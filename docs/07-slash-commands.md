@@ -7,8 +7,10 @@
   (Step 5) instead of reading `README.md`/`docs/` directly.
 - `.claude/commands/validate.md` → `/validate [focus]` — delegates to the
   `coding-agent` subagent (Step 3) to run `.venv/bin/ruff check .` and
-  `.venv/bin/pytest src/tests/ -q` and fix any failures, rather than
-  running the checks inline itself.
+  `.venv/bin/pytest src/tests/ -q`, plus `npm test` in
+  `mcp-servers/build-log-server/` once that server had a real test suite
+  (Step 5, later), and fix any failures, rather than running the checks
+  inline itself.
 
 ## Why these two, this way
 
