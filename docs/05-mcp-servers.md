@@ -1,21 +1,23 @@
 # Step 5: MCP Servers
 
 ## What we built
+
 - `mcp-servers/build-log-server/` — a TypeScript MCP server (stdio
   transport) exposing two tools:
   - `list_build_steps` — parses README.md's status checklist
   - `get_step_log` — returns a docs/NN-*.md file's content by step number,
     with a structured error (not a crash) for missing steps
-- `.mcp.json` at repo root, registering the server for Claude Code
 - `mcp-servers/build-log-server/README.md` documenting setup + verified behavior
 
 ## Why this tool
+
 Right now, knowing build status means manually opening README.md +
 docs/. This makes it queryable as an MCP tool — directly useful to the
 `coding-agent` subagent (Step 3), which can check status before acting
 instead of guessing or re-reading files itself every time.
 
 ## Real decisions made
+
 - Used current SDK (`@modelcontextprotocol/sdk` ^1.29.0, the v1.x
   production line — v2 is alpha-only per the SDK's own GitHub page,
   expected stable ~Q3 2026, so not appropriate to build on yet).
@@ -25,6 +27,7 @@ instead of guessing or re-reading files itself every time.
 - TypeScript strict mode, per root CLAUDE.md convention.
 
 ## Verification performed (not just "it compiled")
+
 1. `npm install` + `npm run build` — compiles clean under `strict: true`.
 2. Piped a real JSON-RPC sequence over stdio directly to the compiled
    server: `initialize` → `notifications/initialized` → `tools/list` →
@@ -46,6 +49,7 @@ would not have caught a wrong relative path to docs/, a wrong regex, or a
 broken error branch — the protocol-level test catches all of those.
 
 ## Not yet done (deliberately)
+
 - No write/mutating tools yet (e.g. "mark step done") — this server is
   read-only by design for now; a mutating tool would need more thought
   about safety (this server can currently only ever report state, never

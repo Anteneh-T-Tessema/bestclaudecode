@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "build-log-server": {
+      "command": "node",
+      "args": ["mcp-servers/build-log-server/dist/index.js"]
+    }
+  }
+}
