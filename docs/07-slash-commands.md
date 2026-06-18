@@ -6,9 +6,9 @@
   reports build-log progress by calling the `build-log-server` MCP tools
   (Step 5) instead of reading `README.md`/`docs/` directly.
 - `.claude/commands/validate.md` → `/validate [focus]` — delegates to the
-  `coding-agent` subagent (Step 3) to run `ruff check .` and
-  `pytest src/tests/ -q` and fix any failures, rather than running the
-  checks inline itself.
+  `coding-agent` subagent (Step 3) to run `.venv/bin/ruff check .` and
+  `.venv/bin/pytest src/tests/ -q` and fix any failures, rather than
+  running the checks inline itself.
 
 ## Why these two, this way
 
@@ -74,4 +74,7 @@ the command answers "what's done" and "what's next" with the same tool.
   the full hook chain, is explicitly Step 8's job.
 - `root CLAUDE.md`'s "use ruff for linting" doesn't mention the project
   venv path — noted as a real gap found via live testing, not fixed here
-  since it's outside this step's stated scope.
+  since it's outside this step's stated scope. **Update**: closed later
+  (root `CLAUDE.md` now states the `.venv/bin` paths explicitly, and
+  `validate.md`'s own prompt text was updated to match) — found again
+  independently while auditing the repo after Step 8.
