@@ -1,4 +1,4 @@
-
+# Claude Code: Skills, Agents, and MCP
 
 A from-scratch, step-by-step build covering Claude Code's full feature surface:
 CLAUDE.md, custom tools, subagents, skills, MCP servers, hooks, slash commands,
