@@ -8,7 +8,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -61,6 +61,56 @@ async function listDocFiles(): Promise<{ step: number; filename: string }[]> {
     .sort((a, b) => a.step - b.step);
 }
 
+/** Result of attempting to mark a step done in README.md's checklist. */
+interface MarkStepDoneResult {
+  ok: boolean;
+  message: string;
+}
+
+/**
+ * Flip a step's README.md checkbox from "[ ]" to "[x]".
+ *
+ * Refuses if there's no docs/NN-*.md for that step yet — without this
+ * guard, this tool could create the exact "checked off but undocumented"
+ * inconsistency the check_build_log_consistency.py Stop hook exists to
+ * catch. No-ops (without error) if the step is already marked done.
+ */
+async function markStepDone(step: number): Promise<MarkStepDoneResult> {
+  const readme = await readFile(README_PATH, "utf-8");
+  const lines = readme.split("\n");
+  const lineRe = /^- \[( |x)\] Step (\d+): (.+)$/;
+  let found = false;
+  let alreadyDone = false;
+  const updated = lines.map((line) => {
+    const m = line.match(lineRe);
+    if (!m || parseInt(m[2], 10) !== step) return line;
+    found = true;
+    if (m[1] === "x") {
+      alreadyDone = true;
+      return line;
+    }
+    return `- [x] Step ${m[2]}: ${m[3]}`;
+  });
+
+  if (!found) {
+    return { ok: false, message: `Step ${step} isn't in README.md's status checklist at all.` };
+  }
+  if (alreadyDone) {
+    return { ok: true, message: `Step ${step} was already marked done.` };
+  }
+
+  const docs = await listDocFiles();
+  if (!docs.some((d) => d.step === step)) {
+    return {
+      ok: false,
+      message: `Refusing to mark step ${step} done: no docs/${String(step).padStart(2, "0")}-*.md file exists yet. Write the build log entry first.`,
+    };
+  }
+
+  await writeFile(README_PATH, updated.join("\n"), "utf-8");
+  return { ok: true, message: `Marked step ${step} done in README.md.` };
+}
+
 const server = new McpServer({
   name: "build-log-server",
   version: "0.1.0",
@@ -108,6 +158,25 @@ server.registerTool(
     }
     const content = await readFile(path.join(DOCS_DIR, match.filename), "utf-8");
     return { content: [{ type: "text", text: content }] };
+  }
+);
+
+server.registerTool(
+  "mark_step_done",
+  {
+    title: "Mark Build Step Done",
+    description:
+      "Flips a step's checkbox to done in README.md's status checklist. Refuses (isError) if no docs/NN-*.md exists for that step yet — write the build log entry first. No-ops if already marked done.",
+    inputSchema: {
+      step: z.number().int().positive().describe("Step number, e.g. 6 for Step 6"),
+    },
+  },
+  async ({ step }) => {
+    const result = await markStepDone(step);
+    return {
+      content: [{ type: "text", text: result.message }],
+      isError: !result.ok,
+    };
   }
 );
 

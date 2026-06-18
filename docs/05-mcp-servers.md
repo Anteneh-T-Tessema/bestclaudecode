@@ -3,10 +3,12 @@
 ## What we built
 
 - `mcp-servers/build-log-server/` — a TypeScript MCP server (stdio
-  transport) exposing two tools:
+  transport) exposing three tools:
   - `list_build_steps` — parses README.md's status checklist
   - `get_step_log` — returns a docs/NN-*.md file's content by step number,
     with a structured error (not a crash) for missing steps
+  - `mark_step_done` — flips a step's checkbox to done in README.md,
+    added later (see "The mark_step_done tool" below)
 - `mcp-servers/build-log-server/README.md` documenting setup + verified behavior
 
 ## Why this tool
@@ -48,12 +50,43 @@ just file well-formedness. A "build" tool that only proves `tsc` exits 0
 would not have caught a wrong relative path to docs/, a wrong regex, or a
 broken error branch — the protocol-level test catches all of those.
 
+## The mark_step_done tool
+
+Added after Step 8 was complete, once the server was no longer read-only
+by necessity but by choice — at that point a mutating tool was the most
+useful thing left to add, so the read-only constraint above was revisited
+deliberately rather than left as permanent scope.
+
+- `mark_step_done(step)` flips a step's README.md checkbox from `[ ]` to
+  `[x]`.
+- Safety guard: it refuses (`isError: true`) if no `docs/NN-*.md` exists
+  for that step yet. Without this, the tool could create exactly the kind
+  of inconsistency `check_build_log_consistency.py`'s `Stop` hook (Step 8)
+  exists to catch — a step checked off with no doc behind it.
+- No-ops (without error) if the step is already marked done, and refuses
+  separately if the step number doesn't appear in the checklist at all.
+
+### Verification performed
+
+Tested against an isolated `mktemp -d` fixture (synthetic README.md +
+docs/, never the real repo) via a throwaway MCP client script, covering
+four cases:
+
+1. Step already done → no-op, `ok: true`.
+2. Step in checklist, no doc yet → refused, `isError: true`.
+3. Step in checklist, doc exists, unchecked → checkbox flipped, `ok: true`.
+4. Step not in checklist at all → refused, `isError: true`.
+
+This caught a real bug before it shipped: the first implementation
+checked doc-existence *before* checklist-membership, so case 4 (step not
+in the checklist, and also no doc for it) returned the misleading
+"no docs/NN-*.md file exists yet" message instead of "isn't in the
+checklist at all." Fixed by reordering the checks — checklist membership
+first, doc-existence second — and re-ran all four cases against a fresh
+fixture to confirm the fix didn't regress the other three.
+
 ## Not yet done (deliberately)
 
-- No write/mutating tools yet (e.g. "mark step done") — this server is
-  read-only by design for now; a mutating tool would need more thought
-  about safety (this server can currently only ever report state, never
-  change it)
 - Not yet tested inside a live Claude Code CLI session consuming it via
   `.mcp.json` — verified at the raw protocol level instead, which proves
   the server is correct; whether Claude Code's client wiring picks it up
