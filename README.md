@@ -17,6 +17,6 @@ See docs/ for a numbered log of each step, what was added, and why.
 - [x] Step 3: Subagents
 - [x] Step 4: Skills
 - [x] Step 5: MCP servers
-- [ ] Step 6: Hooks
-- [ ] Step 7: Slash commands
-- [ ] Step 8: Full integration
+- [x] Step 6: Hooks
+- [x] Step 7: Slash commands
+- [x] Step 8: Full integration

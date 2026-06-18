@@ -1,4 +1,4 @@
-from src.build_log_utils import normalize_step_name
+from src.build_log_utils import double, normalize_step_name
 import pytest
 
 
@@ -13,3 +13,7 @@ def test_strips_whitespace_and_lowercases():
 def test_raises_on_input_that_produces_empty_slug():
     with pytest.raises(ValueError):
         normalize_step_name("   ...   ")
+
+
+def test_double_returns_twice_the_input():
+    assert double(21) == 42

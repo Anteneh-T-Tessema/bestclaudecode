@@ -16,3 +16,8 @@ def normalize_step_name(name: str) -> str:
     if not slug:
         raise ValueError("name produces an empty slug")
     return slug
+
+
+def double(n: int) -> int:
+    """Return n doubled."""
+    return n * 2
