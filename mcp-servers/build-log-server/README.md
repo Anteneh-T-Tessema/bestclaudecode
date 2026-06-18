@@ -1,12 +1,16 @@
 # build-log-server
 
-MCP server (stdio transport) exposing two tools over this repo's build log:
+MCP server (stdio transport) exposing three tools over this repo's build log:
 
 - `list_build_steps` — parses `README.md`'s status checklist, returns
   step number / name / done-or-not for every step.
 - `get_step_log` — returns the full content of `docs/NN-*.md` for a given
   step number; returns a structured error (not a crash) if that step has
   no log file yet.
+- `mark_step_done` — flips a step's checkbox to done in `README.md`.
+  Refuses (`isError: true`) if no `docs/NN-*.md` exists for that step yet,
+  and no-ops if it's already marked done. See `docs/05-mcp-servers.md` for
+  the safety rationale and verification performed.
 
 ## Setup
 
@@ -27,8 +31,13 @@ Tested with a raw JSON-RPC exchange piped over stdio (`initialize` →
 compiled and assumed correct:
 
 - Handshake returns correct protocol version + server info
-- `tools/list` returns both tools with correct, schema-valid input shapes
+- `tools/list` returns both read-only tools with correct, schema-valid
+  input shapes (this test predates `mark_step_done`)
 - `list_build_steps` returns real, accurate data matching repo state
 - `get_step_log(3)` returns the actual Step 3 doc content verbatim
 - `get_step_log(99)` (nonexistent step) returns `isError: true` with a
   helpful message rather than throwing
+
+`mark_step_done` was added later and verified separately against an
+isolated fixture — see `docs/05-mcp-servers.md` for that test's cases and
+the message-precision bug it caught.

@@ -20,9 +20,16 @@
     -> coding-agent writes/edits files under src/
          -> PreToolUse hook gates the write              (Step 6)
          -> PostToolUse hook reacts (ruff + pytest)       (Step 6)
+    -> Claude calls mark_step_done once a doc exists      (Step 5, MCP, new)
     -> Claude reports back and the turn ends
     -> Stop hook validates README/docs consistency        (Step 6, new)
   ```
+
+  `mark_step_done` was added to `build-log-server` after this step was
+  originally written (see `docs/05-mcp-servers.md`); `/advance`'s own
+  instructions were updated to call it as step 4, closing a real gap —
+  the command's stated purpose is to "advance the build by one step," but
+  before this it never actually marked anything done.
 
 ## Why this flow, this command
 

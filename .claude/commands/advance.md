@@ -15,6 +15,9 @@ one flow — don't shortcut any step yourself.
    (Step 6) without you doing anything extra.
 3. Once the subagent reports back, summarize what changed and call
    `get_step_log` for the target step if a doc now exists for it.
+4. If a doc exists for the step, call `mark_step_done` (Step 5, MCP) for
+   it. It refuses on its own if no doc exists yet, so don't call it
+   speculatively — only after confirming the doc is there in step 3.
 
 When this turn ends, the `Stop` hook (Step 6) automatically checks that
 README.md's status checklist and docs/ agree about which steps are
