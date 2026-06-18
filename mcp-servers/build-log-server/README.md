@@ -24,6 +24,16 @@ Registered at the repo root in `.mcp.json` so Claude Code picks it up
 automatically for this project. `dist/` is gitignored (build output);
 run `npm run build` after a fresh clone before the server will start.
 
+## Testing
+
+```bash
+npm test    # builds, then runs the committed suite (node:test)
+```
+
+`test/build-log-server.test.mjs` spins up an isolated tmp fixture per
+run and drives all three tools through a real MCP client over stdio —
+never touches this repo's actual README.md/docs/.
+
 ## Verified behavior
 
 Tested with a raw JSON-RPC exchange piped over stdio (`initialize` →

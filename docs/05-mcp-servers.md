@@ -85,6 +85,33 @@ checklist at all." Fixed by reordering the checks — checklist membership
 first, doc-existence second — and re-ran all four cases against a fresh
 fixture to confirm the fix didn't regress the other three.
 
+## Automated test suite (added later)
+
+Every verification above — the raw JSON-RPC piping, the `mark_step_done`
+fixture cases — was run through throwaway scripts that got deleted
+afterward. That's the opposite of this repo's own standard for `src/`
+Python code (`skills/test-writing`, the Step 6 hooks): real tests,
+committed, that fail if the code regresses. The MCP server had grown to
+three tools with real logic (parsing, a mutation with a safety guard) and
+no committed tests at all, so that gap was closed.
+
+- `mcp-servers/build-log-server/test/build-log-server.test.mjs` — uses
+  Node's built-in `node:test` + `node:assert/strict` (no new dependency).
+  Builds an isolated `mkdtemp` fixture per run (synthetic README.md +
+  docs/, `dist/` copied in, `node_modules` symlinked in since the spawned
+  server resolves imports relative to its own location), connects a real
+  MCP `Client` over stdio, and exercises all three tools: `list_build_steps`
+  parsing, `get_step_log` (existing step + nonexistent step), and all four
+  `mark_step_done` cases from above.
+- `npm test` runs `npm run build && node --test` — always tests the
+  freshly compiled output, never stale `dist/`.
+- **Mutation check**: deliberately broke the already-done check in
+  `markStepDone` (`m[1] === "x"` → `m[1] === "z"`), reran — 2 of 7 tests
+  failed correctly. Reverted, reran — 7/7 passed again. Confirms the suite
+  actually fails when the code is wrong, not just when it doesn't compile.
+- Fixture cleanup verified: `after()` hook removes the tmp directory; no
+  leftover `build-log-server-test-*` directories in `$TMPDIR` after a run.
+
 ## Not yet done (deliberately)
 
 - Not yet tested inside a live Claude Code CLI session consuming it via
