@@ -25,6 +25,10 @@ what was deliberately left undone:
 10. [SDLC document pipeline](docs/10-sdlc-pipeline.md) — `prd-writer`,
     `ai-requirements-writer`, `srs-writer`, `sdd-writer`, plus
     `/blueprint` and `/blueprint-build`
+11. [Best-of-breed agent features](docs/11-best-of-breed-agent-features.md) —
+    a repo map (`src/repo_map.py`), a dynamic-replanning guard in
+    `coding-agent`, and a bounded self-review-and-fix loop via
+    `/implement`
 
 ## How to use this
 
@@ -52,7 +56,11 @@ in `.mcp.json`) and try:
   requirements doc, an SRS, and an SDD for a new project idea under
   `specs/<slug>/`, pausing for confirmation after the PRD
 - `/blueprint-build <slug> [target dir]` — hands a `/blueprint`-generated
-  spec to `coding-agent` for implementation, then points at `/review`
+  spec to `coding-agent` for implementation, then runs the same
+  review-and-fix loop as `/implement`
+- `/implement <task description>` — delegates to `coding-agent`, then
+  `code-reviewer`; if Blocking findings come back, gives `coding-agent`
+  one bounded retry before reporting the final verdict verbatim
 - Editing anything under `src/` — the hooks fire automatically (missing
   docstring blocks the write; a successful edit reruns the test suite)
 
@@ -73,3 +81,4 @@ directory.
 - [x] Step 8: Full integration
 - [x] Step 9: Code reviewer subagent
 - [x] Step 10: SDLC document pipeline
+- [x] Step 11: Best-of-breed agent features

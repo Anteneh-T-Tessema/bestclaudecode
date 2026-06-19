@@ -15,5 +15,11 @@ a real generated spec.
    file that exists (00-idea, 01-prd, 02-ai-requirements if present,
    03-srs, 04-sdd) as its spec, and implement accordingly into the
    target directory from step 2.
-4. Once it reports back, summarize what it built and remind the user
-   they can run `/review` to get a critique of the result.
+4. Once it reports back, run the same review-and-fix loop `/implement`
+   uses (its steps 3-8: diff the result, delegate to `code-reviewer`,
+   and if Blocking findings come back, give `coding-agent` exactly one
+   retry before re-reviewing the cumulative diff and reporting the
+   verdict verbatim). If Blocking findings still remain after that one
+   retry, say so plainly and remind the user they can run `/review`
+   directly or revisit `specs/<slug>/` by hand — don't leave them with
+   nothing if the bounded loop doesn't fully resolve things.
