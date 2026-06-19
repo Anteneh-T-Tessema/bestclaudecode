@@ -14,6 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from src.repo_map import build_repo_map
+from src.symbol_filter import filter_map
 
 
 def format_context(
@@ -23,6 +24,7 @@ def format_context(
     include_deps: bool = False,
     package_root: Path | None = None,
     max_map_lines: int = 200,
+    task_filter: bool = False,
 ) -> str:
     """Return a prompt string with a repo orientation header followed by task.
 
@@ -38,8 +40,13 @@ def format_context(
         package_root: override base for resolving absolute import names.
         max_map_lines: cap the map at this many lines before appending a
             truncation note — avoids blowing the context window on large repos.
+        task_filter: if True, filter the map to entries whose names share
+            tokens with the task before applying the line cap. This produces
+            a denser, more relevant orientation for targeted tasks.
     """
     raw_map = build_repo_map(root, show_deps=include_deps, package_root=package_root)
+    if task_filter and task:
+        raw_map = filter_map(raw_map, task)
     lines = raw_map.splitlines()
     truncated = len(lines) > max_map_lines
     trimmed = "\n".join(lines[:max_map_lines])

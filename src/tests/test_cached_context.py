@@ -1,8 +1,7 @@
 import json
-import time
 from pathlib import Path
 
-from src.cached_context import get_cached_context
+from src.cached_context import _source_fingerprint, get_cached_context
 
 
 def _py(tmp_path: Path, name: str = "a.py", body: str = "def foo():\n    pass\n") -> Path:
@@ -50,13 +49,45 @@ def test_cache_invalidated_when_source_changes(tmp_path):
     cache_dir = tmp_path / ".cache"
     first = get_cached_context(tmp_path, "t", cache_dir=cache_dir)
 
-    # Force the source file to be strictly newer than the cache.
-    time.sleep(0.05)
+    # Fingerprint-based: changing content is enough — no sleep needed.
     src.write_text("def bar():\n    pass\ndef baz():\n    pass\n")
 
     second = get_cached_context(tmp_path, "t", cache_dir=cache_dir)
     sep = "\n\n---\n\n## Task\n\n"
     assert first[: first.index(sep)] != second[: second.index(sep)]
+
+
+def test_cache_invalidated_when_file_deleted(tmp_path):
+    _py(tmp_path, "a.py")
+    extra = _py(tmp_path, "b.py", "def extra():\n    pass\n")
+    cache_dir = tmp_path / ".cache"
+    first = get_cached_context(tmp_path, "t", cache_dir=cache_dir)
+
+    extra.unlink()
+
+    second = get_cached_context(tmp_path, "t", cache_dir=cache_dir)
+    sep = "\n\n---\n\n## Task\n\n"
+    assert first[: first.index(sep)] != second[: second.index(sep)]
+
+
+def test_source_fingerprint_changes_on_edit(tmp_path):
+    src = _py(tmp_path)
+    fp1 = _source_fingerprint(tmp_path)
+    src.write_text("def other():\n    pass\n")
+    assert _source_fingerprint(tmp_path) != fp1
+
+
+def test_source_fingerprint_changes_on_deletion(tmp_path):
+    _py(tmp_path, "a.py")
+    extra = _py(tmp_path, "b.py")
+    fp1 = _source_fingerprint(tmp_path)
+    extra.unlink()
+    assert _source_fingerprint(tmp_path) != fp1
+
+
+def test_source_fingerprint_stable_when_unchanged(tmp_path):
+    _py(tmp_path)
+    assert _source_fingerprint(tmp_path) == _source_fingerprint(tmp_path)
 
 
 def test_cache_not_invalidated_when_source_unchanged(tmp_path):
@@ -87,6 +118,7 @@ def test_cache_file_is_valid_json(tmp_path):
     cache_file = next(cache_dir.iterdir())
     data = json.loads(cache_file.read_text())
     assert "orientation" in data
+    assert "fingerprint" in data
 
 
 def test_empty_repo_still_caches_and_returns(tmp_path):

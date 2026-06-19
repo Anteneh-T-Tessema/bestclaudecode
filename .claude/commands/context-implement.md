@@ -55,11 +55,16 @@ Parse `$ARGUMENTS` before passing it to the agent:
   from the task text before injecting it.
 - **`--cached`** — if present, use `python -m src.cached_context` to load the
   repo map from disk cache (`.context-cache/`) instead of recomputing it.
-  The cache is mtime-validated; a stale or missing cache is rebuilt
+  The cache is fingerprint-validated; a stale or missing cache is rebuilt
   automatically. Remove `--cached` from the task text. Can be combined with
   `--deps`.
+- **`--filter`** — if present, pass `task_filter=True` to `format_context` so
+  only file/symbol entries whose names share tokens with the task are included
+  in the orientation block. Useful when the task is narrowly scoped and the
+  full map would fill the context window with irrelevant symbols. Remove
+  `--filter` from the task text.
 
-Both flags are optional and can be combined: `--deps --cached <task>`.
+All three flags are optional and can be combined: `--deps --cached --filter <task>`.
 
 ## Execution
 
@@ -114,16 +119,19 @@ Both flags are optional and can be combined: `--deps --cached <task>`.
 `/implement` and `/context-implement` run the same review-and-fix loop. The
 difference is the agent's starting state:
 
-| | `/implement` | `/context-implement` |
-|---|---|---|
-| Agent knows repo layout | no — discovers by reading | yes — injected upfront |
-| First turns spent on | orientation reads | the task itself |
-| Context window used for | discovery + task | task (orientation is compact) |
-| Good when | repo is familiar to agent | repo is unfamiliar / large |
+| | `/implement` | `/context-implement` | `/context-implement --cached` |
+|---|---|---|---|
+| Agent knows repo layout | no — discovers by reading | yes — injected upfront | yes — injected upfront |
+| First turns spent on | orientation reads | the task itself | the task itself |
+| Map computation cost | none | one shell scan | zero on a cache hit |
+| Stale if source unchanged | n/a | no (always fresh) | no (fingerprint-validated) |
+| Correct on file deletion | n/a | yes | yes (fingerprint catches it) |
+| Good when | repo is familiar to agent | unfamiliar / large repo, first run | same repo, repeated runs |
 
 The tradeoff is that generating the repo map adds a small upfront cost
-(one shell command). For a small repo this is negligible. For a large repo,
-the `max_map_lines` cap in `format_context` keeps the injection bounded.
+(one shell command). `--cached` eliminates that cost on repeat runs while
+remaining correct: the fingerprint (`sha1` of path+mtime+size for all `.py`
+files) busts the cache on any change, including deletions.
 
 ## Honest limitations
 

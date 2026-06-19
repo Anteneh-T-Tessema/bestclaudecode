@@ -64,6 +64,11 @@ what was deliberately left undone:
     cache (`.context-cache/`) so repeated `/context-implement --cached` runs
     skip the full repo scan when no source has changed; `--deps` flag now
     first-class in `/context-implement` closes the Step 17 gap
+19. [Task-aware symbol filtering and fingerprint cache](docs/19-symbol-filter-and-fingerprint.md) —
+    `src/symbol_filter.py:filter_map()` reduces the orientation block to file/
+    symbol entries that share tokens with the task; `format_context` gains
+    `task_filter=True`; `/context-implement --filter`; cache invalidation
+    upgraded from mtime to source fingerprint (fixes deletion gap from Step 18)
 
 ## How to use this
 
@@ -127,3 +132,4 @@ directory.
 - [x] Step 16: Worktree isolation and --package-root CLI
 - [x] Step 17: Context injection and format_context()
 - [x] Step 18: Disk-cached repo map and --deps/--cached flags
+- [x] Step 19: Task-aware symbol filtering and fingerprint cache

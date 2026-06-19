@@ -1,13 +1,17 @@
 """Disk-cached repo map for agent context injection.
 
-Wraps format_context() with an mtime-based file cache so repeated
-/context-implement invocations skip the build_repo_map scan when no
-Python source file has changed since the last run.
+Wraps format_context() with a fingerprint-based file cache so repeated
+/context-implement invocations skip the build_repo_map scan when the
+Python source tree has not changed since the last run.
 
-Cache location: .context-cache/ in the project root (gitignored).
-Cache key     : a JSON file named by the scan options hash.
-Invalidation  : if any *.py file under `root` has mtime newer than
-                the cache file, the cache is discarded and rebuilt.
+Cache location  : .context-cache/ in the project root (gitignored).
+Cache key       : sha1(root | include_deps | package_root)[:16]  — options hash.
+Invalidation    : a source fingerprint (sha1 of sorted path+mtime+size for
+                  every *.py file) is stored alongside the orientation block.
+                  On load, the stored fingerprint is compared to the current
+                  one. Any difference — including file deletion — busts the
+                  cache.  The old mtime-only approach missed deletions because
+                  deleting a file does not raise the max mtime of survivors.
 
 Used by /context-implement --cached.
 """
@@ -29,10 +33,20 @@ def _cache_key(root: Path, include_deps: bool, package_root: Path | None) -> str
     return hashlib.sha1("|".join(parts).encode()).hexdigest()[:16]
 
 
-def _newest_py_mtime(root: Path) -> float:
-    """Return the highest mtime of any *.py file under root, or 0.0 if none."""
-    mtimes = [p.stat().st_mtime for p in root.rglob("*.py") if p.is_file()]
-    return max(mtimes, default=0.0)
+def _source_fingerprint(root: Path) -> str:
+    """Return a hash that changes whenever the *.py file set or their content changes.
+
+    Sorts entries by resolved path so the result is deterministic. Each entry
+    encodes path, mtime, and file size — cheap to compute (no file reads) yet
+    sensitive to additions, deletions, modifications, and renames.
+    """
+    entries = sorted(
+        (str(p.resolve()), p.stat().st_mtime, p.stat().st_size)
+        for p in root.rglob("*.py")
+        if p.is_file()
+    )
+    payload = json.dumps(entries, separators=(",", ":"))
+    return hashlib.sha1(payload.encode()).hexdigest()
 
 
 def get_cached_context(
@@ -47,9 +61,10 @@ def get_cached_context(
     """Return a formatted context prompt, reading from disk cache when valid.
 
     The cache is a plain JSON file keyed by scan options. It is invalidated
-    when any .py file under `root` has been modified more recently than the
-    cached file. On a miss (or first run) the cache is rebuilt and written to
-    disk before returning.
+    when the source fingerprint (sha1 of path+mtime+size for all .py files)
+    differs from the fingerprint stored in the cache. This correctly handles
+    file additions, edits, renames, and deletions. On a miss the cache is
+    rebuilt and written to disk before returning.
 
     Args:
         root: directory to scan.
@@ -66,17 +81,15 @@ def get_cached_context(
     key = _cache_key(root, include_deps, package_root)
     cache_file = cache_dir / f"{key}.json"
 
-    source_mtime = _newest_py_mtime(root)
+    current_fp = _source_fingerprint(root)
 
     if cache_file.exists():
-        cached_mtime = cache_file.stat().st_mtime
-        if source_mtime <= cached_mtime:
-            data = json.loads(cache_file.read_text())
-            # Inject the (possibly new) task into the cached orientation block.
+        data = json.loads(cache_file.read_text())
+        if data.get("fingerprint") == current_fp:
             orientation = data["orientation"]
             return orientation + "\n\n---\n\n## Task\n\n" + task
 
-    # Cache miss or stale — recompute and persist just the orientation block.
+    # Cache miss or stale — recompute and persist the orientation block.
     full = format_context(
         root,
         "__placeholder__",
@@ -84,11 +97,12 @@ def get_cached_context(
         package_root=package_root,
         max_map_lines=max_map_lines,
     )
-    # Split at the separator to store only the orientation half.
     sep = "\n\n---\n\n## Task\n\n__placeholder__"
     orientation = full[: full.index(sep)] if sep in full else full
 
-    cache_file.write_text(json.dumps({"orientation": orientation}))
+    cache_file.write_text(
+        json.dumps({"fingerprint": current_fp, "orientation": orientation})
+    )
     return orientation + "\n\n---\n\n## Task\n\n" + task
 
 
