@@ -75,6 +75,34 @@ what was deliberately left undone:
     only matching symbol lines, not whole file blocks); `get_cached_context`
     encodes task tokens in key when `task_filter=True` so `--filter --cached`
     gets real cache hits
+21. [LRU cache eviction and placeholder fix](docs/21-lru-eviction-and-placeholder-fix.md) —
+    `src/cache_manager.py:evict_lru()` keeps `.context-cache/` bounded at 50
+    files (atime-based LRU, called after every cache write); placeholder token
+    bug fixed — real task passed to `format_context` when `task_filter=True`
+22. Stemmer bare-root-form fix — `("e", 3)` suffix added to `_SUFFIXES` so
+    "cache" and "caching" share stem "cach"; 2 new tests confirm the gap is
+    closed and `filter_map` no longer misses bare-noun file/symbol names
+23. Configurable eviction + atime reliability — `get_cached_context` gains
+    `max_cache_files` param; `_effective_atime()` falls back to `st_mtime`
+    on noatime mounts (atime == mtime) instead of ranking all files as equal
+24. TF-IDF semantic search index — `src/embedding_index.py:TFIDFIndex` builds
+    a zero-dependency (pure stdlib) in-memory TF-IDF index over repo map
+    symbols; `semantic_fallback()` is wired into `filter_map()` as an
+    automatic fallback when token intersection yields nothing — the agent
+    always receives *some* relevant context, even for terminology mismatches
+25. Multi-language repo map — `src/ts_map.py:build_ts_map()` extracts
+    exported functions, classes, interfaces, types, and consts from `.ts`,
+    `.tsx`, `.js`, and `.mjs` files via regex (no tree-sitter, no npm);
+    `format_context()` gains `include_ts=True` to merge the TS map into the
+    orientation block so agents see the full Python + TypeScript stack
+26. Git diff context injection — `src/diff_context.py:format_context_with_diff()`
+    prepends a `## Recent changes` fenced diff block between the orientation
+    and the task so the agent sees *what changed* alongside *what exists*;
+    capped at 150 lines; falls back gracefully when git is unavailable
+27. Decision / audit log — `src/decision_log.py:log_decision()` writes one
+    Markdown file per implement cycle to `docs/decisions/` recording the task,
+    agent, reviewer verdict, retry count, outcome, and per-finding list;
+    `list_decisions()` returns entries newest-first for programmatic inspection
 
 ## How to use this
 
@@ -140,3 +168,47 @@ directory.
 - [x] Step 18: Disk-cached repo map and --deps/--cached flags
 - [x] Step 19: Task-aware symbol filtering and fingerprint cache
 - [x] Step 20: Suffix stemmer, symbol-level filtering, and task-keyed cache
+- [x] Step 21: LRU cache eviction and placeholder fix
+- [x] Step 22: Stemmer bare-root-form fix ("cache"/"caching" now share a stem)
+- [x] Step 23: Configurable eviction limit and atime reliability fallback
+- [x] Step 24: TF-IDF semantic search index and semantic fallback in filter_map
+- [x] Step 25: Multi-language repo map (TypeScript/JS via regex, zero deps)
+- [x] Step 26: Git diff context injection (format_context_with_diff)
+- [x] Step 27: Decision / audit log per implement cycle (docs/decisions/)
+
+## Where this system beats Cursor / Devin / Windsurf
+
+| Capability | Cursor | Devin | **This system** |
+| --- | --- | --- | --- |
+| Semantic symbol search | Cloud embeddings | Cloud embeddings | **TF-IDF, local, zero deps** |
+| Multi-language map | tree-sitter | tree-sitter | **Regex, no install** |
+| Diff-aware context | Implicit | Implicit | **Explicit injected block** |
+| Audit trail per cycle | No | No | **docs/decisions/ Markdown** |
+| Cost control | Opaque | Opaque | **Per-agent model tiers** |
+| Cache invalidation | Opaque | Opaque | **Fingerprint + LRU, inspectable** |
+| Worktree isolation | No | No | **Clean tree until review passes** |
+| Review-then-fix loop | No | Partial | **Bounded retry, verdict logged** |
+| Extensibility | Extension API | Closed | **Skills + hooks + MCP layers** |
+
+**The clear winning axes:**
+
+1. **Auditability** — every implement cycle writes a structured log with task,
+   agent, reviewer findings, retry count, and outcome. No other tool exposes
+   this. Post-mortem analysis, team review, and compliance reporting all
+   become trivial.
+
+2. **Zero-dependency semantic search** — TF-IDF runs in stdlib `math` +
+   `collections`. Cursor and Devin require a cloud embedding call; this
+   system ranks symbols locally in microseconds with no API key.
+
+3. **Explicit diff context** — the agent is told both what the codebase looks
+   like *and* what just changed. Tools that rely on an agent's exploratory
+   reads miss the "what changed" dimension entirely.
+
+4. **Correctness guarantee** — worktree isolation (nothing lands until the
+   reviewer passes it) + bounded retry loop (max 1 retry, verdict always
+   recorded) means the human always has a readable verdict before merge.
+
+5. **Predictable cost** — Haiku for tight-loop review, Opus for
+   quality-critical writing, Sonnet for implementation. Every invocation has
+   a declared model tier; no surprise spend.

@@ -47,6 +47,7 @@ _SUFFIXES: list[tuple[str, int]] = [
     ("ed", 3),
     ("er", 3),
     ("es", 3),
+    ("e",  3),  # "cache"→"cach" matches "caching"→"cach"; safe: short words are stopwords
     ("s",  3),
 ]
 
@@ -136,6 +137,8 @@ def filter_map(repo_map: str, task: str) -> str:
                     kept.append(symbols[-1])
 
     if not kept:
-        return repo_map
+        # Token intersection found nothing — fall back to TF-IDF semantic search.
+        from src.embedding_index import semantic_fallback
+        return semantic_fallback(repo_map, task)
 
     return "".join(kept)

@@ -22,6 +22,7 @@ import json
 import sys
 from pathlib import Path
 
+from src.cache_manager import evict_lru
 from src.context import format_context
 from src.symbol_filter import _tokenise
 
@@ -68,6 +69,7 @@ def get_cached_context(
     max_map_lines: int = 200,
     task_filter: bool = False,
     cache_dir: Path | None = None,
+    max_cache_files: int = 50,
 ) -> str:
     """Return a formatted context prompt, reading from disk cache when valid.
 
@@ -89,6 +91,7 @@ def get_cached_context(
         max_map_lines: cap on map lines (passed through to format_context).
         task_filter: if True, filter the orientation to task-relevant symbols.
         cache_dir: override the cache directory (default: root / .context-cache).
+        max_cache_files: maximum number of cache files to keep (LRU eviction).
     """
     if cache_dir is None:
         cache_dir = root / _CACHE_DIR_NAME
@@ -107,20 +110,25 @@ def get_cached_context(
             return orientation + "\n\n---\n\n## Task\n\n" + task
 
     # Cache miss or stale — recompute and persist the orientation block.
+    # Pass the real task (not a placeholder) so task_filter uses the correct
+    # tokens when building the filtered map. The separator is constant
+    # regardless of what task string is used.
+    _build_task = task if task_filter else "__placeholder__"
     full = format_context(
         root,
-        "__placeholder__",
+        _build_task,
         include_deps=include_deps,
         package_root=package_root,
         max_map_lines=max_map_lines,
         task_filter=task_filter,
     )
-    sep = "\n\n---\n\n## Task\n\n__placeholder__"
+    sep = f"\n\n---\n\n## Task\n\n{_build_task}"
     orientation = full[: full.index(sep)] if sep in full else full
 
     cache_file.write_text(
         json.dumps({"fingerprint": current_fp, "orientation": orientation})
     )
+    evict_lru(cache_dir, max_files=max_cache_files)
     return orientation + "\n\n---\n\n## Task\n\n" + task
 
 

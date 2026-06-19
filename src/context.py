@@ -15,6 +15,7 @@ from pathlib import Path
 
 from src.repo_map import build_repo_map
 from src.symbol_filter import filter_map
+from src.ts_map import build_ts_map
 
 
 def format_context(
@@ -25,6 +26,7 @@ def format_context(
     package_root: Path | None = None,
     max_map_lines: int = 200,
     task_filter: bool = False,
+    include_ts: bool = False,
 ) -> str:
     """Return a prompt string with a repo orientation header followed by task.
 
@@ -43,8 +45,15 @@ def format_context(
         task_filter: if True, filter the map to entries whose names share
             tokens with the task before applying the line cap. This produces
             a denser, more relevant orientation for targeted tasks.
+        include_ts: if True, append a TypeScript/JavaScript section from
+            build_ts_map() so agents see the full stack (Python + TS/JS MCP
+            servers, frontend code, etc.) in one orientation block.
     """
     raw_map = build_repo_map(root, show_deps=include_deps, package_root=package_root)
+    if include_ts:
+        ts_section = build_ts_map(root)
+        if not ts_section.startswith("(no TypeScript"):
+            raw_map = raw_map + "\n\n" + ts_section
     if task_filter and task:
         raw_map = filter_map(raw_map, task)
     lines = raw_map.splitlines()

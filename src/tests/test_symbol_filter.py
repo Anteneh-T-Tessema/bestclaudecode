@@ -13,6 +13,16 @@ def test_stem_strips_s():
     assert _stem("caches") == "cach"
 
 
+def test_stem_strips_bare_e():
+    # Closes the bare-root-form gap: "cache" and "caching" now share stem "cach".
+    assert _stem("cache") == "cach"
+
+
+def test_tokenise_cache_caching_intersect():
+    # Task "add caching" now matches a symbol named "cache".
+    assert _tokenise("caching") & _tokenise("cache")
+
+
 def test_stem_strips_tion():
     # "injection" strips "tion" (4 chars) from 9-char word → "injec" (5 chars).
     assert _stem("injection") == "injec"
@@ -42,7 +52,8 @@ def test_tokenise_splits_on_word_boundaries():
 def test_tokenise_drops_stopwords():
     tokens = _tokenise("add a fix to the cache")
     assert "the" not in tokens
-    assert "cache" in tokens
+    # "cache" stems to "cach" (strips trailing "e") so "cache" and "caching" share a stem.
+    assert "cach" in tokens
 
 
 def test_tokenise_drops_short_tokens():
