@@ -188,16 +188,30 @@ def build_repo_map(
 def main(argv: list[str] | None = None) -> None:
     """CLI entry point: print a repo map for a directory (or single file).
 
-    Usage: python -m src.repo_map [--no-methods] [--deps] [path]
+    Usage: python -m src.repo_map [--no-methods] [--deps] [--package-root DIR] [path]
     Defaults to the current directory if no path is given. Pass
-    --no-methods to omit class methods, --deps to show cross-file imports.
+    --no-methods to omit class methods, --deps to show cross-file imports,
+    --package-root DIR to set the base for resolving absolute import names
+    (defaults to path when not given).
     """
     args = sys.argv[1:] if argv is None else argv
     include_methods = "--no-methods" not in args
     show_deps = "--deps" in args
-    positional = [a for a in args if a not in ("--no-methods", "--deps")]
-    root = Path(positional[0]) if positional else Path(".")
-    print(build_repo_map(root, include_methods, show_deps))
+    package_root: Path | None = None
+    filtered: list[str] = []
+    skip_next = False
+    for i, a in enumerate(args):
+        if skip_next:
+            skip_next = False
+            continue
+        if a == "--package-root":
+            if i + 1 < len(args):
+                package_root = Path(args[i + 1])
+                skip_next = True
+        elif a not in ("--no-methods", "--deps"):
+            filtered.append(a)
+    root = Path(filtered[0]) if filtered else Path(".")
+    print(build_repo_map(root, include_methods, show_deps, package_root))
 
 
 if __name__ == "__main__":

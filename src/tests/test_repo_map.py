@@ -194,3 +194,26 @@ def test_deps_package_root_resolves_bare_module_names(tmp_path):
     assert utils_path not in imports_line_for(output_without, a_path)
     # With package_root=src: absolute imports resolve from src/ → hit.
     assert utils_path in imports_line_for(output_with, a_path)
+
+
+def test_main_package_root_flag_resolves_bare_imports(tmp_path, capsys):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "utils.py").write_text("def helper():\n    pass\n")
+    (src / "a.py").write_text("import utils\n")
+
+    main(["--deps", "--package-root", str(src), str(tmp_path)])
+
+    output = capsys.readouterr().out
+    a_path = str(src / "a.py")
+    utils_path = str(src / "utils.py")
+
+    def imports_line_for(text: str, file_path: str) -> str:
+        for block in text.split("\n\n"):
+            if block.startswith(file_path + "\n"):
+                for line in block.splitlines():
+                    if "imports:" in line:
+                        return line
+        return ""
+
+    assert utils_path in imports_line_for(output, a_path)

@@ -48,6 +48,11 @@ what was deliberately left undone:
     returns immediately; harness re-invokes with findings when done; plus
     `package_root` parameter in `build_repo_map` so absolute imports resolve
     correctly when the scan root differs from the Python package root
+16. [Worktree isolation and --package-root CLI](docs/16-worktree-isolation-and-package-root-cli.md) —
+    `/safe-implement` wraps `coding-agent` with `isolation: "worktree"`:
+    agent edits land on a throw-away branch, working tree stays clean until
+    the user explicitly accepts; plus `--package-root` CLI flag closing the
+    Step 15 gap
 
 ## How to use this
 
@@ -108,3 +113,4 @@ directory.
 - [x] Step 13: Cross-file import tracking and /parallel-review live
 - [x] Step 14: Subagent model selection
 - [x] Step 15: Background agents and package_root fix
+- [x] Step 16: Worktree isolation and --package-root CLI
