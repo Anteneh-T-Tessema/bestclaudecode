@@ -85,6 +85,12 @@ describe("build-log-server", () => {
     assert.equal(res.isError, true);
   });
 
+  test("validate_build_log reports a doc-exists-but-unchecked inconsistency", async () => {
+    const res = await client.callTool({ name: "validate_build_log", arguments: {} });
+    assert.equal(res.isError, true);
+    assert.match(res.content[0].text, /Step 10 has a docs\/10-\*\.md file but is not checked off in README\.md/);
+  });
+
   test("mark_step_done no-ops when the step is already done", async () => {
     const res = await client.callTool({ name: "mark_step_done", arguments: { step: 1 } });
     assert.equal(res.isError, false);
@@ -110,5 +116,11 @@ describe("build-log-server", () => {
 
     const readme = await readFile(path.join(root, "README.md"), "utf-8");
     assert.match(readme, /- \[x\] Step 10: Has doc ready/);
+  });
+
+  test("validate_build_log reports consistent once README and docs agree", async () => {
+    const res = await client.callTool({ name: "validate_build_log", arguments: {} });
+    assert.equal(res.isError, false);
+    assert.match(res.content[0].text, /Build log is consistent/);
   });
 });

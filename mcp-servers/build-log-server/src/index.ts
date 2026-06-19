@@ -111,6 +111,36 @@ async function markStepDone(step: number): Promise<MarkStepDoneResult> {
   return { ok: true, message: `Marked step ${step} done in README.md.` };
 }
 
+/** Result of checking README.md's checklist against docs/NN-*.md files. */
+interface ValidateBuildLogResult {
+  consistent: boolean;
+  problems: string[];
+}
+
+/**
+ * Compare README.md's status checklist against docs/NN-*.md files in both
+ * directions. Mirrors check_build_log_consistency.py's find_inconsistencies
+ * (same message text), since that Python Stop hook can only run at
+ * turn-end — this exposes the identical check as a tool, callable on demand.
+ */
+async function validateBuildLog(): Promise<ValidateBuildLogResult> {
+  const readmeSteps = await parseReadmeStatus();
+  const docs = await listDocFiles();
+  const docStepSet = new Set(docs.map((d) => d.step));
+
+  const problems: string[] = [];
+  for (const { step, done } of readmeSteps) {
+    const docName = `docs/${String(step).padStart(2, "0")}-*.md`;
+    if (done && !docStepSet.has(step)) {
+      problems.push(`Step ${step} is checked off in README.md but has no ${docName} file.`);
+    }
+    if (!done && docStepSet.has(step)) {
+      problems.push(`Step ${step} has a ${docName} file but is not checked off in README.md.`);
+    }
+  }
+  return { consistent: problems.length === 0, problems };
+}
+
 const server = new McpServer({
   name: "build-log-server",
   version: "0.1.0",
@@ -176,6 +206,26 @@ server.registerTool(
     return {
       content: [{ type: "text", text: result.message }],
       isError: !result.ok,
+    };
+  }
+);
+
+server.registerTool(
+  "validate_build_log",
+  {
+    title: "Validate Build Log Consistency",
+    description:
+      "Checks whether README.md's status checklist and docs/NN-*.md files agree about which steps are done, in both directions. Mirrors the check_build_log_consistency.py Stop hook, but callable on demand mid-session instead of only at turn-end. isError is true if any inconsistency is found.",
+    inputSchema: {},
+  },
+  async () => {
+    const result = await validateBuildLog();
+    const text = result.consistent
+      ? "Build log is consistent: README.md and docs/ agree on every step."
+      : `Build log inconsistencies found:\n- ${result.problems.join("\n- ")}`;
+    return {
+      content: [{ type: "text", text }],
+      isError: !result.consistent,
     };
   }
 );

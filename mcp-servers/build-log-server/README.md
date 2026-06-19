@@ -1,6 +1,6 @@
 # build-log-server
 
-MCP server (stdio transport) exposing three tools over this repo's build log:
+MCP server (stdio transport) exposing four tools over this repo's build log:
 
 - `list_build_steps` — parses `README.md`'s status checklist, returns
   step number / name / done-or-not for every step.
@@ -11,6 +11,11 @@ MCP server (stdio transport) exposing three tools over this repo's build log:
   Refuses (`isError: true`) if no `docs/NN-*.md` exists for that step yet,
   and no-ops if it's already marked done. See `docs/05-mcp-servers.md` for
   the safety rationale and verification performed.
+- `validate_build_log` — checks README.md's checklist against `docs/NN-*.md`
+  files in both directions and reports any mismatch. Same check as the
+  `check_build_log_consistency.py` Stop hook, but callable on demand
+  mid-session instead of only at turn-end. `isError: true` if any
+  inconsistency is found.
 
 ## Setup
 

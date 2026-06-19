@@ -1,0 +1,16 @@
+[project]
+name = "git-changelog-cli"
+version = "0.1.0"
+description = "Generate a Markdown changelog from a git commit range, grouped by conventional-commit type."
+requires-python = ">=3.9"
+readme = "README.md"
+
+[project.scripts]
+changelog = "changelog_cli.cli:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["changelog_cli"]

@@ -3,12 +3,14 @@
 ## What we built
 
 - `mcp-servers/build-log-server/` — a TypeScript MCP server (stdio
-  transport) exposing three tools:
+  transport) exposing four tools:
   - `list_build_steps` — parses README.md's status checklist
   - `get_step_log` — returns a docs/NN-*.md file's content by step number,
     with a structured error (not a crash) for missing steps
   - `mark_step_done` — flips a step's checkbox to done in README.md,
     added later (see "The mark_step_done tool" below)
+  - `validate_build_log` — checks README.md against docs/NN-*.md for
+    consistency, added later (see "The validate_build_log tool" below)
 - `mcp-servers/build-log-server/README.md` documenting setup + verified behavior
 
 ## Why this tool
@@ -85,6 +87,53 @@ checklist at all." Fixed by reordering the checks — checklist membership
 first, doc-existence second — and re-ran all four cases against a fresh
 fixture to confirm the fix didn't regress the other three.
 
+## The validate_build_log tool
+
+Added after `mark_step_done`, once the obvious next gap was the
+`check_build_log_consistency.py` Stop hook's biggest limitation: it only
+runs at turn-end, so there was no way to ask "is the build log
+consistent?" mid-session without waiting for the session to end. This
+tool exposes the identical check on demand.
+
+- `validate_build_log()` parses README.md's checklist and lists
+  `docs/NN-*.md` files (reusing the same `parseReadmeStatus`/
+  `listDocFiles` helpers `mark_step_done` already uses — no duplicated
+  parsing logic), then checks both directions for every step in the
+  checklist: checked off with no doc, or a doc exists but it's not
+  checked off.
+- Message text deliberately matches `check_build_log_consistency.py`'s
+  `find_inconsistencies` wording exactly, so the Python hook and this
+  tool read as the same check expressed twice, not two checks that might
+  drift apart.
+- `isError: true` if any inconsistency is found — the tool call itself
+  succeeds either way; `isError` reports the *finding*, mirroring how the
+  Stop hook's exit code signals "blocked" vs. "clean" rather than
+  treating "found a problem" as a tool malfunction.
+
+### Verification performed for validate_build_log
+
+Extended the existing `test/build-log-server.test.mjs` fixture rather
+than building a new one — the fixture already contains a planted
+inconsistency by construction (`README_FIXTURE`'s step 10 starts
+unchecked but `docs/10-has-doc-ready.md` exists, originally added to
+test `mark_step_done`'s flip behavior), so it doubles as the
+"inconsistent" case for free:
+
+1. Called early (before `mark_step_done` mutates anything) — confirms
+   `isError: true` with the step 10 "has a doc but is not checked off"
+   message.
+2. Called again as the suite's last test, after the existing
+   `mark_step_done` test has flipped step 10's checkbox — confirms
+   `isError: false` with "Build log is consistent," now that README and
+   docs/ agree on every step.
+
+Also verified directly against this repo's real README.md/docs/ (not
+just the fixture) by piping raw JSON-RPC over stdio to the built server:
+returned `isError: false`, "Build log is consistent" — correct, since
+Step 9 deliberately has no README checklist line yet, so there's nothing
+yet to compare against (same reason the Stop hook doesn't flag it
+either).
+
 ## Automated test suite (added later)
 
 Every verification above — the raw JSON-RPC piping, the `mark_step_done`
@@ -100,9 +149,10 @@ no committed tests at all, so that gap was closed.
   Builds an isolated `mkdtemp` fixture per run (synthetic README.md +
   docs/, `dist/` copied in, `node_modules` symlinked in since the spawned
   server resolves imports relative to its own location), connects a real
-  MCP `Client` over stdio, and exercises all three tools: `list_build_steps`
-  parsing, `get_step_log` (existing step + nonexistent step), and all four
-  `mark_step_done` cases from above.
+  MCP `Client` over stdio, and exercises all four tools: `list_build_steps`
+  parsing, `get_step_log` (existing step + nonexistent step), all four
+  `mark_step_done` cases from above, and `validate_build_log`'s two cases
+  (inconsistent, then consistent after the mutation above).
 - `npm test` runs `npm run build && node --test` — always tests the
   freshly compiled output, never stale `dist/`.
 - **Mutation check**: deliberately broke the already-done check in
