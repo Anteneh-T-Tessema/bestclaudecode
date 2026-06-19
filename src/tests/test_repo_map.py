@@ -163,3 +163,34 @@ def test_deps_main_flag_adds_imports_line(tmp_path, capsys):
 
     output = capsys.readouterr().out
     assert "imports:" in output
+
+
+def test_deps_package_root_resolves_bare_module_names(tmp_path):
+    # Scan root = tmp_path; Python sources live under tmp_path/src/.
+    # a.py uses `import utils` (bare name). Without package_root, the
+    # resolver anchors to tmp_path and looks for tmp_path/utils.py —
+    # which doesn't exist — so the dep is silently missed. With
+    # package_root=tmp_path/src the resolver finds tmp_path/src/utils.py.
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "utils.py").write_text("def helper():\n    pass\n")
+    (src / "a.py").write_text("import utils\n")
+
+    output_without = build_repo_map(tmp_path, show_deps=True)
+    output_with = build_repo_map(tmp_path, show_deps=True, package_root=src)
+
+    a_path = str(src / "a.py")
+    utils_path = str(src / "utils.py")
+
+    def imports_line_for(output: str, file_path: str) -> str:
+        for block in output.split("\n\n"):
+            if block.startswith(file_path + "\n"):
+                for line in block.splitlines():
+                    if "imports:" in line:
+                        return line
+        return ""
+
+    # Without package_root: absolute imports resolve from tmp_path → miss.
+    assert utils_path not in imports_line_for(output_without, a_path)
+    # With package_root=src: absolute imports resolve from src/ → hit.
+    assert utils_path in imports_line_for(output_with, a_path)

@@ -43,6 +43,11 @@ what was deliberately left undone:
     (quality-critical, once per pipeline), Sonnet for the rest; plus AST
     parse-caching fix in `repo_map.py` (`show_deps=True` now parses each file
     once instead of twice)
+15. [Background agents and package_root fix](docs/15-background-agents-and-package-root.md) —
+    `/bg-review` spawns `code-reviewer` with `run_in_background: True` and
+    returns immediately; harness re-invokes with findings when done; plus
+    `package_root` parameter in `build_repo_map` so absolute imports resolve
+    correctly when the scan root differs from the Python package root
 
 ## How to use this
 
@@ -102,3 +107,4 @@ directory.
 - [x] Step 12: Parallel agents and diff-scoping fix
 - [x] Step 13: Cross-file import tracking and /parallel-review live
 - [x] Step 14: Subagent model selection
+- [x] Step 15: Background agents and package_root fix

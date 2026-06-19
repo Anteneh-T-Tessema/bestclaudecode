@@ -39,7 +39,7 @@ def _iter_python_files(root: Path) -> list[Path]:
 
 
 def _module_to_candidates(
-    module: str, level: int, file_path: Path, root: Path
+    module: str, level: int, file_path: Path, root: Path, package_root: Path
 ) -> list[Path]:
     if level > 0:
         base = file_path.parent
@@ -47,7 +47,7 @@ def _module_to_candidates(
             base = base.parent
         parts = module.split(".") if module else []
     else:
-        base = root
+        base = package_root
         parts = module.split(".")
     candidate = base.joinpath(*parts) if parts else base
     return [candidate.with_suffix(".py"), candidate / "__init__.py"]
@@ -58,8 +58,11 @@ def _collect_imports(
     root: Path,
     known: set[Path],
     *,
+    package_root: Path | None = None,
     _tree: ast.Module | None = None,
 ) -> list[Path]:
+    if package_root is None:
+        package_root = root
     if _tree is None:
         try:
             _tree = ast.parse(path.read_text())
@@ -69,14 +72,14 @@ def _collect_imports(
     for node in ast.walk(_tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                for c in _module_to_candidates(alias.name, 0, path, root):
+                for c in _module_to_candidates(alias.name, 0, path, root, package_root):
                     if c in known:
                         found.append(c)
                         break
         elif isinstance(node, ast.ImportFrom):
             module = node.module or ""
             if module:
-                for c in _module_to_candidates(module, node.level, path, root):
+                for c in _module_to_candidates(module, node.level, path, root, package_root):
                     if c in known:
                         found.append(c)
                         break
@@ -143,13 +146,16 @@ def build_repo_map(
     root: Path,
     include_methods: bool = True,
     show_deps: bool = False,
+    package_root: Path | None = None,
 ) -> str:
     """Build the full repo map: one outline block per Python file found
     under root, joined with blank lines. Class methods are omitted when
     include_methods is False. When show_deps is True, each file's block
     includes an 'imports:' line listing the other repo files it imports
-    from (stdlib and third-party imports are not shown). Returns a
-    placeholder string if no Python files are found.
+    from (stdlib and third-party imports are not shown). package_root
+    overrides the base directory used to resolve absolute imports — defaults
+    to root when not specified. Returns a placeholder string if no Python
+    files are found.
     """
     files = _iter_python_files(root)
     if not files:
@@ -166,6 +172,7 @@ def build_repo_map(
         deps_map = {
             f: _collect_imports(
                 f, root, known,
+                package_root=package_root,
                 _tree=trees[f] if isinstance(trees[f], ast.Module) else None,
             )
             for f in files
