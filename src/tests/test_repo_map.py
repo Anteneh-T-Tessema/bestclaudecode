@@ -102,3 +102,64 @@ def test_main_without_no_methods_flag_still_includes_methods(tmp_path, capsys):
 
     output = capsys.readouterr().out
     assert "def baz()" in output
+
+
+def test_deps_shows_local_import(tmp_path):
+    (tmp_path / "b.py").write_text("def foo():\n    pass\n")
+    (tmp_path / "a.py").write_text("from b import foo\n")
+
+    output = build_repo_map(tmp_path, show_deps=True)
+
+    # a.py imports b.py — the full path must appear on the imports line
+    assert "imports:" in output
+    assert str(tmp_path / "b.py") in output
+
+
+def test_deps_omits_stdlib_and_third_party_imports(tmp_path):
+    (tmp_path / "a.py").write_text("import os\nimport sys\n")
+
+    output = build_repo_map(tmp_path, show_deps=True)
+
+    assert "imports: (none)" in output
+    assert "os" not in output
+    assert "sys" not in output
+
+
+def test_deps_off_by_default(tmp_path):
+    (tmp_path / "b.py").write_text("def foo():\n    pass\n")
+    (tmp_path / "a.py").write_text("from b import foo\n")
+
+    output = build_repo_map(tmp_path)
+
+    assert "imports:" not in output
+
+
+def test_deps_no_local_imports_shows_none(tmp_path):
+    (tmp_path / "a.py").write_text("def standalone():\n    pass\n")
+
+    output = build_repo_map(tmp_path, show_deps=True)
+
+    assert "imports: (none)" in output
+
+
+def test_deps_detects_relative_import_without_module_qualifier(tmp_path):
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    (pkg / "utils.py").write_text("def helper():\n    pass\n")
+    (pkg / "main.py").write_text("from . import utils\n")
+
+    output = build_repo_map(tmp_path, show_deps=True)
+
+    # pkg/main.py's imports line should reference pkg/utils.py
+    assert str(pkg / "utils.py") in output
+
+
+def test_deps_main_flag_adds_imports_line(tmp_path, capsys):
+    (tmp_path / "b.py").write_text("def foo():\n    pass\n")
+    (tmp_path / "a.py").write_text("from b import foo\n")
+
+    main(["--deps", str(tmp_path)])
+
+    output = capsys.readouterr().out
+    assert "imports:" in output

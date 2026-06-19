@@ -33,6 +33,10 @@ what was deliberately left undone:
     `/parallel-review` fans out N `code-reviewer` instances in parallel
     (the first fan-out command in this repo); fix to the silent-empty-review
     gap when `git diff` misses wholly-untracked new files
+13. [Cross-file import tracking and `/parallel-review` live](docs/13-cross-file-imports-and-parallel-review-live.md) —
+    `--deps` flag in `repo_map.py` maps intra-repo imports using stdlib `ast`;
+    `/parallel-review` exercised live against both changed files (0 Blocking,
+    4 Should-fix found and fixed before commit)
 
 ## How to use this
 
@@ -90,3 +94,4 @@ directory.
 - [x] Step 10: SDLC document pipeline
 - [x] Step 11: Best-of-breed agent features
 - [x] Step 12: Parallel agents and diff-scoping fix
+- [x] Step 13: Cross-file import tracking and /parallel-review live

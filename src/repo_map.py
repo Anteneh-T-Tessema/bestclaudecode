@@ -1,9 +1,10 @@
 """Lightweight, stdlib-only repo map: a per-file outline of top-level
-functions/classes (and class methods) under a directory tree.
+functions/classes (and class methods) under a directory tree, with optional
+cross-file import tracking.
 
 Modeled on Aider's repo map, scoped down to what this repo actually
-needs: no tree-sitter, no multi-language support, no cross-file
-dependency graph or PageRank-style ranking — just a flat listing,
+needs: no tree-sitter, no multi-language support, no PageRank-style
+ranking — just a flat listing with optional cross-file dependency lines,
 parsed with the stdlib `ast` module, intended to give `coding-agent` a
 quick orientation pass before it dives into unfamiliar code.
 """
@@ -37,59 +38,134 @@ def _iter_python_files(root: Path) -> list[Path]:
     )
 
 
-def _outline_file(path: Path, include_methods: bool = True) -> str:
-    """Build one file's outline: top-level functions/classes with line
-    numbers, plus one indent level of class methods unless
-    include_methods is False. If the file doesn't parse, note it as
-    skipped instead of raising.
+def _module_to_candidates(
+    module: str, level: int, file_path: Path, root: Path
+) -> list[Path]:
+    if level > 0:
+        base = file_path.parent
+        for _ in range(level - 1):
+            base = base.parent
+        parts = module.split(".") if module else []
+    else:
+        base = root
+        parts = module.split(".")
+    candidate = base.joinpath(*parts) if parts else base
+    return [candidate.with_suffix(".py"), candidate / "__init__.py"]
+
+
+def _collect_imports(path: Path, root: Path, known: set[Path]) -> list[Path]:
+    try:
+        tree = ast.parse(path.read_text())
+    except SyntaxError:
+        return []
+    found: list[Path] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                for c in _module_to_candidates(alias.name, 0, path, root):
+                    if c in known:
+                        found.append(c)
+                        break
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if module:
+                for c in _module_to_candidates(module, node.level, path, root):
+                    if c in known:
+                        found.append(c)
+                        break
+            else:
+                # `from . import name` — no module qualifier; each name is a
+                # sibling module relative to the package directory.
+                base = path.parent
+                for _ in range(node.level - 1):
+                    base = base.parent
+                for alias in node.names:
+                    sibling = base / f"{alias.name}.py"
+                    if sibling in known:
+                        found.append(sibling)
+    return sorted(set(found))
+
+
+def _outline_file(
+    path: Path,
+    include_methods: bool = True,
+    deps: list[Path] | None = None,
+) -> str:
+    """Build one file's outline: optional imports line, then top-level
+    functions/classes with line numbers, plus one indent level of class
+    methods unless include_methods is False. If the file doesn't parse,
+    note it as skipped instead of raising.
     """
     try:
         tree = ast.parse(path.read_text())
     except SyntaxError as exc:
         return f"{path} -- SKIPPED (syntax error: {exc.msg}, line {exc.lineno})"
 
-    entries: list[str] = []
+    symbol_lines: list[str] = []
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            entries.append(f"  def {node.name}() -- line {node.lineno}")
+            symbol_lines.append(f"  def {node.name}() -- line {node.lineno}")
         elif isinstance(node, ast.ClassDef):
-            entries.append(f"  class {node.name}: -- line {node.lineno}")
+            symbol_lines.append(f"  class {node.name}: -- line {node.lineno}")
             if include_methods:
                 for child in node.body:
                     if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        entries.append(
+                        symbol_lines.append(
                             f"    def {child.name}() -- line {child.lineno}"
                         )
 
-    if not entries:
+    if not symbol_lines and deps is None:
         return f"{path} -- (no top-level functions or classes)"
-    return f"{path}\n" + "\n".join(entries)
+
+    lines: list[str] = []
+    if deps is not None:
+        lines.append(
+            f"  imports: {', '.join(str(d) for d in deps)}" if deps
+            else "  imports: (none)"
+        )
+    lines.extend(symbol_lines)
+    return f"{path}\n" + "\n".join(lines)
 
 
-def build_repo_map(root: Path, include_methods: bool = True) -> str:
+def build_repo_map(
+    root: Path,
+    include_methods: bool = True,
+    show_deps: bool = False,
+) -> str:
     """Build the full repo map: one outline block per Python file found
     under root, joined with blank lines. Class methods are omitted when
-    include_methods is False. Returns a placeholder string if no Python
-    files are found.
+    include_methods is False. When show_deps is True, each file's block
+    includes an 'imports:' line listing the other repo files it imports
+    from (stdlib and third-party imports are not shown). Returns a
+    placeholder string if no Python files are found.
     """
     files = _iter_python_files(root)
     if not files:
         return "(no Python files found)"
+
+    if show_deps:
+        known = set(files)
+        deps_map = {f: _collect_imports(f, root, known) for f in files}
+        return "\n\n".join(
+            _outline_file(f, include_methods, deps=deps_map[f]) for f in files
+        )
+
     return "\n\n".join(_outline_file(f, include_methods) for f in files)
 
 
 def main(argv: list[str] | None = None) -> None:
     """CLI entry point: print a repo map for a directory (or single file).
 
-    Usage: python -m src.repo_map [--no-methods] [path]
+    Usage: python -m src.repo_map [--no-methods] [--deps] [path]
     Defaults to the current directory if no path is given. Pass
-    --no-methods to omit class methods from the output.
+    --no-methods to omit class methods, --deps to show cross-file imports.
     """
     args = sys.argv[1:] if argv is None else argv
     include_methods = "--no-methods" not in args
-    positional = [a for a in args if a != "--no-methods"]
+    show_deps = "--deps" in args
+    positional = [a for a in args if a not in ("--no-methods", "--deps")]
     root = Path(positional[0]) if positional else Path(".")
-    print(build_repo_map(root, include_methods))
+    print(build_repo_map(root, include_methods, show_deps))
 
 
 if __name__ == "__main__":
