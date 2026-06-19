@@ -12,7 +12,12 @@ to reading the whole repository:
 1. Empty — use `git diff` (unstaged changes). If that's empty, fall back
    to `git diff HEAD` (staged + unstaged). If that's also empty, fall
    back to the diff against the upstream merge-base with the default
-   branch.
+   branch. If all three are empty, run `git status --porcelain` and
+   check for lines starting with `??` (untracked files). If any exist,
+   **do not produce a silent empty review** — instead report: "the diff
+   is empty but there are N untracked file(s): [list]; `git add` them to
+   include in `git diff HEAD`, or pass their paths directly as arguments
+   to `/review`."
 2. Looks like a ref-range (contains `..`) — pass it straight through as
    `git diff $ARGUMENTS`.
 3. Looks like a path — diff for that path; if there's no diff for it,

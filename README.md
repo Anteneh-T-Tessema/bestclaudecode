@@ -29,6 +29,10 @@ what was deliberately left undone:
     a repo map (`src/repo_map.py`), a dynamic-replanning guard in
     `coding-agent`, and a bounded self-review-and-fix loop via
     `/implement`
+12. [Parallel agents and diff-scoping fix](docs/12-parallel-agents-and-diff-fix.md) —
+    `/parallel-review` fans out N `code-reviewer` instances in parallel
+    (the first fan-out command in this repo); fix to the silent-empty-review
+    gap when `git diff` misses wholly-untracked new files
 
 ## How to use this
 
@@ -61,6 +65,9 @@ in `.mcp.json`) and try:
 - `/implement <task description>` — delegates to `coding-agent`, then
   `code-reviewer`; if Blocking findings come back, gives `coding-agent`
   one bounded retry before reporting the final verdict verbatim
+- `/parallel-review <path1> [path2] ...` — fans out one `code-reviewer`
+  per path simultaneously, then aggregates findings into a single
+  severity-sorted report with a top-line verdict across all files
 - Editing anything under `src/` — the hooks fire automatically (missing
   docstring blocks the write; a successful edit reruns the test suite)
 
@@ -82,3 +89,4 @@ directory.
 - [x] Step 9: Code reviewer subagent
 - [x] Step 10: SDLC document pipeline
 - [x] Step 11: Best-of-breed agent features
+- [x] Step 12: Parallel agents and diff-scoping fix

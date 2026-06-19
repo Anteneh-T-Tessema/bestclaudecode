@@ -14,7 +14,11 @@ chain.
 3. Once it reports back, determine the diff scope using the same
    fallback `/review` uses: empty → `git diff` (unstaged); if empty →
    `git diff HEAD` (staged + unstaged); if empty → diff against the
-   upstream merge-base with the default branch.
+   upstream merge-base with the default branch. If all three are empty,
+   run `git status --porcelain` and check for `??` lines (untracked
+   files). If any exist, surface them explicitly — "the diff is empty
+   but there are N untracked file(s): [list]; `git add` them to include
+   in `git diff HEAD`" — rather than producing a silent empty review.
 4. Delegate that diff to `code-reviewer` for a critique.
 5. If the review's verdict has **zero Blocking findings**, report
    success: summarize what was built and the review's verdict verbatim.
