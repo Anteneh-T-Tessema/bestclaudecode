@@ -46,7 +46,19 @@ and the same git history. The isolation is transparent to the subagent.
 5. Delegate that diff to `code-reviewer` for a critique (same as `/implement`
    does). Report the review's verdict.
 
-6. Present the user with three options:
+6. **If the review has zero Blocking findings**: proceed directly to the
+   accept/inspect/discard gate (step 7).
+
+   **If the review has one or more Blocking findings**: re-invoke `coding-agent`
+   **once** inside the **same worktree** — give it the Blocking findings
+   (cite exact `file:line`) and tell it to fix only those, nothing else. Then
+   re-run `code-reviewer` against the updated diff. Report the second review's
+   verdict verbatim; if Blocking findings remain, say plainly the change is
+   **not verified clean** and list them. Do not retry again — this loop is
+   bounded at one retry. Proceed to the gate regardless (the user may still
+   want to inspect or discard).
+
+7. Present the user with three options:
    - **Accept**: merge or cherry-pick the worktree branch into the current
      branch (`git merge --no-ff <branch>` or `git cherry-pick <sha-range>`).
    - **Inspect**: tell the user the branch name so they can check it out and
@@ -77,14 +89,18 @@ Use `/implement` when:
 
 ## Honest limitations
 
-1. The worktree branch persists until you explicitly merge or delete it —
+1. The retry loop re-invokes `coding-agent` in the same worktree branch, not
+   a fresh one — the retry's edits layer on top of the first pass's edits.
+   This is correct (the agent has context of its own prior work) but means
+   the worktree branch accumulates commits from both passes.
+2. The worktree branch persists until you explicitly merge or delete it —
    accumulated stale branches need manual cleanup (`git branch -d`).
-2. If the agent runs tests that require external state (a running database,
+3. If the agent runs tests that require external state (a running database,
    a live server), those may behave differently inside the worktree because
    the working directory is different.
-3. The worktree shares the same `.git` object store, so large files the agent
+4. The worktree shares the same `.git` object store, so large files the agent
    writes are not truly isolated — they exist in the repo's object graph even
    if the branch is deleted (until `git gc` runs).
-4. `isolation: "worktree"` is a parameter on the Agent tool call — it is not
+5. `isolation: "worktree"` is a parameter on the Agent tool call — it is not
    a shell sandbox. The agent can still make network requests, read env vars,
    and execute arbitrary shell commands; the isolation is git-level only.

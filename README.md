@@ -53,6 +53,12 @@ what was deliberately left undone:
     agent edits land on a throw-away branch, working tree stays clean until
     the user explicitly accepts; plus `--package-root` CLI flag closing the
     Step 15 gap
+17. [Context injection and format_context()](docs/17-context-injection-and-format-context.md) —
+    `src/context.py:format_context()` pre-computes a repo map and injects it
+    as structured orientation into a subagent's prompt; `/context-implement`
+    uses it so the agent arrives knowing the codebase layout instead of
+    discovering it through exploratory reads; bounded retry in `/safe-implement`
+    closes the Step 16 gap
 
 ## How to use this
 
@@ -114,3 +120,4 @@ directory.
 - [x] Step 14: Subagent model selection
 - [x] Step 15: Background agents and package_root fix
 - [x] Step 16: Worktree isolation and --package-root CLI
+- [x] Step 17: Context injection and format_context()
