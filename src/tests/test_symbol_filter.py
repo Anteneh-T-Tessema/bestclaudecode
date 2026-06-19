@@ -1,9 +1,41 @@
-from src.symbol_filter import _tokenise, filter_map
+from src.symbol_filter import _stem, _tokenise, filter_map
+
+
+def test_stem_strips_ing():
+    assert _stem("caching") == "cach"
+
+
+def test_stem_strips_ed():
+    assert _stem("cached") == "cach"
+
+
+def test_stem_strips_s():
+    assert _stem("caches") == "cach"
+
+
+def test_stem_strips_tion():
+    # "injection" strips "tion" (4 chars) from 9-char word → "injec" (5 chars).
+    assert _stem("injection") == "injec"
+
+
+def test_stem_preserves_short_stems():
+    # "be" → stripping "s" would give "b" (len 1 < min 3) — must not strip.
+    assert _stem("bes") == "bes"
+
+
+def test_stem_no_suffix_match():
+    assert _stem("context") == "context"
+
+
+def test_tokenise_stems_inflections():
+    # "caching" → "cach", "caches" → "cach" — inflected forms intersect.
+    assert _tokenise("caching") & _tokenise("caches")
 
 
 def test_tokenise_splits_on_word_boundaries():
     tokens = _tokenise("cached_context")
-    assert "cached" in tokens
+    # "cached" stems to "cach" (strips "ed"); "context" is unchanged.
+    assert "cach" in tokens
     assert "context" in tokens
 
 

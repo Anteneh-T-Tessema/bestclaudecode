@@ -103,6 +103,38 @@ def test_cache_not_invalidated_when_source_unchanged(tmp_path):
     assert cache_file.stat().st_mtime == mtime_before
 
 
+def test_task_filter_and_cached_produce_separate_cache_file(tmp_path):
+    _py(tmp_path)
+    cache_dir = tmp_path / ".cache"
+    get_cached_context(tmp_path, "task", task_filter=False, cache_dir=cache_dir)
+    get_cached_context(tmp_path, "task", task_filter=True, cache_dir=cache_dir)
+    # task_filter=True encodes task tokens in key → different file.
+    assert len(list(cache_dir.iterdir())) == 2
+
+
+def test_task_filter_cache_hit_on_same_task(tmp_path):
+    _py(tmp_path, "cache.py", "def get_cache():\n    pass\n")
+    cache_dir = tmp_path / ".cache"
+    first = get_cached_context(tmp_path, "cache lookup", task_filter=True, cache_dir=cache_dir)
+
+    cache_file = next(cache_dir.iterdir())
+    mtime_before = cache_file.stat().st_mtime
+
+    second = get_cached_context(tmp_path, "cache lookup", task_filter=True, cache_dir=cache_dir)
+    # Cache file must not have been rewritten.
+    assert cache_file.stat().st_mtime == mtime_before
+    sep = "\n\n---\n\n## Task\n\n"
+    assert first[: first.index(sep)] == second[: second.index(sep)]
+
+
+def test_task_filter_different_tasks_produce_different_cache_files(tmp_path):
+    _py(tmp_path)
+    cache_dir = tmp_path / ".cache"
+    get_cached_context(tmp_path, "cache lookup", task_filter=True, cache_dir=cache_dir)
+    get_cached_context(tmp_path, "symbol filter logic", task_filter=True, cache_dir=cache_dir)
+    assert len(list(cache_dir.iterdir())) == 2
+
+
 def test_different_options_produce_different_cache_files(tmp_path):
     _py(tmp_path)
     cache_dir = tmp_path / ".cache"

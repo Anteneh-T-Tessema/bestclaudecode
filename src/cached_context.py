@@ -23,13 +23,23 @@ import sys
 from pathlib import Path
 
 from src.context import format_context
+from src.symbol_filter import _tokenise
 
 _CACHE_DIR_NAME = ".context-cache"
 
 
-def _cache_key(root: Path, include_deps: bool, package_root: Path | None) -> str:
-    """Return a short hex string that identifies a unique set of scan options."""
-    parts = [str(root.resolve()), str(include_deps), str(package_root)]
+def _cache_key(
+    root: Path,
+    include_deps: bool,
+    package_root: Path | None,
+    task_tokens: str = "",
+) -> str:
+    """Return a short hex string that identifies a unique set of scan options.
+
+    When task_filter is active the task_tokens string is included so filtered
+    results are cached per task, not per codebase alone.
+    """
+    parts = [str(root.resolve()), str(include_deps), str(package_root), task_tokens]
     return hashlib.sha1("|".join(parts).encode()).hexdigest()[:16]
 
 
@@ -56,6 +66,7 @@ def get_cached_context(
     include_deps: bool = False,
     package_root: Path | None = None,
     max_map_lines: int = 200,
+    task_filter: bool = False,
     cache_dir: Path | None = None,
 ) -> str:
     """Return a formatted context prompt, reading from disk cache when valid.
@@ -66,19 +77,25 @@ def get_cached_context(
     file additions, edits, renames, and deletions. On a miss the cache is
     rebuilt and written to disk before returning.
 
+    When task_filter=True the cache key also encodes the stemmed task tokens,
+    so filtered results are cached per task — repeated runs of
+    /context-implement --filter --cached <same task> get a cache hit.
+
     Args:
         root: directory to scan.
         task: task description appended after the orientation block.
         include_deps: if True, cross-file import lines are included.
         package_root: base directory for resolving absolute imports.
         max_map_lines: cap on map lines (passed through to format_context).
+        task_filter: if True, filter the orientation to task-relevant symbols.
         cache_dir: override the cache directory (default: root / .context-cache).
     """
     if cache_dir is None:
         cache_dir = root / _CACHE_DIR_NAME
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    key = _cache_key(root, include_deps, package_root)
+    task_tokens_str = "|".join(sorted(_tokenise(task))) if task_filter else ""
+    key = _cache_key(root, include_deps, package_root, task_tokens_str)
     cache_file = cache_dir / f"{key}.json"
 
     current_fp = _source_fingerprint(root)
@@ -96,6 +113,7 @@ def get_cached_context(
         include_deps=include_deps,
         package_root=package_root,
         max_map_lines=max_map_lines,
+        task_filter=task_filter,
     )
     sep = "\n\n---\n\n## Task\n\n__placeholder__"
     orientation = full[: full.index(sep)] if sep in full else full

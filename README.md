@@ -69,6 +69,12 @@ what was deliberately left undone:
     symbol entries that share tokens with the task; `format_context` gains
     `task_filter=True`; `/context-implement --filter`; cache invalidation
     upgraded from mtime to source fingerprint (fixes deletion gap from Step 18)
+20. [Suffix stemmer, symbol-level filtering, and task-keyed cache](docs/20-stemmer-and-symbol-level-filter.md) —
+    `_stem()` in `symbol_filter.py` strips inflectional suffixes so "caching"
+    matches "cached"/"caches"; `filter_map` upgraded to symbol-level (keeps
+    only matching symbol lines, not whole file blocks); `get_cached_context`
+    encodes task tokens in key when `task_filter=True` so `--filter --cached`
+    gets real cache hits
 
 ## How to use this
 
@@ -133,3 +139,4 @@ directory.
 - [x] Step 17: Context injection and format_context()
 - [x] Step 18: Disk-cached repo map and --deps/--cached flags
 - [x] Step 19: Task-aware symbol filtering and fingerprint cache
+- [x] Step 20: Suffix stemmer, symbol-level filtering, and task-keyed cache
