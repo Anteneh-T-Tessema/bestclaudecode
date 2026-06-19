@@ -53,13 +53,20 @@ def _module_to_candidates(
     return [candidate.with_suffix(".py"), candidate / "__init__.py"]
 
 
-def _collect_imports(path: Path, root: Path, known: set[Path]) -> list[Path]:
-    try:
-        tree = ast.parse(path.read_text())
-    except SyntaxError:
-        return []
+def _collect_imports(
+    path: Path,
+    root: Path,
+    known: set[Path],
+    *,
+    _tree: ast.Module | None = None,
+) -> list[Path]:
+    if _tree is None:
+        try:
+            _tree = ast.parse(path.read_text())
+        except SyntaxError:
+            return []
     found: list[Path] = []
-    for node in ast.walk(tree):
+    for node in ast.walk(_tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 for c in _module_to_candidates(alias.name, 0, path, root):
@@ -90,19 +97,24 @@ def _outline_file(
     path: Path,
     include_methods: bool = True,
     deps: list[Path] | None = None,
+    *,
+    _tree: ast.Module | SyntaxError | None = None,
 ) -> str:
     """Build one file's outline: optional imports line, then top-level
     functions/classes with line numbers, plus one indent level of class
     methods unless include_methods is False. If the file doesn't parse,
     note it as skipped instead of raising.
     """
-    try:
-        tree = ast.parse(path.read_text())
-    except SyntaxError as exc:
-        return f"{path} -- SKIPPED (syntax error: {exc.msg}, line {exc.lineno})"
+    if _tree is None:
+        try:
+            _tree = ast.parse(path.read_text())
+        except SyntaxError as exc:
+            _tree = exc
+    if isinstance(_tree, SyntaxError):
+        return f"{path} -- SKIPPED (syntax error: {_tree.msg}, line {_tree.lineno})"
 
     symbol_lines: list[str] = []
-    for node in tree.body:
+    for node in _tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             symbol_lines.append(f"  def {node.name}() -- line {node.lineno}")
         elif isinstance(node, ast.ClassDef):
@@ -145,9 +157,22 @@ def build_repo_map(
 
     if show_deps:
         known = set(files)
-        deps_map = {f: _collect_imports(f, root, known) for f in files}
+        trees: dict[Path, ast.Module | SyntaxError] = {}
+        for f in files:
+            try:
+                trees[f] = ast.parse(f.read_text())
+            except SyntaxError as exc:
+                trees[f] = exc
+        deps_map = {
+            f: _collect_imports(
+                f, root, known,
+                _tree=trees[f] if isinstance(trees[f], ast.Module) else None,
+            )
+            for f in files
+        }
         return "\n\n".join(
-            _outline_file(f, include_methods, deps=deps_map[f]) for f in files
+            _outline_file(f, include_methods, deps=deps_map[f], _tree=trees[f])
+            for f in files
         )
 
     return "\n\n".join(_outline_file(f, include_methods) for f in files)

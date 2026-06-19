@@ -37,6 +37,12 @@ what was deliberately left undone:
     `--deps` flag in `repo_map.py` maps intra-repo imports using stdlib `ast`;
     `/parallel-review` exercised live against both changed files (0 Blocking,
     4 Should-fix found and fixed before commit)
+14. [Subagent model selection](docs/14-subagent-model-selection.md) —
+    `model:` frontmatter set on all 6 agents: Haiku for `code-reviewer`
+    (tight-loop, structured), Opus for `prd-writer` + `ai-requirements-writer`
+    (quality-critical, once per pipeline), Sonnet for the rest; plus AST
+    parse-caching fix in `repo_map.py` (`show_deps=True` now parses each file
+    once instead of twice)
 
 ## How to use this
 
@@ -95,3 +101,4 @@ directory.
 - [x] Step 11: Best-of-breed agent features
 - [x] Step 12: Parallel agents and diff-scoping fix
 - [x] Step 13: Cross-file import tracking and /parallel-review live
+- [x] Step 14: Subagent model selection
