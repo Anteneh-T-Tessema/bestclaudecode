@@ -46,14 +46,32 @@ src/repo_map.py
 The agent reads the orientation block, knows which files and functions exist,
 and can go directly to the relevant ones.
 
+## Flags
+
+Parse `$ARGUMENTS` before passing it to the agent:
+
+- **`--deps`** — if present, pass `--deps` to `python -m src.repo_map` so
+  cross-file import lines appear in the orientation block. Remove `--deps`
+  from the task text before injecting it.
+- **`--cached`** — if present, use `python -m src.cached_context` to load the
+  repo map from disk cache (`.context-cache/`) instead of recomputing it.
+  The cache is mtime-validated; a stale or missing cache is rebuilt
+  automatically. Remove `--cached` from the task text. Can be combined with
+  `--deps`.
+
+Both flags are optional and can be combined: `--deps --cached <task>`.
+
 ## Execution
 
-1. If `$ARGUMENTS` is empty, ask the user to describe the task.
+1. If `$ARGUMENTS` (after stripping flags) is empty, ask the user to describe
+   the task.
 
-2. Run `python -m src.repo_map` against the project root to get the current
-   repo map. This is a read-only shell command — run it yourself, do not
-   delegate it. Cap at 200 lines (the default in `format_context`); if the
-   output is longer, append a truncation note.
+2. Build the repo map:
+   - With `--cached`: run `python -m src.cached_context [--deps]` — reads
+     from cache if valid, rebuilds otherwise.
+   - Without `--cached`: run `python -m src.repo_map [--deps]` directly.
+   This is a read-only shell command — run it yourself, do not delegate it.
+   Cap at 200 lines; if the output is longer, append a truncation note.
 
 3. Build the injected prompt using the `format_context` structure:
    ```
@@ -67,7 +85,7 @@ and can go directly to the relevant ones.
 
    ## Task
 
-   <$ARGUMENTS>
+   <task text (flags stripped)>
    ```
 
 4. Delegate that full prompt (orientation block + task) to `coding-agent`.
@@ -119,7 +137,6 @@ the `max_map_lines` cap in `format_context` keeps the injection bounded.
 3. Context injection helps most on large, unfamiliar codebases. On a small
    repo the benefit is marginal — the agent would have oriented itself in
    one or two reads anyway.
-4. The `--deps` flag (cross-file import lines) is available via
-   `format_context(include_deps=True)` but not exposed in this command's
-   argument interface — it would require a `--deps` flag parser. Callers who
-   want dep-aware injection can invoke `format_context` directly from Python.
+4. The `--deps` and `--cached` flags are parsed with a simple prefix-strip
+   loop rather than `argparse`. Unrecognised flags starting with `--` are
+   passed through to the task text unchanged, not rejected.

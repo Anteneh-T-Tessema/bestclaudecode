@@ -59,6 +59,11 @@ what was deliberately left undone:
     uses it so the agent arrives knowing the codebase layout instead of
     discovering it through exploratory reads; bounded retry in `/safe-implement`
     closes the Step 16 gap
+18. [Disk-cached repo map and --deps/--cached flags](docs/18-cached-context-and-deps-flag.md) —
+    `src/cached_context.py` wraps `format_context()` with an mtime-based file
+    cache (`.context-cache/`) so repeated `/context-implement --cached` runs
+    skip the full repo scan when no source has changed; `--deps` flag now
+    first-class in `/context-implement` closes the Step 17 gap
 
 ## How to use this
 
@@ -121,3 +126,4 @@ directory.
 - [x] Step 15: Background agents and package_root fix
 - [x] Step 16: Worktree isolation and --package-root CLI
 - [x] Step 17: Context injection and format_context()
+- [x] Step 18: Disk-cached repo map and --deps/--cached flags
