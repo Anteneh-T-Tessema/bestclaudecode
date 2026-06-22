@@ -21,6 +21,11 @@ browser = [
     "playwright",
     "langchain-anthropic",
 ]
+# Step-through debugger support for Python files opened in Lakoora IDE.
+# Install via: uv pip install -e ".[debug]"
+debug = [
+    "debugpy",
+]
 
 [dependency-groups]
 dev = [

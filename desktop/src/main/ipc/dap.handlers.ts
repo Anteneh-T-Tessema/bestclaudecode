@@ -29,17 +29,26 @@ class DesktopDapClient extends EventEmitter {
   get isRunning() { return this.proc !== null }
 
   async launch(adapterCmd: string, adapterArgs: string[], launchArgs: Record<string, unknown>): Promise<void> {
+    const timeout = (ms: number) =>
+      new Promise<never>((_, rej) => setTimeout(() => rej(new Error(`DAP launch timed out after ${ms}ms`)), ms))
+
     const initializedPromise = new Promise<void>((res) => { this.once('initialized', res) })
     this.proc = spawn(adapterCmd, adapterArgs)
     this.proc.stdout?.on('data', (d: Buffer) => this.onData(d.toString()))
+    this.proc.stderr?.on('data', (d: Buffer) => console.error('[DAP adapter stderr]', d.toString()))
     this.proc.on('close', () => { this.proc = null; this.emit('terminated', {}) })
 
-    await this.request('initialize', {
-      adapterID: 'lakoora', pathFormat: 'path',
-      linesStartAt1: true, columnsStartAt1: true, supportsRunInTerminalRequest: false,
-    })
-    await this.request('launch', launchArgs)
-    await initializedPromise
+    await Promise.race([
+      (async () => {
+        await this.request('initialize', {
+          adapterID: 'lakoora', pathFormat: 'path',
+          linesStartAt1: true, columnsStartAt1: true, supportsRunInTerminalRequest: false,
+        })
+        await this.request('launch', launchArgs)
+        await initializedPromise
+      })(),
+      timeout(10_000),
+    ])
   }
 
   async setBreakpoints(sourcePath: string, lines: number[]) {
