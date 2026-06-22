@@ -1,0 +1,50 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: hsl(222 22% 4%);
+  color: hsl(210 20% 96%);
+  -webkit-font-smoothing: antialiased;
+}
+
+.drag-region {
+  -webkit-app-region: drag;
+  user-select: none;
+}
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(222 18% 12%) transparent;
+}
+
+/* Breakpoint red dots in Monaco glyph margin */
+.lakoora-breakpoint {
+  background: #e53e3e;
+  border-radius: 50%;
+  width: 12px !important;
+  height: 12px !important;
+  margin-top: 3px;
+  margin-left: 2px;
+  cursor: pointer;
+}
+
+/* Pulse animation used by refresh icons in panels */
+@keyframes agent-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.agent-pulse {
+  animation: agent-pulse 1s ease-in-out infinite;
+}

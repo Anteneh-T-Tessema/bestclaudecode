@@ -1,0 +1,27 @@
+{
+  "name": "lakoora-server",
+  "version": "0.1.0",
+  "description": "Cloud backend for Lakoora — WebSocket router + per-session sandbox execution (Phase 0 of the all-A roadmap)",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "test": "npm run build && node --test dist/test/*.test.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@google/generative-ai": "^0.24.1",
+    "e2b": "^2.30.4",
+    "openai": "^4.96.2",
+    "ws": "^8.18.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.9.3"
+  }
+}

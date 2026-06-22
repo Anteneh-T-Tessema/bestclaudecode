@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <!-- Required for JIT compilation (V8 in the renderer process) -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <!-- Allow outbound network connections (AI APIs, npm registry, etc.) -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <!-- Allow the user to pick files via open/save dialogs -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+    <!-- Allow spawning helper executables (python, git, node-pty shell) -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+  </dict>
+</plist>
