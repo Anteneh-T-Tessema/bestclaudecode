@@ -1,0 +1,18 @@
+[project]
+name = "support-ticket-triage"
+version = "0.1.0"
+description = "AI-powered support ticket triage: classification, similar-ticket + KB retrieval (RAG), and human-reviewed draft replies."
+requires-python = ">=3.9"
+readme = "README.md"
+
+[project.scripts]
+ticket-triage = "ticket_triage.cli:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = [
+    "ticket_triage",
+]
