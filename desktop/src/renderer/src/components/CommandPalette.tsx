@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   FolderOpen, Search, GitCommit, MessageSquare, ShieldCheck, Settings,
-  PanelBottom, PanelLeft, Trash2, Keyboard, FolderInput,
+  PanelBottom, PanelLeft, Trash2, Keyboard, FolderInput, FileText, Hash,
 } from 'lucide-react'
 import { useAppStore, type ActivityId } from '../store/useAppStore'
 import { useEditorStore } from '../store/useEditorStore'
+import { useEditorActionsStore } from '../store/useEditorActionsStore'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { accent, border, fg, surface } from '../design'
 
@@ -47,6 +48,9 @@ export function CommandPalette() {
   const setQuickOpenOpen = useAppStore((s) => s.setQuickOpenOpen)
   const setShortcutsOpen = useAppStore((s) => s.setShortcutsOpen)
   const saveSettings = useSettingsStore((s) => s.save)
+  const openGoToLine = useEditorActionsStore((s) => s.openGoToLine)
+  const tabs = useEditorStore((s) => s.tabs)
+  const setActiveTab = useEditorStore((s) => s.setActiveTab)
 
   const [query, setQuery] = useState('')
   const [selectedIndex, setSelectedIndex] = useState(0)
@@ -77,7 +81,20 @@ export function CommandPalette() {
     })
   }, [saveSettings])
 
+  const tabCommands: Command[] = tabs.map((t) => ({
+    id: `tab-${t.id}`,
+    category: 'Open Tabs',
+    label: t.filePath?.split('/').pop() ?? t.id,
+    icon: <FileText size={13} />,
+    action: () => {
+      setActiveTab(t.id)
+      close()
+    },
+  }))
+
   const commands: Command[] = [
+    ...tabCommands,
+
     { id: 'go-files', category: 'Go to', label: 'Explorer', icon: <FolderOpen size={13} />, action: () => goTo('files') },
     { id: 'go-git', category: 'Go to', label: 'Source Control', icon: <GitCommit size={13} />, action: () => goTo('git') },
     { id: 'go-search', category: 'Go to', label: 'Search', icon: <Search size={13} />, action: () => goTo('search') },
@@ -87,6 +104,7 @@ export function CommandPalette() {
 
     { id: 'open-folder', category: 'File', label: 'Open Folder…', icon: <FolderInput size={13} />, action: () => { openFolder(); close() } },
     { id: 'quick-open', category: 'File', label: 'Go to File', icon: <FolderOpen size={13} />, shortcut: '⌘P', action: () => { setQuickOpenOpen(true); close() } },
+    { id: 'go-to-line', category: 'File', label: 'Go to Line…', icon: <Hash size={13} />, shortcut: '⌘G', action: () => { openGoToLine(); close() } },
     { id: 'close-tabs', category: 'File', label: 'Close All Tabs', icon: <Trash2 size={13} />, action: () => { closeAllTabs(); close() } },
 
     { id: 'toggle-sidebar', category: 'View', label: 'Toggle Sidebar', icon: <PanelLeft size={13} />, shortcut: '⌘B', action: () => { toggleSidebar(); close() } },
