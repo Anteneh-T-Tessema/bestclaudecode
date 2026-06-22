@@ -149,24 +149,44 @@ def semantic_fallback(repo_map: str, task: str, top_k: int = 10) -> str:
 
 
 def main() -> None:
-    """CLI: python -m src.embedding_index [query] [repo-root]
+    """CLI: python -m src.embedding_index [query] [repo-root] [--json]
 
-    Prints the top-5 ranked symbol lines for the query against a live repo map.
+    Without --json: prints the top-5 ranked symbol lines for the query.
+    With --json: outputs same schema as bm25_index --json:
+        {docCount, avgDl, results: [{score, file, line}]}
     Defaults to the current directory and an empty query (prints index size).
     """
+    import json as _json
     from src.repo_map import build_repo_map
 
-    args = sys.argv[1:]
+    args = list(sys.argv[1:])
+    as_json = "--json" in args
+    if as_json:
+        args.remove("--json")
+
     query = args[0] if args else ""
     root = Path(args[1]) if len(args) > 1 else Path(".")
 
     repo_map = build_repo_map(root)
     index = TFIDFIndex.from_repo_map(repo_map)
-    print(f"Index: {len(index)} symbol documents")
 
-    if not query:
+    if as_json:
+        doc_count = len(index)
+        results = index.search(query, top_k=10) if query else []
+        payload = {
+            "docCount": doc_count,
+            "avgDl": 0,
+            "results": [
+                {"score": round(score, 6), "file": file.strip(), "line": line.strip()}
+                for score, file, line in results
+            ],
+        }
+        print(_json.dumps(payload))
         return
 
+    print(f"Index: {len(index)} symbol documents")
+    if not query:
+        return
     results = index.search(query, top_k=5)
     if not results:
         print("No results.")

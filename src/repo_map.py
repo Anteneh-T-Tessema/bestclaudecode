@@ -13,6 +13,7 @@ from __future__ import annotations
 import ast
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 _SKIP_DIR_NAMES = {"__pycache__", ".venv", "venv", ".git", "node_modules"}
 
@@ -183,6 +184,118 @@ def build_repo_map(
         )
 
     return "\n\n".join(_outline_file(f, include_methods) for f in files)
+
+
+class Chunk(NamedTuple):
+    """One function/method/class body, with its exact source text and line range."""
+
+    file: str
+    name: str
+    kind: str  # "function" | "method" | "class"
+    start_line: int
+    end_line: int
+    source: str
+
+
+def _node_to_chunk(node: ast.AST, path: Path, source: str, kind: str) -> Chunk:
+    segment = ast.get_source_segment(source, node) or ""
+    return Chunk(
+        file=str(path),
+        name=getattr(node, "name", "<unknown>"),
+        kind=kind,
+        start_line=node.lineno,
+        end_line=getattr(node, "end_lineno", node.lineno),
+        source=segment,
+    )
+
+
+def extract_chunks(root: Path) -> list[Chunk]:
+    """Return one Chunk per top-level function/class (and class method)
+    under root, each carrying its exact source text and line range.
+
+    This is the AST-level counterpart to build_repo_map()'s single-line
+    `-- line N` signatures: where the repo map gives one line per symbol
+    (cheap, good for orientation), a Chunk carries the symbol's *entire*
+    body — the unit src.vector_index embeds for semantic search, since a
+    full function body captures far more meaning than its signature alone.
+    """
+    chunks: list[Chunk] = []
+    for path in _iter_python_files(root):
+        try:
+            source = path.read_text()
+            tree = ast.parse(source)
+        except SyntaxError:
+            continue
+
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                chunks.append(_node_to_chunk(node, path, source, "function"))
+            elif isinstance(node, ast.ClassDef):
+                chunks.append(_node_to_chunk(node, path, source, "class"))
+                for child in node.body:
+                    if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        chunks.append(_node_to_chunk(child, path, source, "method"))
+    return chunks
+
+
+def build_import_graph(root: Path, package_root: Path | None = None) -> dict[str, list[str]]:
+    """Return {file: [files it imports from this repo]} for every Python
+    file under root.
+
+    Reuses the same import-resolution logic build_repo_map(show_deps=True)
+    already relies on internally (_collect_imports) — exposed here as a
+    standalone graph so callers can answer "what does X depend on?" and, by
+    inverting it, "what depends on X?" without re-parsing the repo map's
+    text format.
+    """
+    files = _iter_python_files(root)
+    known = set(files)
+    trees: dict[Path, ast.Module | SyntaxError] = {}
+    for f in files:
+        try:
+            trees[f] = ast.parse(f.read_text())
+        except SyntaxError as exc:
+            trees[f] = exc
+
+    graph: dict[str, list[str]] = {}
+    for f in files:
+        deps = _collect_imports(
+            f, root, known,
+            package_root=package_root,
+            _tree=trees[f] if isinstance(trees[f], ast.Module) else None,
+        )
+        graph[str(f)] = [str(d) for d in deps]
+    return graph
+
+
+def find_callers(root: Path, function_name: str) -> list[tuple[str, int]]:
+    """Return (file, line) for every call site of function_name under root.
+
+    Best-effort, syntactic call-site detection — matches calls of the form
+    `function_name(...)` or `obj.function_name(...)` by name only, with no
+    type resolution. This deliberately answers a question pure lexical or
+    embedding search cannot: "find every place that calls X" requires
+    matching an exact identifier used as a call target, not just a string
+    that happens to contain that name.
+    """
+    callers: list[tuple[str, int]] = []
+    for path in _iter_python_files(root):
+        try:
+            tree = ast.parse(path.read_text())
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            called_name: str | None = None
+            if isinstance(func, ast.Name):
+                called_name = func.id
+            elif isinstance(func, ast.Attribute):
+                called_name = func.attr
+            if called_name == function_name:
+                callers.append((str(path), node.lineno))
+    return callers
 
 
 def main(argv: list[str] | None = None) -> None:

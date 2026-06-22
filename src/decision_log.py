@@ -100,13 +100,46 @@ def list_decisions(docs_dir: Path | None = None) -> list[Path]:
     return sorted(target.glob("*.md"), reverse=True)
 
 
-def main() -> None:
-    """CLI: python -m src.decision_log [--list] [docs_dir]
+def _pop_arg(args: list[str], flag: str, default: str = "") -> str:
+    """Extract --flag VALUE from args in-place, return VALUE or default."""
+    try:
+        idx = args.index(flag)
+        value = args[idx + 1]
+        args[idx : idx + 2] = []
+        return value
+    except (ValueError, IndexError):
+        return default
 
-    With --list: print the 10 most recent decision log file names.
-    Without --list: write a sample entry (useful for smoke-testing the format).
+
+def _pop_all(args: list[str], flag: str) -> list[str]:
+    """Extract all --flag VALUE pairs from args in-place, return list of VALUEs."""
+    results: list[str] = []
+    while flag in args:
+        try:
+            idx = args.index(flag)
+            results.append(args[idx + 1])
+            args[idx : idx + 2] = []
+        except IndexError:
+            break
+    return results
+
+
+def main() -> None:
+    """CLI: python -m src.decision_log [--list|--log] [options]
+
+    --list [dir]          Print the 10 most recent decision log file names.
+    --log                 Write a decision log entry from explicit flags:
+        --task TEXT         Task description (required)
+        --verdict TEXT      Reviewer verdict (required)
+        --outcome TEXT      One-line outcome summary (required)
+        --retries N         Number of retries (default 0)
+        --agent TEXT        Agent name (default coding-agent)
+        --finding TEXT      Reviewer finding (repeatable)
+        --dir PATH          Override docs/decisions/ directory
+    (no flags)            Write a sample smoke-test entry.
     """
     args = sys.argv[1:]
+
     if "--list" in args:
         args = [a for a in args if a != "--list"]
         docs_dir = Path(args[0]) if args else None
@@ -115,6 +148,36 @@ def main() -> None:
             print("No decision logs found.")
         for p in entries[:10]:
             print(p)
+        return
+
+    if "--log" in args:
+        args = [a for a in args if a != "--log"]
+        task = _pop_arg(args, "--task")
+        verdict = _pop_arg(args, "--verdict")
+        outcome = _pop_arg(args, "--outcome")
+        agent = _pop_arg(args, "--agent", "coding-agent")
+        retries_str = _pop_arg(args, "--retries", "0")
+        findings = _pop_all(args, "--finding")
+        docs_dir_str = _pop_arg(args, "--dir")
+        docs_dir = Path(docs_dir_str) if docs_dir_str else None
+
+        if not task or not verdict or not outcome:
+            print(
+                "error: --log requires --task, --verdict, and --outcome",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        path = log_decision(
+            task,
+            agent=agent,
+            verdict=verdict,
+            retries=int(retries_str),
+            outcome=outcome,
+            findings=findings or None,
+            docs_dir=docs_dir,
+        )
+        print(f"Wrote: {path}")
         return
 
     docs_dir = Path(args[0]) if args else None

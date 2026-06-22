@@ -103,3 +103,17 @@ def test_format_context_with_diff_task_at_end(tmp_path):
 
     # Task must be the final section.
     assert result.endswith("my task")
+
+
+def test_format_diff_block_shows_ref_in_label():
+    diff = "--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n-a\n+b\n"
+    result = _format_diff_block(diff, 100, ref="HEAD~2")
+    assert "HEAD~2" in result
+
+
+def test_format_diff_block_default_ref_is_head():
+    diff = "--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n-a\n+b\n"
+    result = _format_diff_block(diff, 100)
+    assert "HEAD" in result
+    # Ensure the old broken literal {} does not appear.
+    assert "{}" not in result

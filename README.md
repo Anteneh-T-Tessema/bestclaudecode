@@ -175,18 +175,36 @@ directory.
 - [x] Step 25: Multi-language repo map (TypeScript/JS via regex, zero deps)
 - [x] Step 26: Git diff context injection (format_context_with_diff)
 - [x] Step 27: Decision / audit log per implement cycle (docs/decisions/)
+- [x] Step 28: CLI integration — --diff flag and audit log wired into commands
+- [x] Step 29: BM25 semantic search (Okapi BM25, term saturation, length normalisation)
+- [x] Step 30: Shadow workspace (git worktree preview before apply)
+- [x] Step 31: Web research context (injectable fetcher, --research flag, Cursor @web parity)
+- [x] Step 32: Cross-session agent memory (BM25-queryable, auto-written from decision log)
+- [x] Step 33: GitHub context injection (--issue N / --pr N via gh CLI)
+- [x] Step 34: Long-horizon planning (/plan-implement, TaskPlan, dependency ordering)
+- [x] Step 35: MCP decision log tools (list_decisions, search_decisions, get_decision_stats)
+- [x] Step 36: Multi-modal screenshot context (vision API, injectable describer)
+- [x] Step 37: Decision log analytics (retry rate, verdict distribution, top flagged files)
+- [x] Step 38: Auto-generated architecture doc (AST analysis, generate_arch_doc)
 
 ## Where this system beats Cursor / Devin / Windsurf
 
 | Capability | Cursor | Devin | **This system** |
 | --- | --- | --- | --- |
-| Semantic symbol search | Cloud embeddings | Cloud embeddings | **TF-IDF, local, zero deps** |
+| Semantic symbol search | Cloud BM25 + embeddings | Cloud embeddings | **BM25 + TF-IDF, local, zero deps** |
 | Multi-language map | tree-sitter | tree-sitter | **Regex, no install** |
 | Diff-aware context | Implicit | Implicit | **Explicit injected block** |
-| Audit trail per cycle | No | No | **docs/decisions/ Markdown** |
+| Web research context | @web (proprietary) | Built-in | **Injectable backend, any search API** |
+| Audit trail per cycle | No | No | **docs/decisions/ Markdown + MCP query** |
+| Cross-session memory | No | Black-box | **Auditable JSON, BM25-queryable** |
+| GitHub issue/PR context | No | Yes (opaque) | **Explicit block via gh CLI, inspectable** |
+| Long-horizon planning | No | Yes (black box) | **TaskPlan JSON, resumable checkpoint** |
+| Shadow workspace | Yes (proprietary) | No | **git worktree, promotes via cherry-pick** |
+| Analytics over past runs | No | No | **retry rate, verdict dist., top files** |
+| Architecture doc sync | No | No | **AST-generated, always accurate** |
+| Screenshot/visual context | No | Yes (opaque) | **Injectable, testable without API key** |
 | Cost control | Opaque | Opaque | **Per-agent model tiers** |
 | Cache invalidation | Opaque | Opaque | **Fingerprint + LRU, inspectable** |
-| Worktree isolation | No | No | **Clean tree until review passes** |
 | Review-then-fix loop | No | Partial | **Bounded retry, verdict logged** |
 | Extensibility | Extension API | Closed | **Skills + hooks + MCP layers** |
 

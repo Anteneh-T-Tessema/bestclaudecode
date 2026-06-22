@@ -6,3 +6,9 @@ __pycache__/
 node_modules/
 dist/
 .context-cache/
+desktop/out/
+desktop/out-web/
+desktop/.e2e-cdp-port*
+desktop/test-results/
+desktop/e2e-report/
+plans/

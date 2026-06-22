@@ -11,6 +11,7 @@ import { z } from "zod";
 import { readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // This server lives at mcp-servers/build-log-server/src — repo root is three up.
@@ -141,6 +142,72 @@ async function validateBuildLog(): Promise<ValidateBuildLogResult> {
   return { consistent: problems.length === 0, problems };
 }
 
+// ---------------------------------------------------------------------------
+// Decision log helpers
+// ---------------------------------------------------------------------------
+
+const DECISIONS_DIR = path.join(REPO_ROOT, "docs", "decisions");
+
+interface DecisionEntry {
+  filename: string;
+  date: string;
+  slug: string;
+  task: string;
+  agent: string;
+  verdict: string;
+  retries: number;
+  outcome: string;
+  findings: string[];
+}
+
+/** Parse one decision Markdown file into a structured object. */
+function parseDecisionFile(filename: string, content: string): DecisionEntry {
+  const taskMatch = content.match(/^# Decision: (.+)$/m);
+  const agentMatch = content.match(/\*\*Agent\*\*:\s*(.+?)(?:\s*\\)?$/m);
+  const retriesMatch = content.match(/\*\*Retries\*\*:\s*(\d+)/m);
+  const verdictMatch = content.match(/\*\*Verdict\*\*:\s*(.+?)(?:\s*\\)?$/m);
+  const outcomeMatch = content.match(/\*\*Outcome\*\*:\s*(.+?)(?:\s*\\)?$/m);
+
+  const findingLines = content
+    .split("\n")
+    .filter((l) => l.startsWith("- ") && content.includes("## Reviewer findings"))
+    .map((l) => l.slice(2).trim());
+
+  // Filename: YYYY-MM-DD_HHMMSS_slug.md
+  const nameParts = filename.replace(/\.md$/, "").split("_");
+  const date = nameParts.slice(0, 2).join("T").replace(/(\d{2})(\d{2})(\d{2})$/, "$1:$2:$3") + "Z";
+  const slug = nameParts.slice(2).join("_");
+
+  return {
+    filename,
+    date,
+    slug,
+    task: taskMatch?.[1]?.trim() ?? slug,
+    agent: agentMatch?.[1]?.trim() ?? "unknown",
+    verdict: verdictMatch?.[1]?.trim() ?? "unknown",
+    retries: retriesMatch ? parseInt(retriesMatch[1], 10) : 0,
+    outcome: outcomeMatch?.[1]?.trim() ?? "",
+    findings: findingLines,
+  };
+}
+
+/** Load all decision entries from docs/decisions/, newest first. */
+async function loadDecisions(): Promise<DecisionEntry[]> {
+  let files: string[];
+  try {
+    const entries = await readdir(DECISIONS_DIR);
+    files = entries.filter((f) => f.endsWith(".md")).sort().reverse();
+  } catch {
+    return [];
+  }
+  const results: DecisionEntry[] = [];
+  for (const f of files) {
+    const content = await readFile(path.join(DECISIONS_DIR, f), "utf-8").catch(() => "");
+    if (content) results.push(parseDecisionFile(f, content));
+  }
+  return results;
+}
+
 const server = new McpServer({
   name: "build-log-server",
   version: "0.1.0",
@@ -226,6 +293,220 @@ server.registerTool(
     return {
       content: [{ type: "text", text }],
       isError: !result.consistent,
+    };
+  }
+);
+
+server.registerTool(
+  "list_decisions",
+  {
+    title: "List Decision Log Entries",
+    description:
+      "Returns the N most recent agent decision log entries from docs/decisions/. Each entry includes task, verdict, retry count, outcome, and reviewer findings. Use this to audit what the agent has done and why.",
+    inputSchema: {
+      limit: z.number().int().positive().optional().describe("Max entries to return (default 10)"),
+    },
+  },
+  async ({ limit = 10 }) => {
+    const decisions = await loadDecisions();
+    const slice = decisions.slice(0, limit);
+    if (slice.length === 0) {
+      return { content: [{ type: "text", text: "(no decision log entries found)" }] };
+    }
+    return { content: [{ type: "text", text: JSON.stringify(slice, null, 2) }] };
+  }
+);
+
+server.registerTool(
+  "search_decisions",
+  {
+    title: "Search Decision Log",
+    description:
+      "Searches decision log entries whose task, outcome, or findings contain all of the given keywords (case-insensitive). Returns matching entries newest-first.",
+    inputSchema: {
+      query: z.string().describe("Space-separated keywords to search for"),
+      limit: z.number().int().positive().optional().describe("Max results (default 10)"),
+    },
+  },
+  async ({ query, limit = 10 }) => {
+    const keywords = query.toLowerCase().split(/\s+/).filter(Boolean);
+    const all = await loadDecisions();
+    const matches = all.filter((d) => {
+      const haystack = `${d.task} ${d.outcome} ${d.findings.join(" ")}`.toLowerCase();
+      return keywords.every((k) => haystack.includes(k));
+    });
+    const slice = matches.slice(0, limit);
+    if (slice.length === 0) {
+      return { content: [{ type: "text", text: `(no decisions matched: ${query})` }] };
+    }
+    return { content: [{ type: "text", text: JSON.stringify(slice, null, 2) }] };
+  }
+);
+
+server.registerTool(
+  "get_decision_stats",
+  {
+    title: "Decision Log Analytics",
+    description:
+      "Aggregates all decision log entries and returns statistics: total cycles, retry rate, verdict distribution, and top recurring reviewer findings. Use this to identify systemic patterns across agent runs.",
+    inputSchema: {},
+  },
+  async () => {
+    const all = await loadDecisions();
+    if (all.length === 0) {
+      return { content: [{ type: "text", text: "(no decision log entries found)" }] };
+    }
+    const total = all.length;
+    const withRetry = all.filter((d) => d.retries > 0).length;
+    const retryRate = ((withRetry / total) * 100).toFixed(1);
+
+    const verdictCounts: Record<string, number> = {};
+    for (const d of all) {
+      const v = d.verdict.split(":")[0].trim();
+      verdictCounts[v] = (verdictCounts[v] ?? 0) + 1;
+    }
+
+    const findingCounts: Record<string, number> = {};
+    for (const d of all) {
+      for (const f of d.findings) {
+        const key = f.slice(0, 60);
+        findingCounts[key] = (findingCounts[key] ?? 0) + 1;
+      }
+    }
+    const topFindings = Object.entries(findingCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([f, n]) => ({ finding: f, count: n }));
+
+    const stats = { total, withRetry, retryRate: `${retryRate}%`, verdictCounts, topFindings };
+    return { content: [{ type: "text", text: JSON.stringify(stats, null, 2) }] };
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Subprocess helpers + safety gate (mirrors Phase 1-A/1-B BLOCKED_PATTERNS)
+// ---------------------------------------------------------------------------
+
+const BLOCKED_PATTERNS = [
+  /rm\s+-[a-zA-Z]*r[a-zA-Z]*f\s+(\/|~|\$HOME|\$\{HOME\})/i,
+  /:\(\)\s*\{\s*:|:\s*&\s*\}/,
+  /dd\s+if=\/dev\/zero\s+of=\/dev\//i,
+  /\bmkfs\b/i,
+];
+
+const VENV_PYTHON = path.join(REPO_ROOT, ".venv", "bin", "python");
+
+interface SpawnResult { stdout: string; stderr: string; exitCode: number }
+
+function spawnProc(cmd: string, args: string[], cwd: string): Promise<SpawnResult> {
+  return new Promise((resolve) => {
+    const proc = spawn(cmd, args, { cwd });
+    let stdout = "";
+    let stderr = "";
+    proc.stdout.on("data", (d: Buffer) => { stdout += d.toString() });
+    proc.stderr.on("data", (d: Buffer) => { stderr += d.toString() });
+    proc.on("close", (code) => resolve({ stdout, stderr, exitCode: code ?? 1 }));
+    proc.on("error", (err) => resolve({ stdout: "", stderr: err.message, exitCode: 1 }));
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 10-E: search_codebase, get_repo_map, execute_command
+// ---------------------------------------------------------------------------
+
+server.registerTool(
+  "search_codebase",
+  {
+    title: "Search Codebase (BM25)",
+    description:
+      "Full-text BM25 search across the repository source files. Returns the top matching results with file path, line hint, and relevance score. Use this to find relevant code before making changes.",
+    inputSchema: {
+      query: z.string().describe("Keywords or identifiers to search for"),
+      limit: z.number().int().positive().optional().describe("Max results (default 10)"),
+    },
+  },
+  async ({ query, limit = 10 }) => {
+    const result = await spawnProc(
+      VENV_PYTHON,
+      ["-m", "src.bm25_index", query, REPO_ROOT, "--json"],
+      REPO_ROOT
+    );
+    if (result.exitCode !== 0) {
+      return {
+        content: [{ type: "text", text: `search_codebase failed: ${result.stderr.slice(0, 300)}` }],
+        isError: true,
+      };
+    }
+    let parsed: { results?: Array<{ score: number; file: string; line: string }> };
+    try {
+      parsed = JSON.parse(result.stdout) as typeof parsed;
+    } catch {
+      return {
+        content: [{ type: "text", text: `JSON parse error: ${result.stdout.slice(0, 300)}` }],
+        isError: true,
+      };
+    }
+    const hits = (parsed.results ?? []).slice(0, limit);
+    if (hits.length === 0) {
+      return { content: [{ type: "text", text: `(no results for: ${query})` }] };
+    }
+    return { content: [{ type: "text", text: JSON.stringify(hits, null, 2) }] };
+  }
+);
+
+server.registerTool(
+  "get_repo_map",
+  {
+    title: "Get Repository Map",
+    description:
+      "Returns a structured symbol-level map of the repository (files, classes, functions, exports) generated by src.repo_map. Use this to understand the codebase structure before navigating or modifying it.",
+    inputSchema: {},
+  },
+  async () => {
+    const result = await spawnProc(
+      VENV_PYTHON,
+      ["-m", "src.repo_map", REPO_ROOT],
+      REPO_ROOT
+    );
+    if (result.exitCode !== 0) {
+      return {
+        content: [{ type: "text", text: `get_repo_map failed: ${result.stderr.slice(0, 300)}` }],
+        isError: true,
+      };
+    }
+    const out = result.stdout.trim() || "(empty map)";
+    return { content: [{ type: "text", text: out }] };
+  }
+);
+
+server.registerTool(
+  "execute_command",
+  {
+    title: "Execute Shell Command",
+    description:
+      "Runs an arbitrary shell command in the repository root and returns stdout, stderr, and exit code. Blocked: rm -rf on root paths, fork bombs, dd if=/dev/zero, mkfs. Use only for safe read-only or build commands.",
+    inputSchema: {
+      command: z.string().describe("Shell command to run"),
+      cwd: z.string().optional().describe("Working directory (defaults to repo root)"),
+    },
+  },
+  async ({ command, cwd }) => {
+    if (BLOCKED_PATTERNS.some((re) => re.test(command))) {
+      return {
+        content: [{ type: "text", text: "Command blocked by Lakoora safety policy." }],
+        isError: true,
+      };
+    }
+    const workDir = cwd ?? REPO_ROOT;
+    const result = await spawnProc("/bin/sh", ["-c", command], workDir);
+    const payload = {
+      stdout: result.stdout.slice(0, 4000),
+      stderr: result.stderr.slice(0, 1000),
+      exitCode: result.exitCode,
+    };
+    return {
+      content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+      isError: result.exitCode !== 0,
     };
   }
 );

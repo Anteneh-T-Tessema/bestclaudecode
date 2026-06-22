@@ -22,6 +22,9 @@ chain.
 4. Delegate that diff to `code-reviewer` for a critique.
 5. If the review's verdict has **zero Blocking findings**, report
    success: summarize what was built and the review's verdict verbatim.
+   Then write the audit log (run this shell command yourself — do not
+   delegate it):
+   `python -m src.decision_log --log --task "<task>" --verdict "LGTM" --retries 0 --outcome "<one-sentence summary>" --agent "coding-agent"`
    Done — no retry needed.
 6. If the review reports **one or more Blocking findings**, delegate
    back to `coding-agent` exactly once more: give it the specific
@@ -32,12 +35,15 @@ chain.
    findings) — re-derive the diff scope the same way as step 3. This
    catches anything the retry itself introduced, not just whether the
    original findings got fixed.
-8. Report the second review's verdict **verbatim**. If Blocking findings
-   still remain after this one retry, say plainly — without softened
-   language like "mostly works" or "should be fine" — that the change is
-   **not verified clean**, list the remaining Blocking findings, and
-   stop. Don't retry again automatically; this loop is bounded at one
-   retry by design.
+8. Report the second review's verdict **verbatim**. Write the audit log
+   regardless of outcome — pass `--retries 1` and one `--finding` flag
+   per Blocking finding the reviewer cited:
+   `python -m src.decision_log --log --task "<task>" --verdict "<verdict>" --retries 1 --outcome "<summary>" --agent "coding-agent" --finding "<f1>" --finding "<f2>"`
+   If Blocking findings still remain after this one retry, say plainly —
+   without softened language like "mostly works" or "should be fine" —
+   that the change is **not verified clean**, list the remaining Blocking
+   findings, and stop. Don't retry again automatically; this loop is
+   bounded at one retry by design.
 
 This is a command-level loop, not something delegated to a subagent's
 own prompt — no subagent here has the `Agent` tool, so `coding-agent`

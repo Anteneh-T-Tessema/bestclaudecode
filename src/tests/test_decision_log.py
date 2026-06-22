@@ -117,3 +117,49 @@ def test_log_decision_creates_docs_dir_if_missing(tmp_path):
     )
     assert nested.exists()
     assert path.exists()
+
+
+def test_log_cli_writes_entry(tmp_path, monkeypatch, capsys):
+    """--log mode writes a decision log entry from CLI flags."""
+    import sys
+    from src.decision_log import main
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "decision_log",
+            "--log",
+            "--task", "add caching layer",
+            "--verdict", "LGTM",
+            "--outcome", "Cache module implemented and tested.",
+            "--retries", "1",
+            "--agent", "coding-agent",
+            "--finding", "Missing type hint on evict()",
+            "--dir", str(tmp_path),
+        ],
+    )
+    main()
+    out = capsys.readouterr().out
+    assert "Wrote:" in out
+    entries = list(tmp_path.glob("*.md"))
+    assert len(entries) == 1
+    content = entries[0].read_text()
+    assert "add caching layer" in content
+    assert "LGTM" in content
+    assert "Missing type hint" in content
+
+
+def test_log_cli_missing_required_args_exits(tmp_path, monkeypatch):
+    """--log mode exits with error when required args are absent."""
+    import sys
+    from src.decision_log import main
+
+    monkeypatch.setattr(sys, "argv", ["decision_log", "--log", "--task", "only task"])
+    try:
+        main()
+        raised = False
+    except SystemExit as exc:
+        raised = True
+        assert exc.code != 0
+    assert raised

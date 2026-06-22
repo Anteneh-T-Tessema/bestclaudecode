@@ -111,7 +111,7 @@ def format_context_with_diff(
     orientation = base[: base.index(sep)] if sep in base else base
 
     diff_str = get_diff(ref, repo_root=root, cached=cached)
-    diff_block = _format_diff_block(diff_str, max_diff_lines)
+    diff_block = _format_diff_block(diff_str, max_diff_lines, ref=ref)
 
     return (
         orientation
@@ -121,7 +121,7 @@ def format_context_with_diff(
     )
 
 
-def _format_diff_block(diff: str, max_lines: int) -> str:
+def _format_diff_block(diff: str, max_lines: int, ref: str = "HEAD") -> str:
     """Return a labelled fenced block for the diff, or empty string if no diff."""
     if not diff.strip():
         return ""
@@ -130,7 +130,7 @@ def _format_diff_block(diff: str, max_lines: int) -> str:
     trimmed = "\n".join(lines[:max_lines])
     if truncated:
         trimmed += f"\n... (diff truncated at {max_lines} lines; {len(lines) - max_lines} more)"
-    return f"## Recent changes (git diff {{}}))\n\n```diff\n{trimmed}\n```"
+    return f"## Recent changes (git diff {ref})\n\n```diff\n{trimmed}\n```"
 
 
 def main() -> None:
@@ -143,7 +143,7 @@ def main() -> None:
     ref = args[0] if args else "HEAD"
     root = Path(args[1]) if len(args) > 1 else Path(".")
     diff = get_diff(ref, repo_root=root)
-    block = _format_diff_block(diff, _DEFAULT_MAX_DIFF_LINES)
+    block = _format_diff_block(diff, _DEFAULT_MAX_DIFF_LINES, ref=ref)
     print(block if block else "(no changes)")
 
 

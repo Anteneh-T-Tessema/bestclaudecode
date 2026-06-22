@@ -63,8 +63,14 @@ Parse `$ARGUMENTS` before passing it to the agent:
   in the orientation block. Useful when the task is narrowly scoped and the
   full map would fill the context window with irrelevant symbols. Remove
   `--filter` from the task text.
+- **`--diff [ref]`** — if present, run `python -m src.diff_context [ref]` after
+  building the orientation block and inject the output (a fenced `## Recent
+  changes` block) between the orientation and the task. `ref` defaults to
+  `HEAD` (working-tree changes). Pass `HEAD~1` to include the most recent
+  commit, or any git ref. Remove `--diff` and the following `ref` token (if
+  it does not start with `--`) from the task text.
 
-All three flags are optional and can be combined: `--deps --cached --filter <task>`.
+All four flags are optional and can be combined: `--deps --cached --filter --diff <task>`.
 
 ## Execution
 
@@ -86,6 +92,14 @@ All three flags are optional and can be combined: `--deps --cached --filter <tas
    <repo map output>
    ```
 
+   <if --diff: insert diff block here>
+   ## Recent changes (git diff HEAD)
+
+   ```diff
+   <diff output>
+   ```
+   </if>
+
    ---
 
    ## Task
@@ -93,7 +107,13 @@ All three flags are optional and can be combined: `--deps --cached --filter <tas
    <task text (flags stripped)>
    ```
 
-4. Delegate that full prompt (orientation block + task) to `coding-agent`.
+   If `--diff` was present: after building the orientation block, run
+   `python -m src.diff_context [ref]` (this is a read-only shell command —
+   run it yourself). If the output is not `(no changes)`, insert it between
+   the closing ` ``` ` of the orientation block and the `---` separator.
+   Cap the diff at 150 lines as the module does automatically.
+
+4. Delegate that full prompt (orientation block + optional diff + task) to `coding-agent`.
    The agent should plan, implement, verify (lint + tests), and report back.
 
 5. Once it reports back, determine the diff scope the same way `/implement`
@@ -103,7 +123,16 @@ All three flags are optional and can be combined: `--deps --cached --filter <tas
 6. Delegate that diff to `code-reviewer` for a critique.
 
 7. If the review has **zero Blocking findings**: report success — summarize
-   what was built and the review's verdict. Done.
+   what was built and the review's verdict. Then write the audit log:
+   ```
+   python -m src.decision_log --log \
+     --task "<task text>" \
+     --verdict "LGTM" \
+     --retries 0 \
+     --outcome "<one-sentence summary of what was built>" \
+     --agent "coding-agent"
+   ```
+   Done.
 
 8. If the review has **one or more Blocking findings**: re-delegate to
    `coding-agent` exactly once more, giving it the specific Blocking findings
@@ -111,8 +140,21 @@ All three flags are optional and can be combined: `--deps --cached --filter <tas
    header so the agent retains layout context during the fix pass.
 
 9. Re-run `code-reviewer` against the cumulative diff (not just the retry
-   changes). Report the second verdict verbatim. If Blocking findings remain,
-   say plainly the change is **not verified clean**. Do not retry again.
+   changes). Report the second verdict verbatim. Then write the audit log
+   regardless of outcome — pass `--retries 1` and include each Blocking finding
+   with a `--finding` flag:
+   ```
+   python -m src.decision_log --log \
+     --task "<task text>" \
+     --verdict "<second verdict>" \
+     --retries 1 \
+     --outcome "<one-sentence summary>" \
+     --agent "coding-agent" \
+     --finding "<finding 1>" \
+     --finding "<finding 2>"
+   ```
+   If Blocking findings remain, say plainly the change is **not verified clean**.
+   Do not retry again.
 
 ## Why this is different from /implement
 

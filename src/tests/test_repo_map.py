@@ -1,4 +1,4 @@
-from src.repo_map import build_repo_map, main
+from src.repo_map import build_import_graph, build_repo_map, extract_chunks, find_callers, main
 
 
 def test_lists_top_level_function_and_class_with_method(tmp_path):
@@ -217,3 +217,108 @@ def test_main_package_root_flag_resolves_bare_imports(tmp_path, capsys):
         return ""
 
     assert utils_path in imports_line_for(output, a_path)
+
+
+# ---------------------------------------------------------------------------
+# extract_chunks
+# ---------------------------------------------------------------------------
+
+def test_extract_chunks_returns_full_function_body(tmp_path):
+    (tmp_path / "a.py").write_text(
+        "def foo():\n    x = 1\n    return x\n"
+    )
+    chunks = extract_chunks(tmp_path)
+    assert len(chunks) == 1
+    chunk = chunks[0]
+    assert chunk.name == "foo"
+    assert chunk.kind == "function"
+    assert chunk.start_line == 1
+    assert chunk.end_line == 3
+    assert "return x" in chunk.source
+
+
+def test_extract_chunks_covers_class_and_methods(tmp_path):
+    (tmp_path / "a.py").write_text(
+        "class Bar:\n    def baz(self):\n        pass\n"
+    )
+    chunks = extract_chunks(tmp_path)
+    kinds = {(c.name, c.kind) for c in chunks}
+    assert ("Bar", "class") in kinds
+    assert ("baz", "method") in kinds
+
+
+def test_extract_chunks_skips_unparseable_file(tmp_path):
+    (tmp_path / "broken.py").write_text("def foo(:\n    pass\n")
+    assert extract_chunks(tmp_path) == []
+
+
+def test_extract_chunks_empty_for_no_python_files(tmp_path):
+    assert extract_chunks(tmp_path) == []
+
+
+# ---------------------------------------------------------------------------
+# build_import_graph
+# ---------------------------------------------------------------------------
+
+def test_build_import_graph_resolves_local_import(tmp_path):
+    (tmp_path / "b.py").write_text("def foo():\n    pass\n")
+    (tmp_path / "a.py").write_text("from b import foo\n")
+
+    graph = build_import_graph(tmp_path)
+
+    a_path = str(tmp_path / "a.py")
+    b_path = str(tmp_path / "b.py")
+    assert graph[a_path] == [b_path]
+    assert graph[b_path] == []
+
+
+def test_build_import_graph_omits_stdlib_imports(tmp_path):
+    (tmp_path / "a.py").write_text("import os\nimport sys\n")
+    graph = build_import_graph(tmp_path)
+    assert graph[str(tmp_path / "a.py")] == []
+
+
+def test_build_import_graph_can_be_inverted_to_find_dependents(tmp_path):
+    (tmp_path / "b.py").write_text("def foo():\n    pass\n")
+    (tmp_path / "a.py").write_text("from b import foo\n")
+    (tmp_path / "c.py").write_text("from b import foo\n")
+
+    graph = build_import_graph(tmp_path)
+    b_path = str(tmp_path / "b.py")
+
+    dependents = [f for f, deps in graph.items() if b_path in deps]
+    assert sorted(dependents) == sorted([str(tmp_path / "a.py"), str(tmp_path / "c.py")])
+
+
+# ---------------------------------------------------------------------------
+# find_callers
+# ---------------------------------------------------------------------------
+
+def test_find_callers_finds_direct_call(tmp_path):
+    (tmp_path / "a.py").write_text(
+        "def helper():\n    pass\n\n\ndef main():\n    helper()\n"
+    )
+    callers = find_callers(tmp_path, "helper")
+    assert callers == [(str(tmp_path / "a.py"), 6)]
+
+
+def test_find_callers_finds_method_call(tmp_path):
+    (tmp_path / "a.py").write_text(
+        "def main(obj):\n    obj.evict_lru()\n"
+    )
+    callers = find_callers(tmp_path, "evict_lru")
+    assert callers == [(str(tmp_path / "a.py"), 2)]
+
+
+def test_find_callers_empty_when_never_called(tmp_path):
+    (tmp_path / "a.py").write_text("def helper():\n    pass\n")
+    assert find_callers(tmp_path, "helper") == []
+
+
+def test_find_callers_across_multiple_files(tmp_path):
+    (tmp_path / "a.py").write_text("def main():\n    helper()\n")
+    (tmp_path / "b.py").write_text("def other():\n    helper()\n")
+    callers = find_callers(tmp_path, "helper")
+    assert len(callers) == 2
+    files = {c[0] for c in callers}
+    assert files == {str(tmp_path / "a.py"), str(tmp_path / "b.py")}
