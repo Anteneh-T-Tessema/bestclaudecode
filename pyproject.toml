@@ -1,7 +1,26 @@
 [project]
 name = "skillsagentsandmcp"
 version = "0.1.0"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
+
+[project.optional-dependencies]
+# Persistent vector storage for src.vector_index (src/vector_store.py).
+# Without it, vector_index.py still works fully — it just recomputes
+# embeddings on every search instead of persisting them. Runs in embedded
+# local-file mode with zero extra infrastructure (no Docker/server needed);
+# set QDRANT_URL to point at a remote/cloud instance instead.
+vector-store = [
+    "qdrant-client",
+]
+# Agent-controlled web browsing for src.browser_context (<<<BROWSE>>> blocks).
+# Without it, browser_context.py still imports fine — browse()/search() just
+# return a graceful {"success": false} error dict instead of raising, so the
+# rest of the agent loop keeps working.
+browser = [
+    "browser-use",
+    "playwright",
+    "langchain-anthropic",
+]
 
 [dependency-groups]
 dev = [
