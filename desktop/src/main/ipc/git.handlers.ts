@@ -9,6 +9,41 @@ async function git(cwd: string, args: string[], timeout = 30_000): Promise<strin
   return stdout.trim()
 }
 
+export interface BlameEntry {
+  line: number
+  sha: string
+  author: string
+  timestamp: number
+  summary: string
+}
+
+function parsePorcelain(out: string): BlameEntry[] {
+  const lines = out.split('\n')
+  const entries: BlameEntry[] = []
+  let i = 0
+  while (i < lines.length) {
+    const ln = lines[i]
+    if (!ln || ln.length < 40 || !/^[0-9a-f]{40} /.test(ln)) { i++; continue }
+    const parts = ln.split(' ')
+    const sha = parts[0].slice(0, 8)
+    const lineNum = parseInt(parts[2], 10)
+    i++
+    let author = ''
+    let timestamp = 0
+    let summary = ''
+    while (i < lines.length && !lines[i].startsWith('\t')) {
+      const cur = lines[i]
+      if (cur.startsWith('author ') && !cur.startsWith('author-')) author = cur.slice(7)
+      else if (cur.startsWith('author-time ')) timestamp = parseInt(cur.slice(12), 10)
+      else if (cur.startsWith('summary ')) summary = cur.slice(8)
+      i++
+    }
+    if (lines[i]?.startsWith('\t')) i++
+    if (author) entries.push({ line: lineNum, sha, author, timestamp, summary })
+  }
+  return entries
+}
+
 export function registerGitHandlers(): void {
   ipcMain.handle('git:branch', async (_, cwd: string) => {
     try {
@@ -122,6 +157,15 @@ export function registerGitHandlers(): void {
       return { branches, current }
     } catch {
       return { branches: [], current: null }
+    }
+  })
+
+  ipcMain.handle('git:blame', async (_, { cwd, filePath }: { cwd: string; filePath: string }): Promise<BlameEntry[]> => {
+    try {
+      const out = await git(cwd, ['blame', '--porcelain', filePath], 15_000)
+      return parsePorcelain(out)
+    } catch {
+      return []
     }
   })
 }

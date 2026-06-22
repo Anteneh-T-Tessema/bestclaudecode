@@ -67,6 +67,7 @@ export function createWebApi(): API {
       createBranch: (cwd, branch) => socket.invoke('git:createBranch', { cwd, branch }),
       checkoutBranch: (cwd, branch) => socket.invoke('git:checkoutBranch', { cwd, branch }),
       listBranches: (cwd) => socket.invoke('git:listBranches', cwd),
+      blame: () => Promise.resolve([]),
     },
 
     ai: {

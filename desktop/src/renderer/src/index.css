@@ -40,6 +40,15 @@ body {
   cursor: pointer;
 }
 
+/* Inline git blame text injected after each line via Monaco's after decoration */
+.lakoora-blame {
+  color: #3a3f4b;
+  font-style: italic;
+  font-size: 11px;
+  margin-left: 16px;
+  letter-spacing: 0.01em;
+}
+
 /* Pulse animation used by refresh icons in panels */
 @keyframes agent-pulse {
   0%, 100% { opacity: 1; }

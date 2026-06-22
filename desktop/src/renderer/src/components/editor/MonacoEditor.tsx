@@ -42,6 +42,16 @@ function hoverContentsToMarkdown(contents: LspHoverResult['contents']): string {
 const lspProvidersRegistered = new Set<string>()
 let inlineCompletionProviderRegistered = false
 
+function relativeTime(unixSeconds: number): string {
+  const diff = Date.now() / 1000 - unixSeconds
+  if (diff < 60) return 'just now'
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
+  if (diff < 86400 * 30) return `${Math.floor(diff / 86400)}d ago`
+  if (diff < 86400 * 365) return `${Math.floor(diff / (86400 * 30))}mo ago`
+  return `${Math.floor(diff / (86400 * 365))}y ago`
+}
+
 interface LspClientApi {
   hover: (uri: string, line: number, character: number) => Promise<unknown>
   definition: (uri: string, line: number, character: number) => Promise<unknown>
@@ -234,6 +244,7 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
   const { openInlineEdit } = useEditorActionsStore()
   const { openGoToLine } = useEditorActionsStore()
   const fontSize = useSettingsStore((s) => s.fontSize)
+  const projectPath = useSettingsStore((s) => s.projectPath)
   const setProblems = useProblemsStore((s) => s.setProblems)
 
   const editorRef = useRef<MonacoNS.editor.IStandaloneCodeEditor | null>(null)
@@ -404,6 +415,41 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
       }))
     )
   }, [fileBreakpoints])
+
+  // Load and render inline git blame decorations whenever the active file changes.
+  // Uses gitDecorationsRef (initialized in handleMount). Clears on unmount/file change.
+  useEffect(() => {
+    const filePath = tab?.filePath
+    if (!filePath || !projectPath) return
+    const col = gitDecorationsRef.current
+    if (!col) return
+    let cancelled = false
+    col.set([])
+    void (async () => {
+      const entries = await window.api.git.blame(projectPath, filePath)
+      if (cancelled) return
+      const editor = editorRef.current
+      if (!editor) return
+      const model = editor.getModel()
+      if (!model) return
+      col.set(
+        entries.map(({ line, sha, author, timestamp }) => ({
+          range: {
+            startLineNumber: line, startColumn: model.getLineMaxColumn(line),
+            endLineNumber: line, endColumn: model.getLineMaxColumn(line),
+          },
+          options: {
+            after: {
+              content: `  ${author.slice(0, 22)} · ${sha} · ${relativeTime(timestamp)}`,
+              inlineClassName: 'lakoora-blame',
+            },
+            showIfCollapsed: false,
+          },
+        }))
+      )
+    })()
+    return () => { cancelled = true }
+  }, [tab?.filePath, projectPath])
 
   // Sync external content changes (e.g. after inline AI edit applies)
   useEffect(() => {

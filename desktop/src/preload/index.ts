@@ -3,6 +3,7 @@ import type { ParsedDecision, DecisionStats } from '../main/ipc/decisions.handle
 import type { MemoryEntry } from '../main/ipc/memory.handlers'
 import type { BM25Response, DocsResult, BrowseResult } from '../main/ipc/search.handlers'
 import type { GithubItem } from '../main/ipc/github.handlers'
+import type { BlameEntry } from '../main/ipc/git.handlers'
 import type { ShadowInfo } from '../main/ipc/sandbox.handlers'
 import type { PlanSummary, TaskPlanDetail } from '../main/ipc/taskplanner.handlers'
 import type { ArchDocResult } from '../main/ipc/archDoc.handlers'
@@ -78,6 +79,8 @@ const api = {
     createBranch: (cwd: string, branch: string) => ipcRenderer.invoke('git:createBranch', { cwd, branch }),
     checkoutBranch: (cwd: string, branch: string) => ipcRenderer.invoke('git:checkoutBranch', { cwd, branch }),
     listBranches: (cwd: string) => ipcRenderer.invoke('git:listBranches', cwd),
+    blame: (cwd: string, filePath: string): Promise<BlameEntry[]> =>
+      ipcRenderer.invoke('git:blame', { cwd, filePath }),
   },
 
   // ── AI Chat (streaming) ────────────────────────────────────────────────────
