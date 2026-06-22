@@ -8,11 +8,15 @@ export interface ChatMessage {
 }
 
 export const MODELS = [
+  { id: 'claude-fable-5', label: 'Claude Fable 5', provider: 'anthropic' },
   { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', provider: 'anthropic' },
   { id: 'claude-opus-4-8', label: 'Claude Opus 4.8', provider: 'anthropic' },
   { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', provider: 'anthropic' },
   { id: 'gpt-4o', label: 'GPT-4o', provider: 'openai' },
+  { id: 'gpt-4o-mini', label: 'GPT-4o Mini', provider: 'openai' },
+  { id: 'o1', label: 'o1', provider: 'openai' },
   { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash', provider: 'google' },
+  { id: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro', provider: 'google' },
 ] as const
 
 export type ModelId = (typeof MODELS)[number]['id']

@@ -5,6 +5,7 @@ import { useEditorStore } from '../../store/useEditorStore'
 import { useSettingsStore } from '../../store/useSettingsStore'
 import { toast } from '../../store/useToastStore'
 import { surface, border, fg, accent } from '../../design'
+import { ModelSelector } from './ModelSelector'
 
 const BASE_SYSTEM_PROMPT = `You are an expert AI coding agent for the Lakoora IDE. Help the user understand, write, debug, and improve their code. Be concise and accurate.
 
@@ -339,8 +340,11 @@ export function ChatInput() {
           </button>
         )}
       </div>
-      <div style={{ marginTop: 5, fontSize: 10, color: fg[3] }}>
-        Enter to send · Shift+Enter new line · @file @codebase @web @docs @issue @pr
+      <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <ModelSelector />
+        <span style={{ fontSize: 10, color: fg[3] }}>
+          Enter · @file @codebase @web @docs @issue @pr
+        </span>
       </div>
     </div>
   )

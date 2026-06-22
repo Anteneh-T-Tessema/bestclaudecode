@@ -1,4 +1,5 @@
 import { useChatStore, MODELS } from '../../store/useChatStore'
+import { useSettingsStore } from '../../store/useSettingsStore'
 import { surface, border, fg, accent } from '../../design'
 import { ChevronDown } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
@@ -12,6 +13,7 @@ const PROVIDER_COLORS: Record<string, string> = {
 export function ModelSelector() {
   const activeModel = useChatStore((s) => s.activeModel)
   const setActiveModel = useChatStore((s) => s.setActiveModel)
+  const saveSettings = useSettingsStore((s) => s.save)
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -78,6 +80,7 @@ export function ModelSelector() {
               key={model.id}
               onClick={() => {
                 setActiveModel(model.id)
+                void saveSettings({ activeModel: model.id })
                 setOpen(false)
               }}
               style={{

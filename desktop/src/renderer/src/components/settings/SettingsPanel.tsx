@@ -3,6 +3,7 @@ import { Settings, Circle, Eye, EyeOff, Check, FolderOpen } from 'lucide-react'
 import { PanelHeader, Button, accent, border, fg, surface } from '../../design'
 import { useSettingsStore } from '../../store/useSettingsStore'
 import { toast } from '../../store/useToastStore'
+import { ModelSelector } from '../chat/ModelSelector'
 
 interface EngineHealth {
   repoRoot: string
@@ -278,6 +279,19 @@ export function SettingsPanel() {
               secret={false}
             />
           </div>
+        </div>
+
+        <div>
+          <div style={{
+            fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+            color: fg[3], marginBottom: 8, paddingBottom: 6, borderBottom: `1px solid ${border[1]}`,
+          }}>
+            Active Model
+          </div>
+          <p style={{ fontSize: 10, color: fg[3], margin: '0 0 10px', lineHeight: 1.5 }}>
+            The model used for AI Chat, inline edit (Cmd+K), and ghost-text completion. Persisted across restarts.
+          </p>
+          <ModelSelector />
         </div>
 
         <div>

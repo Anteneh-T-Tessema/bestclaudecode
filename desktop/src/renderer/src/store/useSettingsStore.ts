@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { ModelId } from './useChatStore'
 
 export type Theme = 'dark' | 'light'
 
@@ -11,6 +12,7 @@ interface SettingsStore {
   fontSize: number
   projectPath: string
   recentProjects: string[]
+  activeModel: ModelId
   loaded: boolean
 
   // Actions
@@ -31,6 +33,7 @@ const DEFAULTS = {
   fontSize: 14,
   projectPath: '',
   recentProjects: [] as string[],
+  activeModel: 'claude-sonnet-4-6' as ModelId,
 }
 
 export const useSettingsStore = create<SettingsStore>((set) => ({
@@ -50,6 +53,10 @@ export const useSettingsStore = create<SettingsStore>((set) => ({
         }
       }
       set({ ...DEFAULTS, ...patch, loaded: true })
+      // Sync persisted model into chat store so all AI calls use the right model immediately.
+      const model = (patch.activeModel ?? DEFAULTS.activeModel) as ModelId
+      const { useChatStore } = await import('./useChatStore')
+      useChatStore.getState().setActiveModel(model)
     } catch {
       set({ loaded: true })
     }
