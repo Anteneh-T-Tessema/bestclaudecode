@@ -1,10 +1,20 @@
 import { useState, useEffect, useCallback } from 'react'
-import { GitBranch, RefreshCw, Plus, GitCommit, Clock, CheckCircle, Minus, AlertCircle } from 'lucide-react'
+import { DiffEditor } from '@monaco-editor/react'
+import { GitBranch, RefreshCw, Plus, GitCommit, Clock, CheckCircle, Minus, AlertCircle, X } from 'lucide-react'
 import { useSettingsStore } from '../../store/useSettingsStore'
 import { useAppStore } from '../../store/useAppStore'
 import { toast } from '../../store/useToastStore'
 import { EmptyState } from '../EmptyState'
 import { PanelHeader, IconButton, accent, border, fg, surface } from '../../design'
+
+function languageFromPath(p: string): string {
+  const ext = p.split('.').pop()?.toLowerCase() ?? ''
+  const map: Record<string, string> = {
+    ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
+    py: 'python', json: 'json', md: 'markdown', css: 'css', html: 'html',
+  }
+  return map[ext] ?? 'plaintext'
+}
 
 interface FileEntry { status: string; path: string; staged: boolean }
 interface LogEntry { hash: string; message: string }
@@ -96,6 +106,9 @@ export function GitPanel() {
   const [message, setMessage] = useState('')
   const [committing, setCommitting] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [diffFile, setDiffFile] = useState<FileEntry | null>(null)
+  const [diffData, setDiffData] = useState<{ original: string; modified: string } | null>(null)
+  const [diffLoading, setDiffLoading] = useState(false)
 
   const refresh = useCallback(async () => {
     if (!projectPath) return
@@ -174,6 +187,24 @@ export function GitPanel() {
     }
   }
 
+  const openDiff = useCallback(async (entry: FileEntry) => {
+    if (!projectPath) return
+    setDiffFile(entry)
+    setDiffData(null)
+    setDiffLoading(true)
+    try {
+      const relPath = entry.path.startsWith('/') ? entry.path.slice(projectPath.length + 1) : entry.path
+      const absPath = entry.path.startsWith('/') ? entry.path : `${projectPath}/${entry.path}`
+      const [original, modified] = await Promise.all([
+        window.api.git.show(projectPath, relPath).catch(() => ''),
+        window.api.fs.readFile(absPath).catch(() => ''),
+      ])
+      setDiffData({ original, modified })
+    } finally {
+      setDiffLoading(false)
+    }
+  }, [projectPath])
+
   const changedFiles = files.filter((f) => !f.staged)
   const stagedFiles = files.filter((f) => f.staged)
 
@@ -216,6 +247,7 @@ export function GitPanel() {
           action={{ label: 'Open project', onClick: () => setActiveActivity('files') }}
         />
       ) : (
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
           <div style={{ padding: '8px 10px', borderBottom: `1px solid ${border[1]}`, flexShrink: 0 }}>
             <textarea
@@ -322,25 +354,23 @@ export function GitPanel() {
               <SectionLabel>Staged ({stagedFiles.length})</SectionLabel>
               {stagedFiles.map((f) => {
                 const { label, color } = statusLabel(f.status)
+                const isActive = diffFile?.path === f.path
                 return (
                   <div
                     key={f.path}
-                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 12px' }}
+                    onClick={() => openDiff(f)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8, padding: '3px 12px',
+                      cursor: 'pointer',
+                      background: isActive ? accent.green.subtle : 'transparent',
+                      borderLeft: isActive ? `2px solid ${accent.green.fg}` : '2px solid transparent',
+                    }}
                   >
                     <CheckCircle style={{ width: 10, height: 10, color: accent.green.fg, flexShrink: 0 }} />
                     <span style={{ fontSize: 10, color, flexShrink: 0, fontFamily: 'monospace', fontWeight: 700 }}>
                       {label}
                     </span>
-                    <span
-                      style={{
-                        fontSize: 11,
-                        color: fg[1],
-                        flex: 1,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
+                    <span style={{ fontSize: 11, color: fg[1], flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {f.path.split('/').pop()}
                     </span>
                   </div>
@@ -362,7 +392,7 @@ export function GitPanel() {
                     color={color}
                     name={f.path.split('/').pop() ?? f.path}
                     selected={isSel}
-                    onClick={() => toggleSelect(f.path)}
+                    onClick={() => { toggleSelect(f.path); void openDiff(f) }}
                   />
                 )
               })}
@@ -443,6 +473,81 @@ export function GitPanel() {
               </span>
             </div>
           )}
+        </div>
+
+        {diffFile && (
+          <div
+            style={{
+              flexShrink: 0,
+              height: 260,
+              borderTop: `1px solid ${border[1]}`,
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                padding: '4px 10px',
+                background: surface.overlay,
+                borderBottom: `1px solid ${border[1]}`,
+                flexShrink: 0,
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 10,
+                  color: fg[2],
+                  flex: 1,
+                  fontFamily: 'monospace',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {diffFile.path}
+              </span>
+              <button
+                type="button"
+                onClick={() => { setDiffFile(null); setDiffData(null) }}
+                title="Close diff"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: fg[3],
+                  padding: 2,
+                  display: 'flex',
+                  alignItems: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <X size={11} />
+              </button>
+            </div>
+            <div style={{ flex: 1 }}>
+              {diffLoading ? (
+                <div style={{ padding: 12, fontSize: 11, color: fg[3] }}>Loading…</div>
+              ) : (
+                <DiffEditor
+                  original={diffData?.original ?? ''}
+                  modified={diffData?.modified ?? ''}
+                  language={languageFromPath(diffFile.path)}
+                  theme="lakoora-dark"
+                  options={{
+                    readOnly: true,
+                    renderSideBySide: false,
+                    fontSize: 11,
+                    minimap: { enabled: false },
+                    scrollBeyondLastLine: false,
+                    automaticLayout: true,
+                  }}
+                />
+              )}
+            </div>
+          </div>
+        )}
         </div>
       )}
     </div>
