@@ -4,8 +4,20 @@ import { useSettingsStore } from '../store/useSettingsStore'
 import { useProblemsStore } from '../store/useProblemsStore'
 import { useAppStore } from '../store/useAppStore'
 import { surface, fg, accent, border } from '../design'
-import { GitBranch, AlertCircle, AlertTriangle } from 'lucide-react'
-import { useState, useEffect } from 'react'
+import { GitBranch, GitCommit, AlertCircle, AlertTriangle } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+
+type BlameEntry = { line: number; sha: string; author: string; timestamp: number; summary: string }
+
+function timeAgo(ts: number): string {
+  const s = Math.floor(Date.now() / 1000) - ts
+  if (s < 60) return 'just now'
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`
+  if (s < 2592000) return `${Math.floor(s / 86400)}d ago`
+  if (s < 31536000) return `${Math.floor(s / 2592000)}mo ago`
+  return `${Math.floor(s / 31536000)}y ago`
+}
 
 export function StatusBar() {
   const activeTab = useEditorStore((s) => s.getActiveTab())
@@ -13,16 +25,46 @@ export function StatusBar() {
   const projectPath = useSettingsStore((s) => s.projectPath)
   const problems = useProblemsStore((s) => s.problems)
   const openProblems = useAppStore((s) => s.openProblems)
+  const wordWrap = useSettingsStore((s) => s.wordWrap)
+  const minimapOn = useSettingsStore((s) => s.minimap)
+  const tabSize = useSettingsStore((s) => s.tabSize)
+  const autoSave = useSettingsStore((s) => s.autoSave)
+  const fontSize = useSettingsStore((s) => s.fontSize)
+  const setEditorSetting = useSettingsStore((s) => s.set)
   const [branch, setBranch] = useState<string | null>(null)
+  const [blameMap, setBlameMap] = useState<Map<number, BlameEntry>>(new Map())
+  const blamePath = useRef<string | null>(null)
 
   useEffect(() => {
     if (!projectPath) return
     window.api.git.branch(projectPath).then(setBranch).catch(() => setBranch(null))
   }, [projectPath])
 
+  useEffect(() => {
+    const filePath = activeTab?.filePath
+    if (!filePath || !projectPath) {
+      setBlameMap(new Map())
+      blamePath.current = null
+      return
+    }
+    if (filePath === blamePath.current) return
+    blamePath.current = filePath
+    window.api.git.blame(projectPath, filePath)
+      .then((entries) => {
+        if (filePath !== blamePath.current) return
+        const m = new Map<number, BlameEntry>()
+        for (const e of entries) m.set(e.line, e as BlameEntry)
+        setBlameMap(m)
+      })
+      .catch(() => { if (filePath === blamePath.current) setBlameMap(new Map()) })
+  }, [activeTab?.filePath, projectPath])
+
   const modelLabel = MODELS.find((m) => m.id === activeModel)?.label ?? activeModel
   const errorCount = problems.filter((p) => p.severity === 'error').length
   const warnCount = problems.filter((p) => p.severity === 'warning').length
+  const cursorLine = activeTab?.cursorLine
+  const blame = cursorLine !== undefined ? blameMap.get(cursorLine) : undefined
+  const blameVisible = blame && !blame.sha.startsWith('0000000')
 
   const itemStyle: React.CSSProperties = {
     display: 'flex',
@@ -67,6 +109,17 @@ export function StatusBar() {
             )}
           </div>
         )}
+        {blameVisible && (
+          <div
+            style={{ ...itemStyle, maxWidth: 240, overflow: 'hidden', cursor: 'default' }}
+            title={`${blame.sha} · ${blame.summary}`}
+          >
+            <GitCommit size={11} style={{ color: accent.cyan.fg, flexShrink: 0 }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {blame.author} · {timeAgo(blame.timestamp)}
+            </span>
+          </div>
+        )}
         {(errorCount > 0 || warnCount > 0) && (
           <button
             type="button"
@@ -102,6 +155,46 @@ export function StatusBar() {
 
       {/* Right side */}
       <div style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
+        <button
+          type="button"
+          onClick={() => setEditorSetting('fontSize', Math.min(28, fontSize + 1))}
+          title={`Font size: ${fontSize}px · ⌘+ / ⌘– / ⌘0`}
+          style={{ ...itemStyle, cursor: 'pointer', background: 'none', border: 'none', borderLeft: `1px solid ${border[2]}` }}
+        >
+          {fontSize}px
+        </button>
+        <button
+          type="button"
+          onClick={() => setEditorSetting('tabSize', tabSize === 2 ? 4 : 2)}
+          title="Toggle indent size"
+          style={{ ...itemStyle, cursor: 'pointer', background: 'none', border: 'none', borderLeft: `1px solid ${border[2]}` }}
+        >
+          Spaces: {tabSize}
+        </button>
+        <button
+          type="button"
+          onClick={() => setEditorSetting('wordWrap', !wordWrap)}
+          title="Toggle word wrap"
+          style={{ ...itemStyle, cursor: 'pointer', background: 'none', border: 'none', borderLeft: `1px solid ${border[2]}`, color: wordWrap ? accent.cyan.fg : fg[1] }}
+        >
+          Wrap
+        </button>
+        <button
+          type="button"
+          onClick={() => setEditorSetting('minimap', !minimapOn)}
+          title="Toggle minimap"
+          style={{ ...itemStyle, cursor: 'pointer', background: 'none', border: 'none', borderLeft: `1px solid ${border[2]}`, color: minimapOn ? accent.cyan.fg : fg[1] }}
+        >
+          Map
+        </button>
+        <button
+          type="button"
+          onClick={() => setEditorSetting('autoSave', !autoSave)}
+          title="Toggle auto-save (800 ms debounce)"
+          style={{ ...itemStyle, cursor: 'pointer', background: 'none', border: 'none', borderLeft: `1px solid ${border[2]}`, color: autoSave ? accent.green.fg : fg[1] }}
+        >
+          Auto
+        </button>
         <div style={{ ...itemStyle, borderRight: 'none', borderLeft: `1px solid ${border[2]}`, color: accent.violet.fg }}>
           {modelLabel}
         </div>

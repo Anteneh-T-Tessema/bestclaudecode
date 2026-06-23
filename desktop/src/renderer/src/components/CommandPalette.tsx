@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   FolderOpen, Search, GitCommit, MessageSquare, ShieldCheck, Settings,
-  PanelBottom, PanelLeft, Trash2, Keyboard, FolderInput, FileText, Hash,
+  PanelBottom, PanelLeft, Trash2, Keyboard, FolderInput, FileText, Hash, Clock,
 } from 'lucide-react'
 import { useAppStore, type ActivityId } from '../store/useAppStore'
 import { useEditorStore } from '../store/useEditorStore'
@@ -12,6 +12,7 @@ import { accent, border, fg, surface } from '../design'
 interface Command {
   id: string
   label: string
+  description?: string
   shortcut?: string
   category: string
   icon?: React.ReactNode
@@ -48,9 +49,11 @@ export function CommandPalette() {
   const setQuickOpenOpen = useAppStore((s) => s.setQuickOpenOpen)
   const setShortcutsOpen = useAppStore((s) => s.setShortcutsOpen)
   const saveSettings = useSettingsStore((s) => s.save)
+  const recentFiles = useSettingsStore((s) => s.recentFiles)
   const openGoToLine = useEditorActionsStore((s) => s.openGoToLine)
   const tabs = useEditorStore((s) => s.tabs)
   const setActiveTab = useEditorStore((s) => s.setActiveTab)
+  const openFile = useEditorStore((s) => s.openFile)
 
   const [query, setQuery] = useState('')
   const [selectedIndex, setSelectedIndex] = useState(0)
@@ -81,6 +84,24 @@ export function CommandPalette() {
     })
   }, [saveSettings])
 
+  const openTabPaths = new Set(tabs.map((t) => t.filePath))
+
+  const recentCommands: Command[] = recentFiles
+    .filter((fp) => !openTabPaths.has(fp))
+    .slice(0, 8)
+    .map((fp) => ({
+      id: `recent-${fp}`,
+      category: 'Recent Files',
+      label: fp.split('/').pop() ?? fp,
+      description: fp,
+      icon: <Clock size={13} />,
+      action: () => {
+        void window.api.fs.readFile(fp)
+          .then((content) => { openFile(fp, content); close() })
+          .catch(() => close())
+      },
+    }))
+
   const tabCommands: Command[] = tabs.map((t) => ({
     id: `tab-${t.id}`,
     category: 'Open Tabs',
@@ -93,6 +114,7 @@ export function CommandPalette() {
   }))
 
   const commands: Command[] = [
+    ...recentCommands,
     ...tabCommands,
 
     { id: 'go-files', category: 'Go to', label: 'Explorer', icon: <FolderOpen size={13} />, action: () => goTo('files') },
@@ -269,7 +291,14 @@ export function CommandPalette() {
                     }}
                   >
                     <span style={{ color: isSelected ? accent.amber.fg : fg[3], flexShrink: 0 }}>{cmd.icon}</span>
-                    <span style={{ flex: 1, fontSize: 13, color: isSelected ? fg[0] : fg[1] }}>{cmd.label}</span>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: 'block', fontSize: 13, color: isSelected ? fg[0] : fg[1] }}>{cmd.label}</span>
+                      {cmd.description && (
+                        <span style={{ display: 'block', fontSize: 10, color: fg[4], overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {cmd.description}
+                        </span>
+                      )}
+                    </span>
                     {cmd.shortcut && (
                       <kbd
                         style={{

@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { Shell } from './layout/Shell'
 import { TitleBar } from './layout/TitleBar'
 import { StatusBar } from './layout/StatusBar'
+import { useAppStore } from './store/useAppStore'
 import { CommandPalette } from './components/CommandPalette'
 import { QuickOpen } from './components/QuickOpen'
 import { ToastContainer } from './components/ToastContainer'
@@ -12,6 +13,7 @@ import { useTsExtraLibs } from './hooks/useTsExtraLibs'
 
 export default function App() {
   const loadSettings = useSettingsStore((s) => s.load)
+  const zenMode = useAppStore((s) => s.zenMode)
   useTsExtraLibs()
 
   useEffect(() => {
@@ -25,7 +27,7 @@ export default function App() {
         <ErrorBoundary>
           <Shell />
         </ErrorBoundary>
-        <StatusBar />
+        {!zenMode && <StatusBar />}
         <CommandPalette />
         <QuickOpen />
         <ToastContainer />

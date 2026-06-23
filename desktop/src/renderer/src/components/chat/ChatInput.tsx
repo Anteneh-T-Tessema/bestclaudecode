@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { Send, Square } from 'lucide-react'
 import { useChatStore } from '../../store/useChatStore'
 import { useEditorStore } from '../../store/useEditorStore'
@@ -168,10 +168,10 @@ export function ChatInput() {
   const getActiveTab = useEditorStore((s) => s.getActiveTab)
   const projectPath = useSettingsStore((s) => s.projectPath)
 
-  const send = useCallback(async () => {
-    const content = text.trim()
+  const send = useCallback(async (overrideContent?: string) => {
+    const content = (overrideContent !== undefined ? overrideContent : text).trim()
     if (!content || isStreaming) return
-    setText('')
+    if (overrideContent === undefined) setText('')
 
     // @file — attach current editor content
     let finalContent = content
@@ -241,6 +241,15 @@ export function ChatInput() {
       toast.error(`Chat error: ${(err as Error).message}`)
     }
   }, [text, isStreaming, activeModel, addUserMessage, startAssistantMessage, appendDelta, finalizeMessage, setStreaming, getActiveTab, projectPath])
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { content } = (e as CustomEvent<{ content: string }>).detail
+      send(content)
+    }
+    window.addEventListener('lakoora:chat:regenerate', handler)
+    return () => window.removeEventListener('lakoora:chat:regenerate', handler)
+  }, [send])
 
   const abort = () => {
     if (activeStreamId) {
@@ -321,7 +330,7 @@ export function ChatInput() {
           </button>
         ) : (
           <button
-            onClick={send}
+            onClick={() => send()}
             disabled={!text.trim()}
             title="Send (Enter)"
             style={{
@@ -345,6 +354,11 @@ export function ChatInput() {
         <span style={{ fontSize: 10, color: fg[3] }}>
           Enter · @file @codebase @web @docs @issue @pr
         </span>
+        {text.length > 0 && (
+          <span style={{ fontSize: 10, color: text.length > 4000 ? accent.red.fg : fg[4], marginLeft: 'auto' }}>
+            {text.length} · ~{Math.ceil(text.length / 4)} tok
+          </span>
+        )}
       </div>
     </div>
   )

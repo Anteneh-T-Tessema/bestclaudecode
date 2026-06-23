@@ -24,6 +24,9 @@ interface AppStore {
   setBottomPanelOpen: (open: boolean) => void
   setBottomPanelTab: (tab: BottomPanelTab) => void
   openProblems: () => void
+  zenMode: boolean
+  toggleZenMode: () => void
+  setZenMode: (on: boolean) => void
 }
 
 export const useAppStore = create<AppStore>((set, get) => ({
@@ -49,4 +52,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setBottomPanelOpen: (open) => set({ bottomPanelOpen: open }),
   setBottomPanelTab: (tab) => set({ bottomPanelTab: tab }),
   openProblems: () => set({ bottomPanelOpen: true, bottomPanelTab: 'problems' }),
+  zenMode: false,
+  toggleZenMode: () => set((s) => ({ zenMode: !s.zenMode })),
+  setZenMode: (on) => set({ zenMode: on }),
 }))

@@ -42,6 +42,46 @@ function hoverContentsToMarkdown(contents: LspHoverResult['contents']): string {
 const lspProvidersRegistered = new Set<string>()
 let inlineCompletionProviderRegistered = false
 
+type DiffMark = { line: number; type: 'added' | 'modified' | 'deleted' }
+
+function parseDiffHunks(diff: string): DiffMark[] {
+  const marks: DiffMark[] = []
+  const lines = diff.split('\n')
+  let i = 0
+  while (i < lines.length) {
+    const hm = lines[i].match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/)
+    if (!hm) { i++; continue }
+    let newLine = Math.max(1, parseInt(hm[1], 10))
+    i++
+    const addedLines: number[] = []
+    let hasRemovals = false
+    while (i < lines.length && !lines[i].startsWith('@@ ') && !lines[i].startsWith('diff ')) {
+      const l = lines[i]
+      if (l.startsWith('+') && !l.startsWith('+++')) { addedLines.push(newLine++) }
+      else if (l.startsWith('-') && !l.startsWith('---')) { hasRemovals = true }
+      else if (!l.startsWith('\\')) { newLine++ }
+      i++
+    }
+    const type = hasRemovals ? 'modified' : 'added'
+    for (const line of addedLines) marks.push({ line, type })
+    if (addedLines.length === 0 && hasRemovals) marks.push({ line: Math.max(1, parseInt(hm[1], 10)), type: 'deleted' })
+  }
+  return marks
+}
+
+let diffStylesInjected = false
+function injectDiffStyles() {
+  if (diffStylesInjected) return
+  diffStylesInjected = true
+  const el = document.createElement('style')
+  el.textContent = [
+    '.lakoora-diff-added    { margin-left: 2px; width: 3px !important; background: rgba(35,134,54,0.6); }',
+    '.lakoora-diff-modified { margin-left: 2px; width: 3px !important; background: rgba(194,145,0,0.85); }',
+    '.lakoora-diff-deleted  { margin-left: 2px; width: 3px !important; background: rgba(248,81,73,0.85); }',
+  ].join('\n')
+  document.head.appendChild(el)
+}
+
 function relativeTime(unixSeconds: number): string {
   const diff = Date.now() / 1000 - unixSeconds
   if (diff < 60) return 'just now'
@@ -244,14 +284,19 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
   const { openInlineEdit } = useEditorActionsStore()
   const { openGoToLine } = useEditorActionsStore()
   const fontSize = useSettingsStore((s) => s.fontSize)
+  const wordWrap = useSettingsStore((s) => s.wordWrap)
+  const minimapEnabled = useSettingsStore((s) => s.minimap)
+  const tabSize = useSettingsStore((s) => s.tabSize)
   const projectPath = useSettingsStore((s) => s.projectPath)
   const setProblems = useProblemsStore((s) => s.setProblems)
 
   const editorRef = useRef<MonacoNS.editor.IStandaloneCodeEditor | null>(null)
   const monacoRef = useRef<Monaco | null>(null)
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const decorationsRef = useRef<MonacoNS.editor.IEditorDecorationsCollection | null>(null)
   const gitDecorationsRef = useRef<MonacoNS.editor.IEditorDecorationsCollection | null>(null)
   const breakpointDecorationsRef = useRef<MonacoNS.editor.IEditorDecorationsCollection | null>(null)
+  const diffDecorationsRef = useRef<MonacoNS.editor.IEditorDecorationsCollection | null>(null)
   const lspChangeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const activeLsp = tab?.language ? resolveLsp(tab.language) : null
   const toggleBreakpoint = useDebugStore((s) => s.toggleBreakpoint)
@@ -266,9 +311,11 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
       registerLspProviders(monaco, activeLsp)
       registerInlineCompletionProvider(monaco)
 
+      injectDiffStyles()
       decorationsRef.current = editor.createDecorationsCollection([])
       gitDecorationsRef.current = editor.createDecorationsCollection([])
       breakpointDecorationsRef.current = editor.createDecorationsCollection([])
+      diffDecorationsRef.current = editor.createDecorationsCollection([])
 
       // Breakpoint gutter — click in the glyph margin to toggle a breakpoint.
       // Monaco fires onMouseDown with type GUTTER_GLYPH_MARGIN for this zone.
@@ -350,6 +397,11 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
 
   // Push edits to the active language server, debounced, so hover/definition/diagnostics
   // stay current without round-tripping on every keystroke.
+  // Clear pending auto-save when the active tab changes so we never write stale content to the wrong file.
+  useEffect(() => {
+    return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current) }
+  }, [tabId])
+
   useEffect(() => {
     if (!activeLsp || !tab) return
     if (lspChangeDebounceRef.current) clearTimeout(lspChangeDebounceRef.current)
@@ -451,6 +503,32 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
     return () => { cancelled = true }
   }, [tab?.filePath, projectPath])
 
+  // Inline git diff gutter markers — colored bars for added/modified/deleted lines vs HEAD.
+  // Refreshes when the file changes or after auto-save clears isDirty.
+  useEffect(() => {
+    const filePath = tab?.filePath
+    const col = diffDecorationsRef.current
+    if (!filePath || !projectPath || !col) { col?.set([]); return }
+    let cancelled = false
+    col.set([])
+    void window.api.git.diff(projectPath, filePath).then((raw) => {
+      if (cancelled || !raw) return
+      const marks = parseDiffHunks(raw)
+      col.set(marks.map(({ line, type }) => ({
+        range: { startLineNumber: line, startColumn: 1, endLineNumber: line, endColumn: 1 },
+        options: {
+          linesDecorationsClassName: `lakoora-diff-${type}`,
+          overviewRuler: {
+            color: type === 'added' ? '#23863680' : type === 'modified' ? '#c2910080' : '#f8514980',
+            position: 1,
+          },
+          stickiness: 1, // GrowsOnlyWhenTypingAfter
+        },
+      })))
+    }).catch(() => col.set([]))
+    return () => { cancelled = true }
+  }, [tab?.filePath, tab?.isDirty, projectPath])
+
   // Sync external content changes (e.g. after inline AI edit applies)
   useEffect(() => {
     if (!tab || !editorRef.current) return
@@ -487,17 +565,30 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
       defaultValue={tab.content}
       theme={LAKOORA_THEME_ID}
       onChange={(value) => {
-        if (value !== undefined) updateContent(tabId, value)
+        if (value === undefined) return
+        updateContent(tabId, value)
+        if (useSettingsStore.getState().autoSave) {
+          if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
+          const filePath = tab?.filePath
+          if (filePath) {
+            autoSaveTimerRef.current = setTimeout(async () => {
+              try {
+                await window.api.fs.writeFile(filePath, value)
+                markSaved(tabId)
+              } catch { /* ignore write errors silently */ }
+            }, 800)
+          }
+        }
       }}
       onMount={handleMount}
       options={{
         fontSize,
         fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace",
         lineNumbers: 'on',
-        minimap: { enabled: true, scale: 1 },
+        minimap: { enabled: minimapEnabled, scale: 1 },
         scrollBeyondLastLine: false,
-        wordWrap: 'off',
-        tabSize: 2,
+        wordWrap: wordWrap ? 'on' : 'off',
+        tabSize,
         insertSpaces: true,
         renderLineHighlight: 'line',
         cursorBlinking: 'smooth',

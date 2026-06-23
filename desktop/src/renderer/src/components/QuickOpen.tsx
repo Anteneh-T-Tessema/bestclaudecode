@@ -4,6 +4,7 @@ import { useAppStore } from '../store/useAppStore'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { useEditorStore } from '../store/useEditorStore'
 import { accent, border, fg, surface } from '../design'
+import { isImageFile } from '../utils/fileType'
 
 interface FileEntry {
   path: string
@@ -177,7 +178,7 @@ export function QuickOpen() {
   const handleOpen = useCallback(
     async (file: FileEntry) => {
       try {
-        const content = await window.api.fs.readFile(file.path)
+        const content = isImageFile(file.path) ? '' : await window.api.fs.readFile(file.path)
         openFile(file.path, content)
       } finally {
         setOpen(false)

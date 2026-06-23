@@ -1,6 +1,7 @@
+import { useState } from 'react'
 import type { ChatMessage as ChatMessageType } from '../../store/useChatStore'
 import { surface, border, fg, accent } from '../../design'
-import { Bot, User } from 'lucide-react'
+import { Bot, User, Copy, Check } from 'lucide-react'
 import {
   parseEditBlocks,
   stripEditBlocks,
@@ -21,7 +22,16 @@ interface ChatMessageProps {
 }
 
 export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
+  const [hovered, setHovered] = useState(false)
+  const [copied, setCopied] = useState(false)
   const isUser = message.role === 'user'
+
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(message.content).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
   const editBlocks = isStreaming ? [] : parseEditBlocks(message.content)
   const runBlocks = isStreaming ? [] : parseRunBlocks(message.content)
   const browseBlocks = isStreaming ? [] : parseBrowseBlocks(message.content)
@@ -90,14 +100,39 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
 
   return (
     <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
         display: 'flex',
         gap: 10,
         padding: '12px 14px',
         borderBottom: `1px solid ${border[2]}`,
         background: isUser ? 'transparent' : surface.raised,
+        position: 'relative',
       }}
     >
+      {hovered && !isStreaming && (
+        <button
+          type="button"
+          onClick={copyToClipboard}
+          title="Copy message"
+          style={{
+            position: 'absolute',
+            top: 6,
+            right: 8,
+            background: surface.overlay,
+            border: `1px solid ${border[1]}`,
+            borderRadius: 4,
+            padding: '2px 6px',
+            cursor: 'pointer',
+            color: copied ? accent.green.fg : fg[3],
+            display: 'flex',
+            alignItems: 'center',
+          }}
+        >
+          {copied ? <Check size={11} /> : <Copy size={11} />}
+        </button>
+      )}
       {/* Avatar */}
       <div
         style={{

@@ -4,7 +4,7 @@ import { ChatMessage } from './ChatMessage'
 import { ChatInput } from './ChatInput'
 import { ModelSelector } from './ModelSelector'
 import { surface, border, fg, accent } from '../../design'
-import { Trash2, FlaskConical, Loader2 } from 'lucide-react'
+import { Trash2, FlaskConical, Loader2, RotateCcw } from 'lucide-react'
 
 export function ChatPanel() {
   const messages = useChatStore((s) => s.messages)
@@ -16,6 +16,20 @@ export function ChatPanel() {
   const finalizeMessage = useChatStore((s) => s.finalizeMessage)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [runningTests, setRunningTests] = useState(false)
+
+  const regenerate = () => {
+    if (streamingId !== null) return
+    const msgs = useChatStore.getState().messages
+    if (!msgs.length) return
+    let stripped = msgs
+    if (stripped[stripped.length - 1]?.role === 'assistant') {
+      stripped = stripped.slice(0, -1)
+    }
+    const lastUser = [...stripped].reverse().find((m) => m.role === 'user')
+    if (!lastUser) return
+    useChatStore.setState({ messages: stripped })
+    window.dispatchEvent(new CustomEvent('lakoora:chat:regenerate', { detail: { content: lastUser.content } }))
+  }
 
   const runTests = async () => {
     setRunningTests(true)
@@ -102,6 +116,24 @@ export function ChatPanel() {
           ) : (
             <FlaskConical size={13} />
           )}
+        </button>
+
+        <button
+          type="button"
+          onClick={regenerate}
+          disabled={streamingId !== null || messages.length === 0}
+          title="Regenerate last response"
+          style={{
+            background: 'none',
+            border: 'none',
+            cursor: streamingId !== null || messages.length === 0 ? 'default' : 'pointer',
+            color: streamingId !== null || messages.length === 0 ? fg[4] : fg[3],
+            padding: 4,
+            display: 'flex',
+            alignItems: 'center',
+          }}
+        >
+          <RotateCcw size={13} />
         </button>
 
         <button

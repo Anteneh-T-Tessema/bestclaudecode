@@ -20,12 +20,15 @@ export interface BlameEntry {
 function parsePorcelain(out: string): BlameEntry[] {
   const lines = out.split('\n')
   const entries: BlameEntry[] = []
+  // Cache metadata for each SHA so repeated abbreviated headers still resolve.
+  const commitMeta = new Map<string, { author: string; timestamp: number; summary: string }>()
   let i = 0
   while (i < lines.length) {
     const ln = lines[i]
     if (!ln || ln.length < 40 || !/^[0-9a-f]{40} /.test(ln)) { i++; continue }
     const parts = ln.split(' ')
-    const sha = parts[0].slice(0, 8)
+    const sha = parts[0]
+    const shortSha = sha.slice(0, 8)
     const lineNum = parseInt(parts[2], 10)
     i++
     let author = ''
@@ -39,7 +42,14 @@ function parsePorcelain(out: string): BlameEntry[] {
       i++
     }
     if (lines[i]?.startsWith('\t')) i++
-    if (author) entries.push({ line: lineNum, sha, author, timestamp, summary })
+    if (author) {
+      commitMeta.set(sha, { author, timestamp, summary })
+      entries.push({ line: lineNum, sha: shortSha, author, timestamp, summary })
+    } else {
+      // Abbreviated reference — reuse cached metadata from the first time this SHA appeared.
+      const meta = commitMeta.get(sha)
+      if (meta) entries.push({ line: lineNum, sha: shortSha, ...meta })
+    }
   }
   return entries
 }

@@ -4,6 +4,7 @@ import { useEditorStore } from '../../store/useEditorStore'
 import { useSettingsStore } from '../../store/useSettingsStore'
 import { toast } from '../../store/useToastStore'
 import { fg, surface, accent, border } from '../../design'
+import { isImageFile } from '../../utils/fileType'
 
 interface FileEntry {
   name: string
@@ -164,12 +165,46 @@ function InlineInput({
   )
 }
 
+function ActionBtn({
+  title,
+  onClick,
+  danger,
+  children,
+}: {
+  title: string
+  onClick: (e: React.MouseEvent) => void
+  danger?: boolean
+  children: React.ReactNode
+}) {
+  const [h, setH] = useState(false)
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      onMouseEnter={() => setH(true)}
+      onMouseLeave={() => setH(false)}
+      style={{
+        background: 'none', border: 'none', cursor: 'pointer', display: 'flex',
+        alignItems: 'center', padding: '1px 3px', borderRadius: 3,
+        color: h ? (danger ? accent.red.fg : fg[0]) : fg[3],
+      }}
+    >
+      {children}
+    </button>
+  )
+}
+
 function FileNode({
   entry,
   depth,
   onOpen,
   onToggle,
   onContextMenu,
+  onNewFile,
+  onNewFolder,
+  onRename,
+  onDelete,
   inlineEdit,
   onInlineCommit,
   onInlineCancel,
@@ -179,10 +214,15 @@ function FileNode({
   onOpen: (e: FileEntry) => void
   onToggle: (path: string) => void
   onContextMenu: (e: React.MouseEvent, entry: FileEntry) => void
+  onNewFile: (entry: FileEntry) => void
+  onNewFolder: (entry: FileEntry) => void
+  onRename: (entry: FileEntry) => void
+  onDelete: (entry: FileEntry) => void
   inlineEdit: InlineEdit | null
   onInlineCommit: (name: string) => void
   onInlineCancel: () => void
 }) {
+  const [hovered, setHovered] = useState(false)
   const isRenaming = inlineEdit?.type === 'rename' && inlineEdit.originalPath === entry.path
   const showNewChildInput = entry.isDirectory && entry.expanded &&
     (inlineEdit?.type === 'new-file' || inlineEdit?.type === 'new-folder') &&
@@ -200,15 +240,19 @@ function FileNode({
         />
       ) : (
         <div
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
           onClick={() => (entry.isDirectory ? onToggle(entry.path) : onOpen(entry))}
           onContextMenu={(e) => onContextMenu(e, entry)}
           title={entry.path}
           style={{
+            position: 'relative',
             display: 'flex', alignItems: 'center', gap: 4,
             padding: `2px 8px 2px ${8 + depth * 12}px`,
             cursor: 'pointer', fontSize: 12,
             color: entry.isDirectory ? fg[1] : getFileColor(entry.name),
             userSelect: 'none',
+            background: hovered ? surface.overlay : 'transparent',
           }}
         >
           {entry.isDirectory ? (
@@ -224,9 +268,33 @@ function FileNode({
               <File size={13} style={{ flexShrink: 0, opacity: 0.6 }} />
             </>
           )}
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
             {entry.name}
           </span>
+
+          {hovered && (
+            <div
+              style={{ display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {entry.isDirectory && (
+                <>
+                  <ActionBtn title="New File" onClick={(e) => { e.stopPropagation(); onNewFile(entry) }}>
+                    <FilePlus size={11} />
+                  </ActionBtn>
+                  <ActionBtn title="New Folder" onClick={(e) => { e.stopPropagation(); onNewFolder(entry) }}>
+                    <FolderPlus size={11} />
+                  </ActionBtn>
+                </>
+              )}
+              <ActionBtn title="Rename (F2)" onClick={(e) => { e.stopPropagation(); onRename(entry) }}>
+                <Pencil size={11} />
+              </ActionBtn>
+              <ActionBtn title="Delete" danger onClick={(e) => { e.stopPropagation(); onDelete(entry) }}>
+                <Trash2 size={11} />
+              </ActionBtn>
+            </div>
+          )}
         </div>
       )}
 
@@ -249,6 +317,10 @@ function FileNode({
               onOpen={onOpen}
               onToggle={onToggle}
               onContextMenu={onContextMenu}
+              onNewFile={onNewFile}
+              onNewFolder={onNewFolder}
+              onRename={onRename}
+              onDelete={onDelete}
               inlineEdit={inlineEdit}
               onInlineCommit={onInlineCommit}
               onInlineCancel={onInlineCancel}
@@ -308,7 +380,7 @@ export function FileExplorer() {
 
   const handleOpen = async (entry: FileEntry) => {
     try {
-      const content = await window.api.fs.readFile(entry.path)
+      const content = isImageFile(entry.path) ? '' : await window.api.fs.readFile(entry.path)
       openFile(entry.path, content)
     } catch (err) { toast.error(`Cannot open: ${(err as Error).message}`) }
   }
@@ -442,6 +514,10 @@ export function FileExplorer() {
             onOpen={handleOpen}
             onToggle={handleToggle}
             onContextMenu={handleContextMenu}
+            onNewFile={handleNewFile}
+            onNewFolder={handleNewFolder}
+            onRename={handleRename}
+            onDelete={handleDelete}
             inlineEdit={inlineEdit}
             onInlineCommit={handleInlineCommit}
             onInlineCancel={() => setInlineEdit(null)}

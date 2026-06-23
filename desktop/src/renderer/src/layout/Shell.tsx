@@ -20,6 +20,7 @@ export function Shell() {
   const sidebarOpen = useAppStore((s) => s.sidebarOpen)
   const bottomOpen = useAppStore((s) => s.bottomPanelOpen)
   const setBottomOpen = useAppStore((s) => s.setBottomPanelOpen)
+  const zenMode = useAppStore((s) => s.zenMode)
 
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR)
   const [rightWidth, setRightWidth] = useState(DEFAULT_RIGHT)
@@ -106,10 +107,10 @@ export function Shell() {
       }}
     >
       {/* Activity Bar */}
-      <ActivityBar />
+      {!zenMode && <ActivityBar />}
 
       {/* Sidebar */}
-      {sidebarOpen && (
+      {sidebarOpen && !zenMode && (
         <>
           <div style={{ width: sidebarWidth, flexShrink: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <Sidebar />
@@ -169,16 +170,20 @@ export function Shell() {
       </div>
 
       {/* Right panel resize handle */}
-      <div
-        className="resize-handle resize-handle--vertical"
-        onMouseDown={onMouseDown('right')}
-        style={{ borderLeft: `1px solid ${border[0]}` }}
-      />
+      {!zenMode && (
+        <div
+          className="resize-handle resize-handle--vertical"
+          onMouseDown={onMouseDown('right')}
+          style={{ borderLeft: `1px solid ${border[0]}` }}
+        />
+      )}
 
       {/* Right panel */}
-      <div style={{ width: rightWidth, flexShrink: 0, overflow: 'hidden' }}>
-        <RightPanel />
-      </div>
+      {!zenMode && (
+        <div style={{ width: rightWidth, flexShrink: 0, overflow: 'hidden' }}>
+          <RightPanel />
+        </div>
+      )}
     </div>
   )
 }

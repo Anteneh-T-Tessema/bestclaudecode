@@ -1,6 +1,7 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { X, Keyboard } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
+import { useSettingsStore } from '../store/useSettingsStore'
 import { accent, border, fg, surface } from '../design'
 
 const SECTIONS = [
@@ -12,6 +13,7 @@ const SECTIONS = [
       { keys: ['⌘', 'B'], label: 'Toggle Sidebar' },
       { keys: ['⌘', '`'], label: 'Toggle Terminal' },
       { keys: ['⌘', '/'], label: 'Keyboard Shortcuts' },
+      { keys: ['⌘K', 'Z'], label: 'Zen Mode' },
     ],
   },
   {
@@ -21,6 +23,9 @@ const SECTIONS = [
       { keys: ['⌘', 'K'], label: 'Inline AI Edit (selection)' },
       { keys: ['⌘', 'G'], label: 'Go to Line' },
       { keys: ['⌘', 'F'], label: 'Find in File' },
+      { keys: ['⌘', '+'], label: 'Increase Font Size' },
+      { keys: ['⌘', '–'], label: 'Decrease Font Size' },
+      { keys: ['⌘', '0'], label: 'Reset Font Size' },
     ],
   },
   {
@@ -68,13 +73,52 @@ export function KeyboardShortcuts() {
   const setQuickOpenOpen = useAppStore((s) => s.setQuickOpenOpen)
   const toggleSidebar = useAppStore((s) => s.toggleSidebar)
   const toggleBottomPanel = useAppStore((s) => s.toggleBottomPanel)
+  const toggleZenMode = useAppStore((s) => s.toggleZenMode)
+  const setZenMode = useAppStore((s) => s.setZenMode)
+  const saveFontSize = useSettingsStore((s) => s.set)
+
+  // Chord state: ⌘K arms the chord; a subsequent Z within 1 s fires Zen Mode.
+  const chordPending = useRef(false)
+  const chordTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const meta = e.metaKey || e.ctrlKey
-      if (!meta) return
 
-      if (e.key === 'p' && e.shiftKey) {
+      // Second key of ⌘K Z chord
+      if (chordPending.current && !meta && e.key === 'z') {
+        e.preventDefault()
+        chordPending.current = false
+        if (chordTimer.current) clearTimeout(chordTimer.current)
+        toggleZenMode()
+        return
+      }
+      // Any other key cancels the pending chord
+      if (chordPending.current && e.key !== 'k') {
+        chordPending.current = false
+        if (chordTimer.current) clearTimeout(chordTimer.current)
+      }
+
+      if (!meta) {
+        // Escape exits zen mode
+        if (e.key === 'Escape' && useAppStore.getState().zenMode) {
+          setZenMode(false)
+        }
+        return
+      }
+
+      if (e.key === '=' || e.key === '+') {
+        e.preventDefault()
+        const cur = useSettingsStore.getState().fontSize
+        void saveFontSize('fontSize', Math.min(28, cur + 1))
+      } else if (e.key === '-') {
+        e.preventDefault()
+        const cur = useSettingsStore.getState().fontSize
+        void saveFontSize('fontSize', Math.max(10, cur - 1))
+      } else if (e.key === '0') {
+        e.preventDefault()
+        void saveFontSize('fontSize', 14)
+      } else if (e.key === 'p' && e.shiftKey) {
         e.preventDefault()
         setCommandPaletteOpen(true)
       } else if (e.key === 'p') {
@@ -89,11 +133,17 @@ export function KeyboardShortcuts() {
       } else if (e.key === '/') {
         e.preventDefault()
         setOpen(!useAppStore.getState().shortcutsOpen)
+      } else if (e.key === 'k') {
+        // Arm chord — next Z triggers zen mode
+        e.preventDefault()
+        chordPending.current = true
+        if (chordTimer.current) clearTimeout(chordTimer.current)
+        chordTimer.current = setTimeout(() => { chordPending.current = false }, 1000)
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [setCommandPaletteOpen, setQuickOpenOpen, toggleSidebar, toggleBottomPanel, setOpen])
+  }, [setCommandPaletteOpen, setQuickOpenOpen, toggleSidebar, toggleBottomPanel, setOpen, toggleZenMode, setZenMode, saveFontSize])
 
   if (!open) return null
 
@@ -140,6 +190,7 @@ export function KeyboardShortcuts() {
           <button
             type="button"
             onClick={() => setOpen(false)}
+            title="Close"
             style={{ background: 'none', border: 'none', cursor: 'pointer', color: fg[3] }}
           >
             <X size={14} />

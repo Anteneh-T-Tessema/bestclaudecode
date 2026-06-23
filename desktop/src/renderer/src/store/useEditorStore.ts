@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { useAppStore } from './useAppStore'
+import { useSettingsStore } from './useSettingsStore'
 
 export interface EditorTab {
   id: string
@@ -75,6 +76,14 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   activeTabId: null,
 
   openFile: (filePath, content) => {
+    // Keep a persisted MRU list of recently opened files (max 20, deduped).
+    void useSettingsStore.getState().save({
+      recentFiles: [
+        filePath,
+        ...useSettingsStore.getState().recentFiles.filter((p) => p !== filePath),
+      ].slice(0, 20),
+    })
+
     const existing = get().tabs.find((t) => t.filePath === filePath)
     if (existing) {
       set({ activeTabId: existing.id })

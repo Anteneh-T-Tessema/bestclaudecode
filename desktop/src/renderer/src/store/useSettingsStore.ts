@@ -10,6 +10,11 @@ interface SettingsStore {
   ollamaUrl: string
   theme: Theme
   fontSize: number
+  wordWrap: boolean
+  minimap: boolean
+  tabSize: 2 | 4
+  autoSave: boolean
+  recentFiles: string[]
   projectPath: string
   recentProjects: string[]
   activeModel: ModelId
@@ -31,6 +36,11 @@ const DEFAULTS = {
   ollamaUrl: 'http://localhost:11434',
   theme: 'dark' as Theme,
   fontSize: 14,
+  wordWrap: false,
+  minimap: true,
+  tabSize: 2 as 2 | 4,
+  autoSave: true,
+  recentFiles: [] as string[],
   projectPath: '',
   recentProjects: [] as string[],
   activeModel: 'claude-sonnet-4-6' as ModelId,
