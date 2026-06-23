@@ -127,6 +127,31 @@ export function registerGitHandlers(): void {
     }
   })
 
+  ipcMain.handle('git:push', async (_, { cwd, remote = 'origin', branch, setUpstream = false }: { cwd: string; remote?: string; branch?: string; setUpstream?: boolean }) => {
+    try {
+      const args = ['push', remote]
+      if (setUpstream) args.push('--set-upstream')
+      if (branch) args.push(branch)
+      const out = await git(cwd, args, 60_000)
+      return { success: true, output: out }
+    } catch (e) {
+      return { success: false, error: (e as Error).message }
+    }
+  })
+
+  // Returns { ahead, behind } relative to the upstream tracking branch.
+  ipcMain.handle('git:aheadBehind', async (_, cwd: string): Promise<{ ahead: number; behind: number }> => {
+    try {
+      const out = await git(cwd, ['status', '--porcelain=v2', '--branch'])
+      const abLine = out.split('\n').find((l) => l.startsWith('# branch.ab '))
+      if (!abLine) return { ahead: 0, behind: 0 }
+      const [, aStr, bStr] = abLine.match(/\+(\d+) -(\d+)/) ?? []
+      return { ahead: parseInt(aStr ?? '0', 10), behind: parseInt(bStr ?? '0', 10) }
+    } catch {
+      return { ahead: 0, behind: 0 }
+    }
+  })
+
   ipcMain.handle('git:createBranch', async (_, { cwd, branch, checkout = true }: { cwd: string; branch: string; checkout?: boolean }) => {
     try {
       if (checkout) {
@@ -166,6 +191,27 @@ export function registerGitHandlers(): void {
       return parsePorcelain(out)
     } catch {
       return []
+    }
+  })
+
+  // Returns the content of a file at HEAD (empty string if new/untracked).
+  ipcMain.handle('git:show', async (_, { cwd, relPath }: { cwd: string; relPath: string }): Promise<string> => {
+    try {
+      return await git(cwd, ['show', `HEAD:${relPath}`])
+    } catch {
+      return ''
+    }
+  })
+
+  // Returns the unified diff for a file (staged diff uses --cached).
+  ipcMain.handle('git:diffFile', async (_, { cwd, relPath, staged }: { cwd: string; relPath: string; staged: boolean }): Promise<string> => {
+    try {
+      const args = staged
+        ? ['diff', '--cached', 'HEAD', '--', relPath]
+        : ['diff', 'HEAD', '--', relPath]
+      return await git(cwd, args)
+    } catch {
+      return ''
     }
   })
 }

@@ -64,10 +64,14 @@ export function createWebApi(): API {
       diff: (cwd, filePath) => socket.invoke('git:diff', { cwd, path: filePath }),
       statusFiles: (cwd) => socket.invoke('git:statusFiles', cwd),
       pull: (cwd) => socket.invoke('git:pull', { cwd }),
+      push: (cwd, opts) => socket.invoke('git:push', { cwd, ...opts }),
+      aheadBehind: () => Promise.resolve({ ahead: 0, behind: 0 }),
       createBranch: (cwd, branch) => socket.invoke('git:createBranch', { cwd, branch }),
       checkoutBranch: (cwd, branch) => socket.invoke('git:checkoutBranch', { cwd, branch }),
       listBranches: (cwd) => socket.invoke('git:listBranches', cwd),
       blame: () => Promise.resolve([]),
+      show: () => Promise.resolve(''),
+      diffFile: () => Promise.resolve(''),
     },
 
     ai: {

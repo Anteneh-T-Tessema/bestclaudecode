@@ -76,11 +76,19 @@ const api = {
     diff: (cwd: string, filePath: string) => ipcRenderer.invoke('git:diff', { cwd, path: filePath }) as Promise<string>,
     statusFiles: (cwd: string) => ipcRenderer.invoke('git:statusFiles', cwd),
     pull: (cwd: string) => ipcRenderer.invoke('git:pull', { cwd }),
+    push: (cwd: string, opts?: { remote?: string; branch?: string; setUpstream?: boolean }) =>
+      ipcRenderer.invoke('git:push', { cwd, ...opts }) as Promise<{ success: boolean; output?: string; error?: string }>,
+    aheadBehind: (cwd: string): Promise<{ ahead: number; behind: number }> =>
+      ipcRenderer.invoke('git:aheadBehind', cwd),
     createBranch: (cwd: string, branch: string) => ipcRenderer.invoke('git:createBranch', { cwd, branch }),
     checkoutBranch: (cwd: string, branch: string) => ipcRenderer.invoke('git:checkoutBranch', { cwd, branch }),
     listBranches: (cwd: string) => ipcRenderer.invoke('git:listBranches', cwd),
     blame: (cwd: string, filePath: string): Promise<BlameEntry[]> =>
       ipcRenderer.invoke('git:blame', { cwd, filePath }),
+    show: (cwd: string, relPath: string): Promise<string> =>
+      ipcRenderer.invoke('git:show', { cwd, relPath }),
+    diffFile: (cwd: string, relPath: string, staged: boolean): Promise<string> =>
+      ipcRenderer.invoke('git:diffFile', { cwd, relPath, staged }),
   },
 
   // ── AI Chat (streaming) ────────────────────────────────────────────────────

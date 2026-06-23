@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { DiffEditor } from '@monaco-editor/react'
-import { GitBranch, RefreshCw, Plus, GitCommit, Clock, CheckCircle, Minus, AlertCircle, X } from 'lucide-react'
+import { GitBranch, RefreshCw, Plus, GitCommit, Clock, CheckCircle, Minus, AlertCircle, X, ArrowUp, ArrowDown } from 'lucide-react'
 import { useSettingsStore } from '../../store/useSettingsStore'
 import { useAppStore } from '../../store/useAppStore'
 import { toast } from '../../store/useToastStore'
@@ -106,6 +106,10 @@ export function GitPanel() {
   const [message, setMessage] = useState('')
   const [committing, setCommitting] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [pushing, setPushing] = useState(false)
+  const [pulling, setPulling] = useState(false)
+  const [ahead, setAhead] = useState(0)
+  const [behind, setBehind] = useState(0)
   const [diffFile, setDiffFile] = useState<FileEntry | null>(null)
   const [diffData, setDiffData] = useState<{ original: string; modified: string } | null>(null)
   const [diffLoading, setDiffLoading] = useState(false)
@@ -114,10 +118,11 @@ export function GitPanel() {
     if (!projectPath) return
     setLoading(true)
     try {
-      const [b, rawFiles, rawLog] = await Promise.all([
+      const [b, rawFiles, rawLog, ab] = await Promise.all([
         window.api.git.branch(projectPath),
         window.api.git.statusFiles(projectPath),
         window.api.git.log(projectPath),
+        window.api.git.aheadBehind(projectPath),
       ])
       setBranch(b)
       const parsed: FileEntry[] = (rawFiles as Array<{ status: string; path: string }>).map((f) => ({
@@ -127,12 +132,51 @@ export function GitPanel() {
       }))
       setFiles(parsed)
       setLog(rawLog as LogEntry[])
+      const { ahead: a, behind: be } = ab as { ahead: number; behind: number }
+      setAhead(a)
+      setBehind(be)
     } catch {
       // not a git repo
     } finally {
       setLoading(false)
     }
   }, [projectPath])
+
+  const handlePush = useCallback(async () => {
+    if (!projectPath) return
+    setPushing(true)
+    try {
+      const result = await window.api.git.push(projectPath, { setUpstream: ahead > 0 && behind === 0 })
+      if ((result as { success: boolean; error?: string }).success) {
+        toast.success('Pushed successfully')
+        refresh()
+      } else {
+        toast.error(`Push failed: ${(result as { error?: string }).error ?? 'unknown error'}`)
+      }
+    } catch (e) {
+      toast.error(`Push failed: ${(e as Error).message}`)
+    } finally {
+      setPushing(false)
+    }
+  }, [projectPath, ahead, behind, refresh])
+
+  const handlePull = useCallback(async () => {
+    if (!projectPath) return
+    setPulling(true)
+    try {
+      const result = await window.api.git.pull(projectPath)
+      if ((result as { success: boolean; error?: string }).success) {
+        toast.success('Pulled successfully')
+        refresh()
+      } else {
+        toast.error(`Pull failed: ${(result as { error?: string }).error ?? 'unknown error'}`)
+      }
+    } catch (e) {
+      toast.error(`Pull failed: ${(e as Error).message}`)
+    } finally {
+      setPulling(false)
+    }
+  }, [projectPath, refresh])
 
   useEffect(() => {
     refresh()
@@ -209,7 +253,7 @@ export function GitPanel() {
   const stagedFiles = files.filter((f) => f.staged)
 
   const headerActions = (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
       {branch && (
         <span
           style={{
@@ -220,11 +264,42 @@ export function GitPanel() {
             border: `1px solid ${accent.green.border}`,
             padding: '1px 6px',
             borderRadius: 3,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
           }}
         >
           {branch}
+          {behind > 0 && (
+            <span style={{ display: 'flex', alignItems: 'center', gap: 1, color: accent.cyan.fg }}>
+              <ArrowDown style={{ width: 9, height: 9 }} />
+              {behind}
+            </span>
+          )}
+          {ahead > 0 && (
+            <span style={{ display: 'flex', alignItems: 'center', gap: 1, color: accent.amber.fg }}>
+              <ArrowUp style={{ width: 9, height: 9 }} />
+              {ahead}
+            </span>
+          )}
         </span>
       )}
+      <IconButton
+        size={22}
+        onClick={handlePull}
+        disabled={pulling || pushing}
+        title={behind > 0 ? `Pull (${behind} commit${behind !== 1 ? 's' : ''} behind)` : 'Pull'}
+      >
+        <ArrowDown style={{ width: 11, height: 11, color: pulling ? accent.cyan.fg : undefined }} className={pulling ? 'agent-pulse' : ''} />
+      </IconButton>
+      <IconButton
+        size={22}
+        onClick={handlePush}
+        disabled={pushing || pulling}
+        title={ahead > 0 ? `Push (${ahead} commit${ahead !== 1 ? 's' : ''} ahead)` : 'Push'}
+      >
+        <ArrowUp style={{ width: 11, height: 11, color: pushing ? accent.amber.fg : undefined }} className={pushing ? 'agent-pulse' : ''} />
+      </IconButton>
       <IconButton size={22} onClick={refresh} disabled={loading} title="Refresh">
         <RefreshCw style={{ width: 11, height: 11 }} className={loading ? 'agent-pulse' : ''} />
       </IconButton>
