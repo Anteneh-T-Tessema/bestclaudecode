@@ -96,6 +96,14 @@ const api = {
       ipcRenderer.invoke('git:fileAtRevision', { cwd, rev, relPath }),
     commitFiles: (cwd: string, hash: string): Promise<Array<{ status: string; path: string; oldPath?: string }>> =>
       ipcRenderer.invoke('git:commitFiles', { cwd, hash }),
+    stashCreate: (cwd: string, name: string): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('git:stashCreate', { cwd, name }),
+    stashList: (cwd: string): Promise<Array<{ ref: string; name: string; age: string }>> =>
+      ipcRenderer.invoke('git:stashList', cwd),
+    stashApply: (cwd: string, ref: string): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('git:stashApply', { cwd, ref }),
+    stashDrop: (cwd: string, ref: string): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('git:stashDrop', { cwd, ref }),
   },
 
   // ── AI Chat (streaming) ────────────────────────────────────────────────────

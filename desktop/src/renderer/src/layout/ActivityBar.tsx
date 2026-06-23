@@ -1,4 +1,4 @@
-import { Files, GitBranch, Search, MessageSquare, ShieldCheck, Settings, Brain, Radar, ListTodo, BookOpen, Bot, Bug, ListTree } from 'lucide-react'
+import { Files, GitBranch, Search, MessageSquare, ShieldCheck, Settings, Brain, Radar, ListTodo, BookOpen, Bot, Bug, ListTree, StickyNote } from 'lucide-react'
 import { useAppStore, type ActivityId } from '../store/useAppStore'
 import { IconButton, Tooltip, accent, surface, border, type AccentName } from '../design'
 
@@ -22,6 +22,7 @@ const ACTIVITIES: ActivityDef[] = [
   { id: 'agent', icon: Bot, label: 'Agent Progress', accentName: 'violet' },
   { id: 'debug', icon: Bug, label: 'Debug', accentName: 'red' },
   { id: 'outline', icon: ListTree, label: 'Outline', accentName: 'cyan' },
+  { id: 'notepads', icon: StickyNote, label: 'Notepads', accentName: 'amber' },
 ]
 
 const BOTTOM: ActivityDef = { id: 'settings', icon: Settings, label: 'Settings' }

@@ -11,6 +11,7 @@ import { ArchDocPanel } from '../components/sidebar/ArchDocPanel'
 import { AgentProgressPanel } from '../components/agent/AgentProgressPanel'
 import { DebugPanel } from '../components/sidebar/DebugPanel'
 import { OutlinePanel } from '../components/sidebar/OutlinePanel'
+import { NotepadsPanel } from '../components/sidebar/NotepadsPanel'
 import { SettingsPanel } from '../components/settings/SettingsPanel'
 import { ErrorBoundary } from '../components/ErrorBoundary'
 
@@ -27,6 +28,7 @@ const LABELS: Record<string, string> = {
   agent: 'AGENT',
   debug: 'DEBUG',
   outline: 'OUTLINE',
+  notepads: 'NOTEPADS',
   settings: 'SETTINGS',
 }
 
@@ -64,6 +66,8 @@ export function Sidebar() {
         return <DebugPanel />
       case 'outline':
         return <OutlinePanel />
+      case 'notepads':
+        return <NotepadsPanel />
       case 'settings':
         return <SettingsPanel />
       default:

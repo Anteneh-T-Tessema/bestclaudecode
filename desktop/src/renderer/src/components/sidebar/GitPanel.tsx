@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { DiffEditor } from '@monaco-editor/react'
-import { GitBranch, RefreshCw, Plus, GitCommit, Clock, CheckCircle, Minus, AlertCircle, X, ArrowUp, ArrowDown, ChevronRight, FileText, Check, Sparkles } from 'lucide-react'
+import { GitBranch, RefreshCw, Plus, GitCommit, Clock, CheckCircle, Minus, AlertCircle, X, ArrowUp, ArrowDown, ChevronRight, FileText, Check, Sparkles, Bookmark, RotateCcw, Trash2, ChevronDown } from 'lucide-react'
 import { useSettingsStore } from '../../store/useSettingsStore'
 import { useAppStore } from '../../store/useAppStore'
 import { useChatStore } from '../../store/useChatStore'
@@ -310,6 +310,76 @@ export function GitPanel() {
   const [branchDropdownOpen, setBranchDropdownOpen] = useState(false)
   const branchBadgeRef = useRef<HTMLSpanElement>(null)
 
+  // Checkpoints (git stash)
+  interface Checkpoint { ref: string; name: string; age: string }
+  const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([])
+  const [checkpointsOpen, setCheckpointsOpen] = useState(true)
+  const [cpSaving, setCpSaving] = useState(false)
+  const [cpNameDraft, setCpNameDraft] = useState('')
+  const [cpInputOpen, setCpInputOpen] = useState(false)
+  const [cpRestoring, setCpRestoring] = useState<string | null>(null)
+  const cpInputRef = useRef<HTMLInputElement>(null)
+
+  const loadCheckpoints = useCallback(async () => {
+    if (!projectPath) return
+    try {
+      const list = await window.api.git.stashList(projectPath)
+      setCheckpoints(list)
+    } catch {
+      setCheckpoints([])
+    }
+  }, [projectPath])
+
+  const saveCheckpoint = useCallback(async () => {
+    const name = cpNameDraft.trim() || `checkpoint ${new Date().toLocaleTimeString()}`
+    if (!projectPath) return
+    setCpSaving(true)
+    try {
+      const result = await window.api.git.stashCreate(projectPath, name)
+      if (result.success) {
+        toast.success(`Checkpoint "${name}" saved`)
+        setCpInputOpen(false)
+        setCpNameDraft('')
+        loadCheckpoints()
+        refresh()
+      } else {
+        toast.error(`Checkpoint failed: ${result.error ?? 'unknown'}`)
+      }
+    } finally {
+      setCpSaving(false)
+    }
+  }, [projectPath, cpNameDraft, loadCheckpoints])
+
+  const restoreCheckpoint = useCallback(async (ref: string, name: string) => {
+    if (!projectPath) return
+    setCpRestoring(ref)
+    try {
+      const result = await window.api.git.stashApply(projectPath, ref)
+      if (result.success) {
+        toast.success(`Checkpoint "${name}" restored`)
+        loadCheckpoints()
+        refresh()
+      } else {
+        toast.error(`Restore failed: ${result.error ?? 'unknown'}`)
+      }
+    } finally {
+      setCpRestoring(null)
+    }
+  }, [projectPath, loadCheckpoints])
+
+  const dropCheckpoint = useCallback(async (ref: string, name: string) => {
+    if (!projectPath) return
+    try {
+      const result = await window.api.git.stashDrop(projectPath, ref)
+      if (result.success) {
+        toast.success(`Checkpoint "${name}" deleted`)
+        loadCheckpoints()
+      } else {
+        toast.error(`Delete failed: ${result.error ?? 'unknown'}`)
+      }
+    } catch {}
+  }, [projectPath, loadCheckpoints])
+
   const refresh = useCallback(async () => {
     if (!projectPath) return
     setLoading(true)
@@ -376,7 +446,12 @@ export function GitPanel() {
 
   useEffect(() => {
     refresh()
-  }, [refresh])
+    loadCheckpoints()
+  }, [refresh, loadCheckpoints])
+
+  useEffect(() => {
+    if (cpInputOpen) setTimeout(() => cpInputRef.current?.focus(), 30)
+  }, [cpInputOpen])
 
   const toggleSelect = (path: string) => {
     setSelected((prev) => {
@@ -794,6 +869,172 @@ export function GitPanel() {
               </p>
             </div>
           )}
+
+          {/* ── Checkpoints ───────────────────────────────────────────── */}
+          <div style={{ borderBottom: `1px solid ${border[1]}`, flexShrink: 0 }}>
+            {/* Header row */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                padding: '5px 12px 3px',
+                cursor: 'pointer',
+                userSelect: 'none',
+              }}
+              onClick={() => setCheckpointsOpen((o) => !o)}
+            >
+              <Bookmark style={{ width: 10, height: 10, color: accent.violet.fg, flexShrink: 0, marginRight: 5 }} />
+              <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: fg[3], flex: 1 }}>
+                Checkpoints {checkpoints.length > 0 ? `(${checkpoints.length})` : ''}
+              </span>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setCpInputOpen((o) => !o) }}
+                title="Save checkpoint"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: accent.violet.fg, padding: 2, display: 'flex', alignItems: 'center', borderRadius: 3 }}
+              >
+                <Plus style={{ width: 11, height: 11 }} />
+              </button>
+              <ChevronDown style={{
+                width: 10, height: 10, color: fg[4], marginLeft: 2,
+                transform: checkpointsOpen ? 'rotate(0deg)' : 'rotate(-90deg)',
+                transition: 'transform 0.12s',
+              }} />
+            </div>
+
+            {checkpointsOpen && (
+              <>
+                {/* Inline name input */}
+                {cpInputOpen && (
+                  <div style={{ padding: '4px 10px 6px' }}>
+                    <input
+                      ref={cpInputRef}
+                      type="text"
+                      value={cpNameDraft}
+                      onChange={(e) => setCpNameDraft(e.target.value)}
+                      placeholder="Checkpoint name…"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') { e.preventDefault(); void saveCheckpoint() }
+                        if (e.key === 'Escape') { setCpInputOpen(false); setCpNameDraft('') }
+                      }}
+                      style={{
+                        width: '100%',
+                        boxSizing: 'border-box',
+                        background: surface.raised,
+                        border: `1px solid ${accent.violet.fg}`,
+                        borderRadius: 4,
+                        color: fg[0],
+                        fontSize: 11,
+                        padding: '4px 8px',
+                        outline: 'none',
+                        fontFamily: 'inherit',
+                      }}
+                    />
+                    <div style={{ display: 'flex', gap: 5, marginTop: 4 }}>
+                      <button
+                        type="button"
+                        onClick={() => void saveCheckpoint()}
+                        disabled={cpSaving}
+                        style={{
+                          flex: 1,
+                          padding: '3px 0',
+                          background: accent.violet.subtle,
+                          border: `1px solid ${accent.violet.border}`,
+                          borderRadius: 3,
+                          color: accent.violet.fg,
+                          fontSize: 10,
+                          fontWeight: 600,
+                          cursor: cpSaving ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        {cpSaving ? 'Saving…' : 'Save Checkpoint'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setCpInputOpen(false); setCpNameDraft('') }}
+                        style={{
+                          padding: '3px 8px',
+                          background: 'none',
+                          border: `1px solid ${border[1]}`,
+                          borderRadius: 3,
+                          color: fg[3],
+                          fontSize: 10,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {checkpoints.length === 0 && !cpInputOpen && (
+                  <div style={{ padding: '4px 12px 8px', fontSize: 10, color: fg[4] }}>
+                    No checkpoints — click + to save the current working state.
+                  </div>
+                )}
+
+                {checkpoints.map((cp) => (
+                  <div
+                    key={cp.ref}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '4px 10px',
+                      borderTop: `1px solid ${border[2]}`,
+                    }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = surface.raised }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'none' }}
+                  >
+                    <Bookmark style={{ width: 10, height: 10, color: accent.violet.dim, flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 11, color: fg[1], overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {cp.name}
+                      </div>
+                      <div style={{ fontSize: 9, color: fg[4], marginTop: 1 }}>{cp.age} · {cp.ref}</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void restoreCheckpoint(cp.ref, cp.name)}
+                      disabled={cpRestoring === cp.ref}
+                      title="Restore (apply stash)"
+                      style={{
+                        flexShrink: 0,
+                        background: 'none',
+                        border: `1px solid ${accent.green.border}`,
+                        borderRadius: 3,
+                        color: cpRestoring === cp.ref ? fg[4] : accent.green.fg,
+                        cursor: 'pointer',
+                        padding: '2px 5px',
+                        display: 'flex',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <RotateCcw style={{ width: 10, height: 10 }} className={cpRestoring === cp.ref ? 'agent-pulse' : ''} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void dropCheckpoint(cp.ref, cp.name)}
+                      title="Delete checkpoint"
+                      style={{
+                        flexShrink: 0,
+                        background: 'none',
+                        border: 'none',
+                        color: fg[4],
+                        cursor: 'pointer',
+                        padding: '2px 3px',
+                        display: 'flex',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <Trash2 style={{ width: 10, height: 10 }} />
+                    </button>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
 
           {log.length > 0 && (
             <div>

@@ -111,6 +111,38 @@ async function injectGithubContext(content: string): Promise<string> {
   return result
 }
 
+function extractImportedPackages(content: string, language: string): string[] {
+  const pkgs = new Set<string>()
+  const addPkg = (raw: string) => {
+    if (!raw || raw.startsWith('.') || raw.startsWith('/')) return
+    const pkg = raw.startsWith('@') ? raw.split('/').slice(0, 2).join('/') : raw.split('/')[0]
+    if (pkg) pkgs.add(pkg)
+  }
+  if (language === 'typescript' || language === 'javascript') {
+    const re = /(?:from|import)\s+['"]([^'"]+)['"]/g
+    let m: RegExpExecArray | null
+    while ((m = re.exec(content)) !== null) addPkg(m[1])
+    const req = /require\(['"]([^'"]+)['"]\)/g
+    while ((m = req.exec(content)) !== null) addPkg(m[1])
+  } else if (language === 'python') {
+    const imp = /^import\s+(\w+)/gm
+    const frm = /^from\s+(\w+)/gm
+    let m: RegExpExecArray | null
+    while ((m = imp.exec(content)) !== null) pkgs.add(m[1])
+    while ((m = frm.exec(content)) !== null) pkgs.add(m[1])
+  } else if (language === 'rust') {
+    const use_ = /^use\s+([a-z_][a-z0-9_]*)/gm
+    const skip = new Set(['std', 'core', 'alloc', 'super', 'self', 'crate'])
+    let m: RegExpExecArray | null
+    while ((m = use_.exec(content)) !== null) { if (!skip.has(m[1])) pkgs.add(m[1]) }
+  } else if (language === 'go') {
+    const re = /import\s+["']([^"'.][^"']+)["']/g
+    let m: RegExpExecArray | null
+    while ((m = re.exec(content)) !== null) pkgs.add(m[1].split('/').pop() ?? m[1])
+  }
+  return [...pkgs].sort()
+}
+
 // eslint-disable-next-line no-control-regex
 const ANSI_RE = /\x1b\[[0-9;]*[A-Za-z]|\x1b[()][AB012]|\r/g
 
@@ -204,6 +236,11 @@ export function ChatInput() {
   const [folderQuery, setFolderQuery] = useState<string | null>(null)
   const [folderPickerIndex, setFolderPickerIndex] = useState(0)
   const folderPickerStartRef = useRef<number>(-1)
+
+  // Docs picker state (triggered by @docs <query>)
+  const [docsQuery, setDocsQuery] = useState<string | null>(null)
+  const [docsPickerIndex, setDocsPickerIndex] = useState(0)
+  const docsPickerStartRef = useRef<number>(-1)
 
   const {
     activeModel,
@@ -456,6 +493,38 @@ export function ChatInput() {
     })
   }
 
+  const closeDocsPicker = () => {
+    setDocsQuery(null)
+    setDocsPickerIndex(0)
+    docsPickerStartRef.current = -1
+  }
+
+  const activeTabForDocs = getActiveTab()
+  const discoveredPackages = docsQuery !== null && activeTabForDocs
+    ? extractImportedPackages(activeTabForDocs.content, activeTabForDocs.language)
+    : []
+  const filteredDocs = discoveredPackages.filter((p) =>
+    docsQuery === '' || p.toLowerCase().includes((docsQuery ?? '').toLowerCase())
+  ).slice(0, 12)
+
+  const acceptDocsPicker = (pkg: string) => {
+    const ta = textareaRef.current
+    if (!ta || docsPickerStartRef.current < 0) return
+    const before = text.slice(0, docsPickerStartRef.current)
+    const after = text.slice(ta.selectionStart)
+    const insert = `@docs ${pkg} `
+    setText(before + insert + after)
+    closeDocsPicker()
+    requestAnimationFrame(() => {
+      if (!ta) return
+      const pos = before.length + insert.length
+      ta.setSelectionRange(pos, pos)
+      ta.focus()
+      ta.style.height = 'auto'
+      ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`
+    })
+  }
+
   const acceptMention = (tag: string) => {
     const ta = textareaRef.current
     if (!ta || mentionStartRef.current < 0) return
@@ -491,6 +560,19 @@ export function ChatInput() {
         window.api.fs.findFiles(pp).then((files) => { allFilesRef.current = files }).catch(() => {})
       }
     }
+
+    // Detect @docs <query> — docs package picker from current file imports
+    const docsMatch = slice.match(/@docs ([^\s@]*)$/)
+    if (docsMatch) {
+      docsPickerStartRef.current = slice.length - docsMatch[0].length
+      setDocsQuery(docsMatch[1])
+      setDocsPickerIndex(0)
+      closeFolderPicker()
+      closeFilePicker()
+      closeMention()
+      return
+    }
+    closeDocsPicker()
 
     // Detect @folder <query> — folder picker mode (check before @file)
     const folderMatch = slice.match(/@folder ([^\s@]*)$/)
@@ -536,6 +618,12 @@ export function ChatInput() {
   }
 
   const handleKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (docsQuery !== null && filteredDocs.length > 0) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setDocsPickerIndex((i) => (i + 1) % filteredDocs.length); return }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setDocsPickerIndex((i) => (i - 1 + filteredDocs.length) % filteredDocs.length); return }
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); acceptDocsPicker(filteredDocs[docsPickerIndex]); return }
+      if (e.key === 'Escape') { e.preventDefault(); closeDocsPicker(); return }
+    }
     if (folderQuery !== null && filteredDirs.length > 0) {
       if (e.key === 'ArrowDown') { e.preventDefault(); setFolderPickerIndex((i) => (i + 1) % filteredDirs.length); return }
       if (e.key === 'ArrowUp') { e.preventDefault(); setFolderPickerIndex((i) => (i - 1 + filteredDirs.length) % filteredDirs.length); return }
@@ -629,6 +717,51 @@ export function ChatInput() {
               </button>
             )
           })}
+        </div>
+      )}
+
+      {/* @docs package picker popup */}
+      {docsQuery !== null && filteredDocs.length > 0 && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: '100%',
+            left: 12,
+            right: 12,
+            marginBottom: 4,
+            background: surface.raised,
+            border: `1px solid ${border[0]}`,
+            borderRadius: 8,
+            overflow: 'hidden',
+            boxShadow: '0 -4px 16px rgba(0,0,0,0.4)',
+            zIndex: 100,
+          }}
+        >
+          <div style={{ padding: '4px 12px 2px', fontSize: 9, color: fg[4], borderBottom: `1px solid ${border[2]}` }}>
+            Packages imported in {activeTabForDocs?.label ?? 'current file'}
+          </div>
+          {filteredDocs.map((pkg, i) => (
+            <button
+              key={pkg}
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); acceptDocsPicker(pkg) }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                width: '100%',
+                padding: '6px 12px',
+                background: i === docsPickerIndex ? surface.surface : 'transparent',
+                border: 'none',
+                borderBottom: i < filteredDocs.length - 1 ? `1px solid ${border[2]}` : 'none',
+                cursor: 'pointer',
+                textAlign: 'left',
+              }}
+            >
+              <span style={{ fontSize: 11, color: accent.cyan.fg }}>📦</span>
+              <span style={{ fontSize: 12, color: fg[0], fontFamily: 'monospace' }}>{pkg}</span>
+            </button>
+          ))}
         </div>
       )}
 

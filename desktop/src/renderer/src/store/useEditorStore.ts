@@ -63,6 +63,8 @@ interface EditorStore {
   tabs: EditorTab[]
   activeTabId: string | null
   editorSelection: string
+  splitOpen: boolean
+  splitTabId: string | null
   openFile: (filePath: string, content: string) => void
   closeTab: (id: string) => void
   setActiveTab: (id: string) => void
@@ -71,12 +73,17 @@ interface EditorStore {
   setCursor: (id: string, line: number, col: number) => void
   setEditorSelection: (text: string) => void
   getActiveTab: () => EditorTab | null
+  openSplit: (tabId: string) => void
+  closeSplit: () => void
+  setSplitTabId: (id: string) => void
 }
 
 export const useEditorStore = create<EditorStore>((set, get) => ({
   tabs: [],
   activeTabId: null,
   editorSelection: '',
+  splitOpen: false,
+  splitTabId: null,
 
   openFile: (filePath, content) => {
     // Keep a persisted MRU list of recently opened files (max 20, deduped).
@@ -148,6 +155,10 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   },
 
   setEditorSelection: (text) => set({ editorSelection: text }),
+
+  openSplit: (tabId) => set({ splitOpen: true, splitTabId: tabId }),
+  closeSplit: () => set({ splitOpen: false, splitTabId: null }),
+  setSplitTabId: (id) => set({ splitTabId: id }),
 
   getActiveTab: () => {
     const { tabs, activeTabId } = get()

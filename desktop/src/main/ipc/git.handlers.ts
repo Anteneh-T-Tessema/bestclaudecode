@@ -259,4 +259,48 @@ export function registerGitHandlers(): void {
       return ''
     }
   })
+
+  // ── Checkpoints (named git stashes with "lakoora:" prefix) ─────────────────
+
+  ipcMain.handle('git:stashCreate', async (_, { cwd, name }: { cwd: string; name: string }) => {
+    try {
+      await git(cwd, ['stash', 'push', '--include-untracked', '-m', `lakoora: ${name}`])
+      return { success: true }
+    } catch (e) {
+      return { success: false, error: (e as Error).message }
+    }
+  })
+
+  ipcMain.handle('git:stashList', async (_, cwd: string): Promise<Array<{ ref: string; name: string; age: string }>> => {
+    try {
+      const out = await git(cwd, ['stash', 'list', '--format=%gd|%cr|%s'])
+      return out.split('\n').filter(Boolean).flatMap((line) => {
+        const [ref, age, ...subjectParts] = line.split('|')
+        const subject = subjectParts.join('|')
+        const m = subject.match(/lakoora: (.+)$/)
+        if (!m) return []
+        return [{ ref: ref.trim(), name: m[1].trim(), age: age.trim() }]
+      })
+    } catch {
+      return []
+    }
+  })
+
+  ipcMain.handle('git:stashApply', async (_, { cwd, ref }: { cwd: string; ref: string }) => {
+    try {
+      await git(cwd, ['stash', 'apply', ref])
+      return { success: true }
+    } catch (e) {
+      return { success: false, error: (e as Error).message }
+    }
+  })
+
+  ipcMain.handle('git:stashDrop', async (_, { cwd, ref }: { cwd: string; ref: string }) => {
+    try {
+      await git(cwd, ['stash', 'drop', ref])
+      return { success: true }
+    } catch (e) {
+      return { success: false, error: (e as Error).message }
+    }
+  })
 }

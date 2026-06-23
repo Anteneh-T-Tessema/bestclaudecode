@@ -76,6 +76,10 @@ export function createWebApi(): API {
       stagedDiff: () => Promise.resolve(''),
       fileAtRevision: () => Promise.resolve(''),
       commitFiles: () => Promise.resolve([]),
+      stashCreate: () => Promise.resolve(notPorted('git.stashCreate', { success: false })),
+      stashList: () => Promise.resolve(notPorted('git.stashList', [] as Array<{ ref: string; name: string; age: string }>)),
+      stashApply: () => Promise.resolve(notPorted('git.stashApply', { success: false })),
+      stashDrop: () => Promise.resolve(notPorted('git.stashDrop', { success: false })),
     },
 
     ai: {
