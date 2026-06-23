@@ -30,10 +30,10 @@ const api = {
     openFile: (filters?: Electron.FileFilter[]) => ipcRenderer.invoke('fs:openFile', filters) as Promise<string | null>,
     watchDir: (p: string) => ipcRenderer.invoke('fs:watchDir', p),
     unwatchDir: (p: string) => ipcRenderer.invoke('fs:unwatchDir', p),
-    searchInFiles: (dirPath: string, query: string, caseSensitive = false) =>
-      ipcRenderer.invoke('fs:searchInFiles', { dirPath, query, caseSensitive }),
-    replaceInFiles: (dirPath: string, query: string, replacement: string, caseSensitive = false) =>
-      ipcRenderer.invoke('fs:replaceInFiles', { dirPath, query, replacement, caseSensitive }),
+    searchInFiles: (dirPath: string, query: string, caseSensitive = false, regex = false) =>
+      ipcRenderer.invoke('fs:searchInFiles', { dirPath, query, caseSensitive, regex }),
+    replaceInFiles: (dirPath: string, query: string, replacement: string, caseSensitive = false, regex = false) =>
+      ipcRenderer.invoke('fs:replaceInFiles', { dirPath, query, replacement, caseSensitive, regex }),
     onFileChange: (cb: (e: { eventType: string; filename: string; dirPath: string }) => void) => {
       const handler = (_: Electron.IpcRendererEvent, data: { eventType: string; filename: string; dirPath: string }) => cb(data)
       ipcRenderer.on('fs:change', handler)

@@ -39,8 +39,8 @@ export function createWebApi(): API {
       openFile: () => Promise.resolve(notPorted('fs.openFile', null)),
       watchDir: () => Promise.resolve(notPorted('fs.watchDir', undefined)),
       unwatchDir: () => Promise.resolve(notPorted('fs.unwatchDir', undefined)),
-      searchInFiles: () => Promise.resolve(notPorted('fs.searchInFiles', [])),
-      replaceInFiles: () => Promise.resolve(notPorted('fs.replaceInFiles', { filesChanged: 0, replacements: 0 })),
+      searchInFiles: (p, q, cs, rx) => socket.invoke('fs:searchInFiles', { dirPath: p, query: q, caseSensitive: cs ?? false, regex: rx ?? false }),
+      replaceInFiles: (p, q, r, cs, rx) => socket.invoke('fs:replaceInFiles', { dirPath: p, query: q, replacement: r, caseSensitive: cs ?? false, regex: rx ?? false }),
       onFileChange: () => () => {},
     },
 

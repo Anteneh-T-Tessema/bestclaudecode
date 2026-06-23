@@ -127,14 +127,20 @@ export function registerFsHandlers(): void {
   })
 
   ipcMain.handle('fs:searchInFiles', async (_, {
-    dirPath, query, caseSensitive,
-  }: { dirPath: string; query: string; caseSensitive: boolean }) => {
+    dirPath, query, caseSensitive, regex: useRegex = false,
+  }: { dirPath: string; query: string; caseSensitive: boolean; regex?: boolean }) => {
     assertInProject(dirPath)
     if (!query.trim()) return []
     const IGNORE = new Set(['.git', 'node_modules', 'dist', 'out', '__pycache__', '.next', 'build', 'coverage'])
     const IGNORE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.ico', '.icns', '.lock', '.map', '.woff', '.woff2', '.ttf', '.eot'])
     const results: { file: string; line: number; text: string; matchStart: number; matchEnd: number }[] = []
     const MAX_RESULTS = 200
+
+    let searchRegex: RegExp | null = null
+    if (useRegex) {
+      try { searchRegex = new RegExp(query, caseSensitive ? 'g' : 'gi') }
+      catch { return [] }
+    }
 
     async function walk(dir: string) {
       if (results.length >= MAX_RESULTS) return
@@ -152,19 +158,22 @@ export function registerFsHandlers(): void {
           try {
             const content = await fs.readFile(fullPath, 'utf-8')
             const lines = content.split('\n')
-            const searchQuery = caseSensitive ? query : query.toLowerCase()
             for (let i = 0; i < lines.length && results.length < MAX_RESULTS; i++) {
               const lineText = lines[i]
-              const searchText = caseSensitive ? lineText : lineText.toLowerCase()
-              const idx = searchText.indexOf(searchQuery)
-              if (idx !== -1) {
-                results.push({
-                  file: fullPath,
-                  line: i + 1,
-                  text: lineText.slice(0, 200),
-                  matchStart: idx,
-                  matchEnd: idx + query.length,
-                })
+              if (searchRegex) {
+                searchRegex.lastIndex = 0
+                let m: RegExpExecArray | null
+                while ((m = searchRegex.exec(lineText)) !== null && results.length < MAX_RESULTS) {
+                  results.push({ file: fullPath, line: i + 1, text: lineText.slice(0, 200), matchStart: m.index, matchEnd: m.index + m[0].length })
+                  if (m[0].length === 0) searchRegex.lastIndex++
+                }
+              } else {
+                const searchQuery = caseSensitive ? query : query.toLowerCase()
+                const searchText = caseSensitive ? lineText : lineText.toLowerCase()
+                const idx = searchText.indexOf(searchQuery)
+                if (idx !== -1) {
+                  results.push({ file: fullPath, line: i + 1, text: lineText.slice(0, 200), matchStart: idx, matchEnd: idx + query.length })
+                }
               }
             }
           } catch { /* binary or unreadable */ }
@@ -177,14 +186,17 @@ export function registerFsHandlers(): void {
   })
 
   ipcMain.handle('fs:replaceInFiles', async (_, {
-    dirPath, query, replacement, caseSensitive,
-  }: { dirPath: string; query: string; replacement: string; caseSensitive: boolean }) => {
+    dirPath, query, replacement, caseSensitive, regex: useRegex = false,
+  }: { dirPath: string; query: string; replacement: string; caseSensitive: boolean; regex?: boolean }) => {
     assertInProject(dirPath)
     let filesChanged = 0
     let replacements = 0
     const flags = caseSensitive ? 'g' : 'gi'
     let regex: RegExp
-    try { regex = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags) }
+    try {
+      const pattern = useRegex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      regex = new RegExp(pattern, flags)
+    }
     catch { return { filesChanged: 0, replacements: 0 } }
 
     async function walk(dir: string) {

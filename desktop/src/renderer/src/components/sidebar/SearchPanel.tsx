@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Search, CaseSensitive, ChevronRight, FileText, Replace } from 'lucide-react'
+import { Search, CaseSensitive, ChevronRight, FileText, Replace, Regex } from 'lucide-react'
 import { useSettingsStore } from '../../store/useSettingsStore'
 import { useEditorStore } from '../../store/useEditorStore'
 import { toast } from '../../store/useToastStore'
@@ -66,6 +66,8 @@ export function SearchPanel() {
   const [replacement, setReplacement] = useState('')
   const [replaceOpen, setReplaceOpen] = useState(false)
   const [caseSensitive, setCaseSensitive] = useState(false)
+  const [useRegex, setUseRegex] = useState(false)
+  const [regexError, setRegexError] = useState<string | null>(null)
   const [results, setResults] = useState<Match[]>([])
   const [searching, setSearching] = useState(false)
   const [replacing, setReplacing] = useState(false)
@@ -78,16 +80,23 @@ export function SearchPanel() {
     inputRef.current?.focus()
   }, [])
 
+  const validateRegex = useCallback((q: string, rx: boolean): boolean => {
+    if (!rx || !q) { setRegexError(null); return true }
+    try { new RegExp(q); setRegexError(null); return true }
+    catch (e) { setRegexError((e as Error).message); return false }
+  }, [])
+
   const runSearch = useCallback(
-    (q: string, cs: boolean) => {
+    (q: string, cs: boolean, rx: boolean) => {
       if (!q.trim() || !projectPath) {
         setResults([])
         setSearched(false)
         return
       }
+      if (!validateRegex(q, rx)) return
       setSearching(true)
       window.api.fs
-        .searchInFiles(projectPath, q, cs)
+        .searchInFiles(projectPath, q, cs, rx)
         .then((r) => {
           setResults(r)
           setSearched(true)
@@ -98,19 +107,29 @@ export function SearchPanel() {
         })
         .finally(() => setSearching(false))
     },
-    [projectPath]
+    [projectPath, validateRegex]
   )
 
   const handleChange = (val: string) => {
     setQuery(val)
     if (debounceRef.current) clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => runSearch(val, caseSensitive), 400)
+    if (useRegex) validateRegex(val, true)
+    debounceRef.current = setTimeout(() => runSearch(val, caseSensitive, useRegex), 400)
   }
 
   const toggleCase = () => {
     const next = !caseSensitive
     setCaseSensitive(next)
-    if (query) runSearch(query, next)
+    if (query) runSearch(query, next, useRegex)
+  }
+
+  const toggleRegex = () => {
+    const next = !useRegex
+    setUseRegex(next)
+    setRegexError(null)
+    if (query) {
+      if (validateRegex(query, next)) runSearch(query, caseSensitive, next)
+    }
   }
 
   const openMatch = async (m: Match) => {
@@ -126,7 +145,7 @@ export function SearchPanel() {
     if (!query.trim() || !projectPath) return
     setReplacing(true)
     try {
-      const result = await window.api.fs.replaceInFiles(projectPath, query, replacement, caseSensitive)
+      const result = await window.api.fs.replaceInFiles(projectPath, query, replacement, caseSensitive, useRegex)
       toast.success(
         `Replaced ${result.replacements} occurrence${result.replacements !== 1 ? 's' : ''} in ${result.filesChanged} file${result.filesChanged !== 1 ? 's' : ''}`
       )
@@ -176,13 +195,13 @@ export function SearchPanel() {
             value={query}
             onChange={(e) => handleChange(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') runSearch(query, caseSensitive)
+              if (e.key === 'Enter') runSearch(query, caseSensitive, useRegex)
             }}
-            placeholder="Search in files…"
+            placeholder={useRegex ? 'Search regex…' : 'Search in files…'}
             style={{
               flex: 1,
               background: surface.raised,
-              border: `1px solid ${border[0]}`,
+              border: `1px solid ${regexError ? accent.red.fg : border[0]}`,
               borderRadius: 3,
               outline: 'none',
               fontSize: 12,
@@ -211,6 +230,25 @@ export function SearchPanel() {
           </button>
           <button
             type="button"
+            onClick={toggleRegex}
+            title="Use regular expression"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 26,
+              height: 26,
+              borderRadius: 3,
+              border: 'none',
+              cursor: 'pointer',
+              background: useRegex ? accent.cyan.border : surface.overlay,
+              color: useRegex ? accent.cyan.bright : fg[3],
+            }}
+          >
+            <Regex size={13} />
+          </button>
+          <button
+            type="button"
             onClick={() => setReplaceOpen((r) => !r)}
             title="Toggle replace"
             style={{
@@ -229,6 +267,12 @@ export function SearchPanel() {
             <Replace size={13} />
           </button>
         </div>
+
+        {regexError && (
+          <div style={{ padding: '2px 10px 6px', fontSize: 10, color: accent.red.fg, lineHeight: 1.4 }}>
+            {regexError}
+          </div>
+        )}
 
         {replaceOpen && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 10px 8px' }}>
