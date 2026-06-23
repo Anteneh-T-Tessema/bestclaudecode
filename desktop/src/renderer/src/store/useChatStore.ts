@@ -84,6 +84,8 @@ interface ChatStore {
   isStreaming: boolean
   streamingId: string | null
   activeStreamId: string | null
+  composerMode: boolean
+  setComposerMode: (on: boolean) => void
 
   // Session management
   createSession: () => string
@@ -103,13 +105,15 @@ interface ChatStore {
 
 const initial = loadInitialState()
 
-export const useChatStore = create<ChatStore>((set, get) => ({
+export const useChatStore = create<ChatStore>((set) => ({
   sessions: initial.sessions,
   activeSessionId: initial.activeSessionId,
   activeModel: 'claude-sonnet-4-6',
   isStreaming: false,
   streamingId: null,
   activeStreamId: null,
+  composerMode: false,
+  setComposerMode: (on) => set({ composerMode: on }),
 
   createSession: () => {
     const session = makeSession()

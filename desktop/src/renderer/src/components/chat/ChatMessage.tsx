@@ -1,7 +1,10 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import type { ChatMessage as ChatMessageType } from '../../store/useChatStore'
+import { useChatStore } from '../../store/useChatStore'
+import { useEditorStore } from '../../store/useEditorStore'
+import { useSettingsStore } from '../../store/useSettingsStore'
 import { surface, border, fg, accent } from '../../design'
-import { Bot, User, Copy, Check } from 'lucide-react'
+import { Bot, User, Copy, Check, Zap } from 'lucide-react'
 import {
   parseEditBlocks,
   stripEditBlocks,
@@ -14,6 +17,7 @@ import { EditProposalCard } from './EditProposalCard'
 import { MultiFileEditCard } from './MultiFileEditCard'
 import { RunProposalCard } from './RunProposalCard'
 import { BrowseProposalCard } from './BrowseProposalCard'
+import { toast } from '../../store/useToastStore'
 
 
 interface ChatMessageProps {
@@ -24,7 +28,39 @@ interface ChatMessageProps {
 export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
   const [hovered, setHovered] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [autoApplied, setAutoApplied] = useState(false)
+  const composerMode = useChatStore((s) => s.composerMode)
+  const openFile = useEditorStore((s) => s.openFile)
+  const updateContent = useEditorStore((s) => s.updateContent)
+  const tabs = useEditorStore((s) => s.tabs)
+  const projectPath = useSettingsStore((s) => s.projectPath)
+  const prevStreaming = useRef(isStreaming)
   const isUser = message.role === 'user'
+
+  // Composer auto-apply: when streaming finishes + composerMode is on, write all edit blocks
+  useEffect(() => {
+    if (prevStreaming.current && !isStreaming && composerMode && !autoApplied && !isUser) {
+      const blocks = parseEditBlocks(message.content)
+      if (blocks.length > 0) {
+        void (async () => {
+          let applied = 0
+          for (const block of blocks) {
+            const absPath = block.path.startsWith('/') ? block.path : `${projectPath}/${block.path}`
+            try {
+              await window.api.fs.writeFile(absPath, block.content)
+              const tab = tabs.find((t) => t.filePath === absPath)
+              if (tab) updateContent(tab.id, block.content)
+              else openFile(absPath, block.content)
+              applied++
+            } catch {}
+          }
+          if (applied > 0) toast.success(`Composer: auto-applied ${applied} file${applied !== 1 ? 's' : ''}`)
+          setAutoApplied(true)
+        })()
+      }
+    }
+    prevStreaming.current = isStreaming
+  }, [isStreaming])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const copyToClipboard = () => {
     navigator.clipboard.writeText(message.content).then(() => {
@@ -162,7 +198,12 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
         </div>
         <div style={{ fontSize: 13, color: fg[0], lineHeight: 1.55, wordBreak: 'break-word' }}>
           {renderContent(proseContent)}
-          {editBlocks.length > 1 ? (
+          {autoApplied && editBlocks.length > 0 ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 10px', background: accent.violet.subtle, border: `1px solid ${accent.violet.border}`, borderRadius: 6, margin: '6px 0', fontSize: 11, color: accent.violet.fg }}>
+              <Zap size={11} />
+              Composer auto-applied {editBlocks.length} file{editBlocks.length !== 1 ? 's' : ''}
+            </div>
+          ) : editBlocks.length > 1 ? (
             <MultiFileEditCard blocks={editBlocks} />
           ) : editBlocks.length === 1 ? (
             <EditProposalCard

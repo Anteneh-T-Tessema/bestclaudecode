@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { Files, GitBranch, Search, MessageSquare, ShieldCheck, Settings, Brain, Radar, ListTodo, BookOpen, Bot, Bug, ListTree, StickyNote } from 'lucide-react'
 import { useAppStore, type ActivityId } from '../store/useAppStore'
 import { IconButton, Tooltip, accent, surface, border, type AccentName } from '../design'
@@ -74,6 +75,17 @@ function ActivityButton({
 
 export function ActivityBar() {
   const { activeActivity, setActiveActivity } = useAppStore()
+  const [agentRunning, setAgentRunning] = useState(false)
+
+  useEffect(() => {
+    window.api.agent.getActiveSession().then((id) => setAgentRunning(!!id))
+    const off = window.api.agent.onProgress((raw: unknown) => {
+      const p = raw as { status: string }
+      if (p.status === 'running' || p.status === 'retrying') setAgentRunning(true)
+      if (p.status === 'finished' || p.status === 'blocked' || p.status === 'error') setAgentRunning(false)
+    })
+    return off
+  }, [])
 
   return (
     <div
@@ -93,12 +105,23 @@ export function ActivityBar() {
     >
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
         {ACTIVITIES.map((activity) => (
-          <ActivityButton
-            key={activity.id}
-            activity={activity}
-            isActive={activeActivity === activity.id}
-            onClick={() => setActiveActivity(activity.id)}
-          />
+          <div key={activity.id} style={{ position: 'relative' }}>
+            <ActivityButton
+              activity={activity}
+              isActive={activeActivity === activity.id}
+              onClick={() => setActiveActivity(activity.id)}
+            />
+            {activity.id === 'agent' && agentRunning && (
+              <span style={{
+                position: 'absolute', top: 4, right: 4,
+                width: 7, height: 7, borderRadius: '50%',
+                background: accent.amber.fg,
+                boxShadow: `0 0 6px ${accent.amber.fg}`,
+                animation: 'pulse 1.2s ease-in-out infinite',
+                pointerEvents: 'none',
+              }} />
+            )}
+          </div>
         ))}
       </div>
 

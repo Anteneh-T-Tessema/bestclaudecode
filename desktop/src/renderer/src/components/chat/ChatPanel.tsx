@@ -4,7 +4,7 @@ import { ChatMessage } from './ChatMessage'
 import { ChatInput } from './ChatInput'
 import { ModelSelector } from './ModelSelector'
 import { surface, border, fg, accent } from '../../design'
-import { Trash2, FlaskConical, Loader2, RotateCcw, Plus, X } from 'lucide-react'
+import { Trash2, FlaskConical, Loader2, RotateCcw, Plus, X, Zap } from 'lucide-react'
 
 export function ChatPanel() {
   const sessions = useChatStore((s) => s.sessions)
@@ -14,6 +14,8 @@ export function ChatPanel() {
   const switchSession = useChatStore((s) => s.switchSession)
   const streamingId = useChatStore((s) => s.streamingId)
   const clearMessages = useChatStore((s) => s.clearMessages)
+  const composerMode = useChatStore((s) => s.composerMode)
+  const setComposerMode = useChatStore((s) => s.setComposerMode)
   const addUserMessage = useChatStore((s) => s.addUserMessage)
   const startAssistantMessage = useChatStore((s) => s.startAssistantMessage)
   const appendDelta = useChatStore((s) => s.appendDelta)
@@ -160,6 +162,27 @@ export function ChatPanel() {
           }}
         >
           <Plus size={13} />
+        </button>
+        <button
+          type="button"
+          onClick={() => setComposerMode(!composerMode)}
+          title={composerMode ? 'Composer mode: edits auto-apply (click to disable)' : 'Enable Composer mode — edits apply automatically'}
+          style={{
+            background: composerMode ? accent.violet.subtle : 'none',
+            border: composerMode ? `1px solid ${accent.violet.border}` : 'none',
+            borderRadius: 4,
+            cursor: 'pointer',
+            color: composerMode ? accent.violet.fg : fg[3],
+            padding: '2px 6px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 3,
+            fontSize: 9,
+            fontWeight: composerMode ? 700 : 400,
+          }}
+        >
+          <Zap size={11} />
+          {composerMode && 'Auto'}
         </button>
         <button
           type="button"

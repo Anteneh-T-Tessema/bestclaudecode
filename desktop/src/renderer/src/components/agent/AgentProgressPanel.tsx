@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Bot, Square, CheckCircle2, AlertCircle, Loader, CircleDot } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Bot, Square, CheckCircle2, AlertCircle, Loader, CircleDot, Play } from 'lucide-react'
 import { PanelHeader, accent, border, fg, surface } from '../../design'
 import { toast } from '../../store/useToastStore'
+import { useChatStore } from '../../store/useChatStore'
 
 interface AgentProgress {
   sessionId: string
@@ -28,13 +29,21 @@ function StatusIcon({ status }: { status: AgentProgress['status'] }) {
 export function AgentProgressPanel() {
   const [events, setEvents] = useState<EventEntry[]>([])
   const [isRunning, setIsRunning] = useState(false)
+  const [goal, setGoal] = useState('')
+  const [launching, setLaunching] = useState(false)
+  const activeModel = useChatStore((s) => s.activeModel)
+  const goalRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     const off = window.api.agent.onProgress((raw: unknown) => {
       const p = raw as AgentProgress
       setEvents((prev) => [...prev.slice(-99), { ...p, ts: Date.now() }])
       if (p.status === 'running' || p.status === 'retrying') setIsRunning(true)
-      if (p.status === 'finished' || p.status === 'blocked' || p.status === 'error') setIsRunning(false)
+      if (p.status === 'finished' || p.status === 'blocked' || p.status === 'error') {
+        setIsRunning(false)
+        if (p.status === 'finished') toast.success('Background agent finished all subtasks')
+        if (p.status === 'error') toast.error(`Agent error: ${p.error ?? 'unknown'}`)
+      }
     })
 
     window.api.agent.getActiveSession().then((id) => setIsRunning(!!id))
@@ -49,6 +58,27 @@ export function AgentProgressPanel() {
   }, [])
 
   const clear = useCallback(() => setEvents([]), [])
+
+  const launch = useCallback(async () => {
+    const trimmed = goal.trim()
+    if (!trimmed || isRunning || launching) return
+    setLaunching(true)
+    try {
+      const detail = await window.api.taskPlanner.create(trimmed)
+      if (!detail?.slug) { toast.error('Failed to create plan'); return }
+      const plans = await window.api.taskPlanner.list()
+      const summary = plans.find((p) => p.slug === detail.slug)
+      if (!summary?.path) { toast.error('Could not locate plan file'); return }
+      await window.api.agent.startAutonomous({ planFile: summary.path, model: activeModel })
+      setGoal('')
+      setIsRunning(true)
+      toast.success('Background agent started')
+    } catch (err) {
+      toast.error(`Launch failed: ${(err as Error).message}`)
+    } finally {
+      setLaunching(false)
+    }
+  }, [goal, isRunning, launching, activeModel])
 
   const latest = events.length > 0 ? events[events.length - 1] : null
 
@@ -89,6 +119,42 @@ export function AgentProgressPanel() {
           </div>
         }
       />
+
+      {/* Goal input — launch a new background agent */}
+      {!isRunning && (
+        <div style={{ padding: '8px 10px', borderBottom: `1px solid ${border[1]}`, flexShrink: 0, background: surface.base }}>
+          <div style={{ fontSize: 10, color: fg[4], marginBottom: 4, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+            New background agent
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <input
+              ref={goalRef}
+              value={goal}
+              onChange={(e) => setGoal(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') launch() }}
+              placeholder="Describe a long-horizon goal…"
+              style={{
+                flex: 1, background: surface.raised, border: `1px solid ${border[0]}`,
+                borderRadius: 5, padding: '5px 8px', fontSize: 11, color: fg[0], outline: 'none',
+              }}
+            />
+            <button
+              type="button"
+              onClick={launch}
+              disabled={!goal.trim() || launching}
+              style={{
+                background: goal.trim() && !launching ? accent.violet.fg : surface.raised,
+                border: 'none', borderRadius: 5, padding: '5px 10px', cursor: goal.trim() && !launching ? 'pointer' : 'not-allowed',
+                color: goal.trim() && !launching ? '#fff' : fg[4],
+                display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, flexShrink: 0,
+              }}
+            >
+              {launching ? <Loader size={11} style={{ animation: 'spin 1s linear infinite' }} /> : <Play size={11} />}
+              {launching ? 'Launching…' : 'Run'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Current status banner */}
       {latest && (
