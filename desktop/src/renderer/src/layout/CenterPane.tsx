@@ -7,6 +7,7 @@ import { MonacoEditor } from '../components/editor/MonacoEditor'
 import { InlineAIEdit } from '../components/editor/InlineAIEdit'
 import { GoToLine } from '../components/editor/GoToLine'
 import { DiffViewer } from '../components/editor/DiffViewer'
+import { Breadcrumb } from '../components/editor/Breadcrumb'
 import { surface } from '../design'
 
 export function CenterPane() {
@@ -33,6 +34,7 @@ export function CenterPane() {
       ) : (
         <>
           <EditorTabs />
+          <Breadcrumb />
           <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
             {activeTabId && <MonacoEditor tabId={activeTabId} />}
             {inlineEditOpen && <InlineAIEdit />}
