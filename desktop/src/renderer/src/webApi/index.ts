@@ -72,6 +72,8 @@ export function createWebApi(): API {
       blame: () => Promise.resolve([]),
       show: () => Promise.resolve(''),
       diffFile: () => Promise.resolve(''),
+      fileAtRevision: () => Promise.resolve(''),
+      commitFiles: () => Promise.resolve([]),
     },
 
     ai: {

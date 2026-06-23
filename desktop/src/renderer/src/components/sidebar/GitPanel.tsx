@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { DiffEditor } from '@monaco-editor/react'
-import { GitBranch, RefreshCw, Plus, GitCommit, Clock, CheckCircle, Minus, AlertCircle, X, ArrowUp, ArrowDown } from 'lucide-react'
+import { GitBranch, RefreshCw, Plus, GitCommit, Clock, CheckCircle, Minus, AlertCircle, X, ArrowUp, ArrowDown, ChevronRight, FileText } from 'lucide-react'
 import { useSettingsStore } from '../../store/useSettingsStore'
 import { useAppStore } from '../../store/useAppStore'
 import { toast } from '../../store/useToastStore'
@@ -18,6 +18,7 @@ function languageFromPath(p: string): string {
 
 interface FileEntry { status: string; path: string; staged: boolean }
 interface LogEntry { hash: string; message: string }
+interface CommitFile { status: string; path: string; oldPath?: string }
 
 function statusLabel(s: string): { label: string; color: string } {
   if (s === 'M' || s === 'MM') return { label: 'M', color: accent.amber.fg }
@@ -113,6 +114,10 @@ export function GitPanel() {
   const [diffFile, setDiffFile] = useState<FileEntry | null>(null)
   const [diffData, setDiffData] = useState<{ original: string; modified: string } | null>(null)
   const [diffLoading, setDiffLoading] = useState(false)
+  const [diffTitle, setDiffTitle] = useState<string | null>(null)
+  const [expandedCommit, setExpandedCommit] = useState<string | null>(null)
+  const [commitFileMap, setCommitFileMap] = useState<Record<string, CommitFile[]>>({})
+  const [commitFilesLoading, setCommitFilesLoading] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     if (!projectPath) return
@@ -234,6 +239,7 @@ export function GitPanel() {
   const openDiff = useCallback(async (entry: FileEntry) => {
     if (!projectPath) return
     setDiffFile(entry)
+    setDiffTitle(null)
     setDiffData(null)
     setDiffLoading(true)
     try {
@@ -242,6 +248,42 @@ export function GitPanel() {
       const [original, modified] = await Promise.all([
         window.api.git.show(projectPath, relPath).catch(() => ''),
         window.api.fs.readFile(absPath).catch(() => ''),
+      ])
+      setDiffData({ original, modified })
+    } finally {
+      setDiffLoading(false)
+    }
+  }, [projectPath])
+
+  const toggleCommit = useCallback(async (hash: string) => {
+    if (expandedCommit === hash) {
+      setExpandedCommit(null)
+      return
+    }
+    setExpandedCommit(hash)
+    if (commitFileMap[hash]) return
+    if (!projectPath) return
+    setCommitFilesLoading(hash)
+    try {
+      const files = await window.api.git.commitFiles(projectPath, hash)
+      setCommitFileMap((m) => ({ ...m, [hash]: files as CommitFile[] }))
+    } finally {
+      setCommitFilesLoading(null)
+    }
+  }, [expandedCommit, commitFileMap, projectPath])
+
+  const openCommitDiff = useCallback(async (hash: string, file: CommitFile) => {
+    if (!projectPath) return
+    const relPath = file.oldPath ?? file.path
+    const pseudoEntry: FileEntry = { status: file.status, path: file.path, staged: true }
+    setDiffFile(pseudoEntry)
+    setDiffTitle(`${hash.slice(0, 7)} · ${file.path.split('/').pop()}`)
+    setDiffData(null)
+    setDiffLoading(true)
+    try {
+      const [original, modified] = await Promise.all([
+        window.api.git.fileAtRevision(projectPath, `${hash}^`, relPath).catch(() => ''),
+        window.api.git.fileAtRevision(projectPath, hash, file.path).catch(() => ''),
       ])
       setDiffData({ original, modified })
     } finally {
@@ -496,36 +538,80 @@ export function GitPanel() {
           {log.length > 0 && (
             <div>
               <SectionLabel>Recent Commits</SectionLabel>
-              {log.map((entry) => (
-                <div
-                  key={entry.hash}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: 8,
-                    padding: '5px 12px',
-                    borderBottom: `1px solid ${border[2]}`,
-                  }}
-                >
-                  <Clock style={{ width: 10, height: 10, color: fg[4], flexShrink: 0, marginTop: 1 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
+              {log.map((entry) => {
+                const isExpanded = expandedCommit === entry.hash
+                const cFiles = commitFileMap[entry.hash]
+                const isLoadingFiles = commitFilesLoading === entry.hash
+                return (
+                  <div key={entry.hash} style={{ borderBottom: `1px solid ${border[2]}` }}>
                     <div
+                      onClick={() => void toggleCommit(entry.hash)}
                       style={{
-                        fontSize: 11,
-                        color: fg[1],
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: 6,
+                        padding: '5px 10px',
+                        cursor: 'pointer',
+                        background: isExpanded ? surface.overlay : 'transparent',
                       }}
                     >
-                      {entry.message}
+                      <ChevronRight
+                        style={{
+                          width: 11,
+                          height: 11,
+                          color: fg[4],
+                          flexShrink: 0,
+                          marginTop: 1,
+                          transform: isExpanded ? 'rotate(90deg)' : 'none',
+                          transition: 'transform 0.12s',
+                        }}
+                      />
+                      <Clock style={{ width: 10, height: 10, color: fg[4], flexShrink: 0, marginTop: 2 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 11, color: fg[1], overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {entry.message}
+                        </div>
+                        <div style={{ fontSize: 9, color: fg[4], fontFamily: 'monospace', marginTop: 1 }}>
+                          {entry.hash.slice(0, 7)}
+                        </div>
+                      </div>
                     </div>
-                    <div style={{ fontSize: 9, color: fg[4], fontFamily: 'monospace', marginTop: 1 }}>
-                      {entry.hash.slice(0, 7)}
-                    </div>
+
+                    {isExpanded && (
+                      <div style={{ paddingLeft: 28 }}>
+                        {isLoadingFiles && (
+                          <div style={{ padding: '4px 12px', fontSize: 10, color: fg[3] }}>Loading files…</div>
+                        )}
+                        {cFiles?.map((cf) => {
+                          const { label, color } = statusLabel(cf.status)
+                          const isActive = diffFile?.path === cf.path && diffTitle?.startsWith(entry.hash.slice(0, 7))
+                          return (
+                            <div
+                              key={cf.path}
+                              onClick={() => void openCommitDiff(entry.hash, cf)}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                padding: '3px 10px 3px 4px',
+                                cursor: 'pointer',
+                                background: isActive ? accent.amber.subtle : 'transparent',
+                                borderLeft: isActive ? `2px solid ${accent.amber.fg}` : '2px solid transparent',
+                              }}
+                            >
+                              <FileText style={{ width: 10, height: 10, color: fg[4], flexShrink: 0 }} />
+                              <span style={{ fontSize: 10, color, flexShrink: 0, fontFamily: 'monospace', fontWeight: 700 }}>{label}</span>
+                              <span style={{ fontSize: 11, color: fg[1], flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {cf.path.split('/').pop()}
+                              </span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
 
@@ -581,11 +667,11 @@ export function GitPanel() {
                   whiteSpace: 'nowrap',
                 }}
               >
-                {diffFile.path}
+                {diffTitle ?? diffFile.path}
               </span>
               <button
                 type="button"
-                onClick={() => { setDiffFile(null); setDiffData(null) }}
+                onClick={() => { setDiffFile(null); setDiffData(null); setDiffTitle(null) }}
                 title="Close diff"
                 style={{
                   background: 'none',

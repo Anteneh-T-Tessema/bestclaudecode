@@ -89,6 +89,10 @@ const api = {
       ipcRenderer.invoke('git:show', { cwd, relPath }),
     diffFile: (cwd: string, relPath: string, staged: boolean): Promise<string> =>
       ipcRenderer.invoke('git:diffFile', { cwd, relPath, staged }),
+    fileAtRevision: (cwd: string, rev: string, relPath: string): Promise<string> =>
+      ipcRenderer.invoke('git:fileAtRevision', { cwd, rev, relPath }),
+    commitFiles: (cwd: string, hash: string): Promise<Array<{ status: string; path: string; oldPath?: string }>> =>
+      ipcRenderer.invoke('git:commitFiles', { cwd, hash }),
   },
 
   // ── AI Chat (streaming) ────────────────────────────────────────────────────

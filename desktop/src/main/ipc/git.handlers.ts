@@ -203,6 +203,32 @@ export function registerGitHandlers(): void {
     }
   })
 
+  // Returns the content of a file at an arbitrary revision (empty on error).
+  ipcMain.handle('git:fileAtRevision', async (_, { cwd, rev, relPath }: { cwd: string; rev: string; relPath: string }): Promise<string> => {
+    try {
+      return await git(cwd, ['show', `${rev}:${relPath}`])
+    } catch {
+      return ''
+    }
+  })
+
+  // Lists files changed in a commit: [{ status, path, newPath? }]
+  ipcMain.handle('git:commitFiles', async (_, { cwd, hash }: { cwd: string; hash: string }) => {
+    try {
+      const out = await git(cwd, ['diff-tree', '--no-commit-id', '-r', '--name-status', hash])
+      return out.split('\n').filter(Boolean).map((line) => {
+        const parts = line.split('\t')
+        const status = parts[0].charAt(0)
+        if (status === 'R' && parts[2]) {
+          return { status: 'R', path: parts[2], oldPath: parts[1] }
+        }
+        return { status, path: parts[1] }
+      })
+    } catch {
+      return []
+    }
+  })
+
   // Returns the unified diff for a file (staged diff uses --cached).
   ipcMain.handle('git:diffFile', async (_, { cwd, relPath, staged }: { cwd: string; relPath: string; staged: boolean }): Promise<string> => {
     try {
