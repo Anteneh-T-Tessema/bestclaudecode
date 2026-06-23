@@ -8,7 +8,8 @@ import { useProblemsStore } from '../../store/useProblemsStore'
 import { useDebugStore } from '../../store/useDebugStore'
 import { toast } from '../../store/useToastStore'
 
-const LAKOORA_THEME_ID = 'lakoora-dark'
+const LAKOORA_DARK_ID = 'lakoora-dark'
+const LAKOORA_LIGHT_ID = 'lakoora-light'
 
 function fileToUri(filePath: string): string {
   return `file://${filePath}`
@@ -237,8 +238,8 @@ function registerLspProviders(monaco: Monaco, lspEntry: ReturnType<typeof resolv
 // (#rgb/#rrggbb/#rrggbbaa) — passing the design system's hsl(...) tokens throws
 // "Illegal value for token color" at mount time. These are hex equivalents of the
 // surface/fg/accent tokens used elsewhere in the app, kept in sync by hand.
-function defineLakooraDark(monaco: Monaco) {
-  monaco.editor.defineTheme(LAKOORA_THEME_ID, {
+function defineMonacoThemes(monaco: Monaco) {
+  monaco.editor.defineTheme(LAKOORA_DARK_ID, {
     base: 'vs-dark',
     inherit: true,
     rules: [
@@ -251,15 +252,15 @@ function defineLakooraDark(monaco: Monaco) {
       { token: 'variable', foreground: 'e2e8f0' },
     ],
     colors: {
-      'editor.background': '#08090c', // surface.base
-      'editor.foreground': '#f3f5f7', // fg[0]
+      'editor.background': '#08090c',
+      'editor.foreground': '#f3f5f7',
       'editor.lineHighlightBackground': '#0d0f14',
       'editorLineNumber.foreground': '#464a53',
-      'editorLineNumber.activeForeground': '#bcc0c8', // fg[1]
+      'editorLineNumber.activeForeground': '#bcc0c8',
       'editor.selectionBackground': '#123154',
       'editor.selectionHighlightBackground': '#0b1d32',
-      'editorCursor.foreground': '#368ef2', // accent.blue.fg
-      'editorGutter.background': '#08090c', // surface.base
+      'editorCursor.foreground': '#368ef2',
+      'editorGutter.background': '#08090c',
       'editorWidget.background': '#101319',
       'input.background': '#101319',
       'editorSuggestWidget.background': '#101319',
@@ -268,6 +269,39 @@ function defineLakooraDark(monaco: Monaco) {
       'list.hoverBackground': '#14171f',
       'scrollbarSlider.background': '#1d212a',
       'scrollbarSlider.hoverBackground': '#262b36',
+    },
+  })
+
+  monaco.editor.defineTheme(LAKOORA_LIGHT_ID, {
+    base: 'vs',
+    inherit: true,
+    rules: [
+      { token: 'comment', foreground: '94a3b8', fontStyle: 'italic' },
+      { token: 'keyword', foreground: '2563eb' },
+      { token: 'string', foreground: '16a34a' },
+      { token: 'number', foreground: 'd97706' },
+      { token: 'type', foreground: '0891b2' },
+      { token: 'function', foreground: '7c3aed' },
+      { token: 'variable', foreground: '1e293b' },
+    ],
+    colors: {
+      'editor.background': '#fafafa',
+      'editor.foreground': '#1a2030',
+      'editor.lineHighlightBackground': '#f1f5f9',
+      'editorLineNumber.foreground': '#94a3b8',
+      'editorLineNumber.activeForeground': '#475569',
+      'editor.selectionBackground': '#bfdbfe',
+      'editor.selectionHighlightBackground': '#dbeafe',
+      'editorCursor.foreground': '#2563eb',
+      'editorGutter.background': '#fafafa',
+      'editorWidget.background': '#ffffff',
+      'input.background': '#f8fafc',
+      'editorSuggestWidget.background': '#ffffff',
+      'editorSuggestWidget.border': '#e2e8f0',
+      'editorSuggestWidget.selectedBackground': '#eff6ff',
+      'list.hoverBackground': '#f1f5f9',
+      'scrollbarSlider.background': '#cbd5e1',
+      'scrollbarSlider.hoverBackground': '#94a3b8',
     },
   })
 }
@@ -301,6 +335,7 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
   const diffDecorationsRef = useRef<MonacoNS.editor.IEditorDecorationsCollection | null>(null)
   const lspChangeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const activeLsp = tab?.language ? resolveLsp(tab.language) : null
+  const theme = useSettingsStore((s) => s.theme)
   const toggleBreakpoint = useDebugStore((s) => s.toggleBreakpoint)
   const fileBreakpoints = useDebugStore((s) => tab ? (s.breakpoints[tab.filePath] ?? []) : [])
 
@@ -308,8 +343,8 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
     (editor: MonacoNS.editor.IStandaloneCodeEditor, monaco: Monaco) => {
       editorRef.current = editor
       monacoRef.current = monaco
-      defineLakooraDark(monaco)
-      monaco.editor.setTheme(LAKOORA_THEME_ID)
+      defineMonacoThemes(monaco)
+      monaco.editor.setTheme(useSettingsStore.getState().theme === 'light' ? LAKOORA_LIGHT_ID : LAKOORA_DARK_ID)
       registerLspProviders(monaco, activeLsp)
       registerInlineCompletionProvider(monaco)
 
@@ -419,6 +454,12 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
   useEffect(() => {
     return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current) }
   }, [tabId])
+
+  useEffect(() => {
+    const monaco = monacoRef.current
+    if (!monaco) return
+    monaco.editor.setTheme(theme === 'light' ? LAKOORA_LIGHT_ID : LAKOORA_DARK_ID)
+  }, [theme])
 
   useEffect(() => {
     if (!activeLsp || !tab) return

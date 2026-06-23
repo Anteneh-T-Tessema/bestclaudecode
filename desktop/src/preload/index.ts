@@ -39,6 +39,7 @@ const api = {
       ipcRenderer.on('fs:change', handler)
       return (): void => { ipcRenderer.removeListener('fs:change', handler) }
     },
+    findFiles: (root: string): Promise<string[]> => ipcRenderer.invoke('fs:findFiles', root),
   },
 
   // ── Terminal ───────────────────────────────────────────────────────────────

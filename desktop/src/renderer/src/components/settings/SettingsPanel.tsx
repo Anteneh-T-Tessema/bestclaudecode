@@ -1,5 +1,5 @@
-import { useState, useCallback, useEffect } from 'react'
-import { Settings, Circle, Eye, EyeOff, Check, FolderOpen } from 'lucide-react'
+import { useState, useCallback, useEffect, useRef } from 'react'
+import { Settings, Circle, Eye, EyeOff, Check, FolderOpen, Save } from 'lucide-react'
 import { PanelHeader, Button, accent, border, fg, surface } from '../../design'
 import { useSettingsStore } from '../../store/useSettingsStore'
 import { toast } from '../../store/useToastStore'
@@ -180,6 +180,7 @@ export function SettingsPanel() {
   const storeGoogleKey = useSettingsStore((s) => s.googleApiKey)
   const storeOllamaUrl = useSettingsStore((s) => s.ollamaUrl)
   const recentProjects = useSettingsStore((s) => s.recentProjects)
+  const projectPath = useSettingsStore((s) => s.projectPath)
   const saveSettings = useSettingsStore((s) => s.save)
 
   const [anthropicKey, setAnthropicKey] = useState('')
@@ -188,6 +189,12 @@ export function SettingsPanel() {
   const [ollamaUrl, setOllamaUrl] = useState('')
   const [savedField, setSavedField] = useState<string | null>(null)
 
+  // .lakoorarules editor
+  const [rules, setRules] = useState('')
+  const [rulesSaving, setRulesSaving] = useState(false)
+  const [rulesSaved, setRulesSaved] = useState(false)
+  const rulesLoadedFor = useRef<string | null>(null)
+
   useEffect(() => {
     if (!settingsLoaded) return
     setAnthropicKey(storeAnthropicKey)
@@ -195,6 +202,28 @@ export function SettingsPanel() {
     setGoogleKey(storeGoogleKey)
     setOllamaUrl(storeOllamaUrl)
   }, [settingsLoaded, storeAnthropicKey, storeOpenaiKey, storeGoogleKey, storeOllamaUrl])
+
+  useEffect(() => {
+    if (!projectPath || rulesLoadedFor.current === projectPath) return
+    rulesLoadedFor.current = projectPath
+    window.api.fs.readFile(`${projectPath}/.lakoorarules`)
+      .then((content) => setRules(content ?? ''))
+      .catch(() => setRules(''))
+  }, [projectPath])
+
+  const saveRules = async () => {
+    if (!projectPath) return
+    setRulesSaving(true)
+    try {
+      await window.api.fs.writeFile(`${projectPath}/.lakoorarules`, rules)
+      setRulesSaved(true)
+      setTimeout(() => setRulesSaved(false), 1500)
+    } catch {
+      toast.error('Failed to save .lakoorarules')
+    } finally {
+      setRulesSaving(false)
+    }
+  }
 
   const flashSaved = (field: string) => {
     setSavedField(field)
@@ -292,6 +321,68 @@ export function SettingsPanel() {
             The model used for AI Chat, inline edit (Cmd+K), and ghost-text completion. Persisted across restarts.
           </p>
           <ModelSelector />
+        </div>
+
+        <div>
+          <div style={{
+            fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+            color: fg[3], marginBottom: 8, paddingBottom: 6, borderBottom: `1px solid ${border[1]}`,
+          }}>
+            Project Rules (.lakoorarules)
+          </div>
+          <p style={{ fontSize: 10, color: fg[3], margin: '0 0 8px', lineHeight: 1.5 }}>
+            Rules injected as system context into every AI chat. Use plain text or Markdown to describe coding conventions, naming rules, or domain constraints.
+            {!projectPath && <span style={{ color: accent.amber.fg }}> Open a project to edit.</span>}
+          </p>
+          <div style={{ position: 'relative' }}>
+            <textarea
+              value={rules}
+              onChange={(e) => { setRules(e.target.value); setRulesSaved(false) }}
+              onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); void saveRules() } }}
+              disabled={!projectPath}
+              placeholder={'# Example\nAlways use TypeScript strict mode.\nPrefer named exports over default exports.\nUse functional components only.'}
+              rows={8}
+              style={{
+                width: '100%',
+                background: surface.raised,
+                border: `1px solid ${border[0]}`,
+                borderRadius: 4,
+                padding: '8px 10px',
+                fontSize: 11,
+                color: fg[0],
+                fontFamily: 'monospace',
+                lineHeight: 1.6,
+                resize: 'vertical',
+                outline: 'none',
+                boxSizing: 'border-box',
+                opacity: projectPath ? 1 : 0.5,
+              }}
+            />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
+            <button
+              type="button"
+              onClick={saveRules}
+              disabled={!projectPath || rulesSaving}
+              title="Save .lakoorarules (⌘S)"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '4px 10px',
+                fontSize: 10,
+                fontWeight: 600,
+                borderRadius: 4,
+                border: `1px solid ${rulesSaved ? accent.green.border : border[0]}`,
+                background: rulesSaved ? accent.green.subtle : surface.raised,
+                color: rulesSaved ? accent.green.fg : fg[2],
+                cursor: projectPath && !rulesSaving ? 'pointer' : 'not-allowed',
+              }}
+            >
+              <Save size={10} />
+              {rulesSaving ? 'Saving…' : rulesSaved ? 'Saved' : 'Save'}
+            </button>
+          </div>
         </div>
 
         <div>

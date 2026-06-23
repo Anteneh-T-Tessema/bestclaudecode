@@ -7,6 +7,13 @@ export interface ChatMessage {
   timestamp: number
 }
 
+export interface ChatSession {
+  id: string
+  title: string
+  messages: ChatMessage[]
+  createdAt: number
+}
+
 export const MODELS = [
   { id: 'claude-fable-5', label: 'Claude Fable 5', provider: 'anthropic' },
   { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', provider: 'anthropic' },
@@ -21,35 +28,70 @@ export const MODELS = [
 
 export type ModelId = (typeof MODELS)[number]['id']
 
-const PERSIST_KEY = 'lakoora:chat:messages'
+const SESSIONS_KEY = 'lakoora:chat:sessions'
+const LEGACY_KEY = 'lakoora:chat:messages'
 
-function loadPersistedMessages(): ChatMessage[] {
-  try {
-    const raw = localStorage.getItem(PERSIST_KEY)
-    if (!raw) return []
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? (parsed as ChatMessage[]) : []
-  } catch {
-    return []
+function makeSession(messages: ChatMessage[] = []): ChatSession {
+  return {
+    id: `session-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    title: 'New Chat',
+    messages,
+    createdAt: Date.now(),
   }
 }
 
-function persistMessages(messages: ChatMessage[]): void {
+function loadInitialState(): { sessions: ChatSession[]; activeSessionId: string } {
   try {
-    // Keep only last 100 messages to avoid localStorage bloat
-    const toSave = messages.slice(-100)
-    localStorage.setItem(PERSIST_KEY, JSON.stringify(toSave))
-  } catch {
-    // Ignore storage errors
-  }
+    const raw = localStorage.getItem(SESSIONS_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw) as { sessions: ChatSession[]; activeSessionId: string }
+      if (Array.isArray(parsed?.sessions) && parsed.sessions.length > 0) {
+        return { sessions: parsed.sessions, activeSessionId: parsed.activeSessionId ?? parsed.sessions[0].id }
+      }
+    }
+  } catch { /* ignore */ }
+
+  // Migrate legacy flat messages → single session
+  try {
+    const legacy = localStorage.getItem(LEGACY_KEY)
+    if (legacy) {
+      const msgs = JSON.parse(legacy) as ChatMessage[]
+      if (Array.isArray(msgs) && msgs.length > 0) {
+        const session = makeSession(msgs.slice(-100))
+        if (msgs[0]?.content) session.title = msgs[0].content.slice(0, 40)
+        localStorage.removeItem(LEGACY_KEY)
+        const result = { sessions: [session], activeSessionId: session.id }
+        localStorage.setItem(SESSIONS_KEY, JSON.stringify(result))
+        return result
+      }
+    }
+  } catch { /* ignore */ }
+
+  const session = makeSession()
+  return { sessions: [session], activeSessionId: session.id }
+}
+
+function persist(sessions: ChatSession[], activeSessionId: string) {
+  try {
+    localStorage.setItem(SESSIONS_KEY, JSON.stringify({ sessions, activeSessionId }))
+  } catch { /* ignore */ }
 }
 
 interface ChatStore {
-  messages: ChatMessage[]
+  sessions: ChatSession[]
+  activeSessionId: string
   activeModel: ModelId
   isStreaming: boolean
   streamingId: string | null
   activeStreamId: string | null
+
+  // Session management
+  createSession: () => string
+  deleteSession: (id: string) => void
+  switchSession: (id: string) => void
+  renameSession: (id: string, title: string) => void
+
+  // Message actions (operate on active session)
   addUserMessage: (content: string) => string
   startAssistantMessage: () => string
   appendDelta: (id: string, delta: string) => void
@@ -59,20 +101,69 @@ interface ChatStore {
   setActiveModel: (model: ModelId) => void
 }
 
-export const useChatStore = create<ChatStore>((set) => ({
-  messages: loadPersistedMessages(),
+const initial = loadInitialState()
+
+export const useChatStore = create<ChatStore>((set, get) => ({
+  sessions: initial.sessions,
+  activeSessionId: initial.activeSessionId,
   activeModel: 'claude-sonnet-4-6',
   isStreaming: false,
   streamingId: null,
   activeStreamId: null,
 
+  createSession: () => {
+    const session = makeSession()
+    set((s) => {
+      const sessions = [...s.sessions, session]
+      persist(sessions, session.id)
+      return { sessions, activeSessionId: session.id }
+    })
+    return session.id
+  },
+
+  deleteSession: (id) => {
+    set((s) => {
+      const sessions = s.sessions.filter((sess) => sess.id !== id)
+      if (sessions.length === 0) {
+        const fresh = makeSession()
+        sessions.push(fresh)
+      }
+      const activeSessionId = s.activeSessionId === id ? sessions[sessions.length - 1].id : s.activeSessionId
+      persist(sessions, activeSessionId)
+      return { sessions, activeSessionId }
+    })
+  },
+
+  switchSession: (id) => {
+    set((s) => {
+      persist(s.sessions, id)
+      return { activeSessionId: id, isStreaming: false, streamingId: null, activeStreamId: null }
+    })
+  },
+
+  renameSession: (id, title) => {
+    set((s) => {
+      const sessions = s.sessions.map((sess) => sess.id === id ? { ...sess, title } : sess)
+      persist(sessions, s.activeSessionId)
+      return { sessions }
+    })
+  },
+
   addUserMessage: (content) => {
     const id = `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`
     const msg: ChatMessage = { id, role: 'user', content, timestamp: Date.now() }
     set((s) => {
-      const messages = [...s.messages, msg]
-      persistMessages(messages)
-      return { messages }
+      const sessions = s.sessions.map((sess) => {
+        if (sess.id !== s.activeSessionId) return sess
+        const messages = [...sess.messages, msg].slice(-100)
+        // Auto-title from first user message
+        const title = sess.messages.length === 0 && sess.title === 'New Chat'
+          ? content.slice(0, 40) || 'New Chat'
+          : sess.title
+        return { ...sess, messages, title }
+      })
+      persist(sessions, s.activeSessionId)
+      return { sessions }
     })
     return id
   },
@@ -81,27 +172,35 @@ export const useChatStore = create<ChatStore>((set) => ({
     const id = `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`
     const msg: ChatMessage = { id, role: 'assistant', content: '', timestamp: Date.now() }
     set((s) => {
-      const messages = [...s.messages, msg]
-      return { messages, isStreaming: true, streamingId: id }
+      const sessions = s.sessions.map((sess) =>
+        sess.id === s.activeSessionId
+          ? { ...sess, messages: [...sess.messages, msg] }
+          : sess
+      )
+      return { sessions, isStreaming: true, streamingId: id }
     })
     return id
   },
 
   appendDelta: (id, delta) => {
     set((s) => ({
-      messages: s.messages.map((m) =>
-        m.id === id ? { ...m, content: m.content + delta } : m
+      sessions: s.sessions.map((sess) =>
+        sess.id === s.activeSessionId
+          ? { ...sess, messages: sess.messages.map((m) => m.id === id ? { ...m, content: m.content + delta } : m) }
+          : sess
       ),
     }))
   },
 
   finalizeMessage: (id) => {
     set((s) => {
-      const messages = s.messages.map((m) =>
-        m.id === id ? { ...m } : m
+      const sessions = s.sessions.map((sess) =>
+        sess.id === s.activeSessionId
+          ? { ...sess, messages: sess.messages.map((m) => m.id === id ? { ...m } : m) }
+          : sess
       )
-      persistMessages(messages)
-      return { messages, isStreaming: false, streamingId: null, activeStreamId: null }
+      persist(sessions, s.activeSessionId)
+      return { sessions, isStreaming: false, streamingId: null, activeStreamId: null }
     })
   },
 
@@ -110,8 +209,13 @@ export const useChatStore = create<ChatStore>((set) => ({
   },
 
   clearMessages: () => {
-    persistMessages([])
-    set({ messages: [], isStreaming: false, streamingId: null, activeStreamId: null })
+    set((s) => {
+      const sessions = s.sessions.map((sess) =>
+        sess.id === s.activeSessionId ? { ...sess, messages: [], title: 'New Chat' } : sess
+      )
+      persist(sessions, s.activeSessionId)
+      return { sessions, isStreaming: false, streamingId: null, activeStreamId: null }
+    })
   },
 
   setActiveModel: (model) => set({ activeModel: model }),

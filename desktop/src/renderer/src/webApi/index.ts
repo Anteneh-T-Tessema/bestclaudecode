@@ -42,6 +42,7 @@ export function createWebApi(): API {
       searchInFiles: (p, q, cs, rx) => socket.invoke('fs:searchInFiles', { dirPath: p, query: q, caseSensitive: cs ?? false, regex: rx ?? false }),
       replaceInFiles: (p, q, r, cs, rx) => socket.invoke('fs:replaceInFiles', { dirPath: p, query: q, replacement: r, caseSensitive: cs ?? false, regex: rx ?? false }),
       onFileChange: () => () => {},
+      findFiles: () => Promise.resolve(notPorted('fs.findFiles', [] as string[])),
     },
 
     terminal: {

@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { AlertCircle, AlertTriangle, Info, CheckCircle2, ChevronRight, type LucideIcon } from 'lucide-react'
+import { AlertCircle, AlertTriangle, Info, CheckCircle2, ChevronRight, Sparkles, type LucideIcon } from 'lucide-react'
 import { useProblemsStore, type Problem, type ProblemSeverity } from '../store/useProblemsStore'
 import { useEditorStore } from '../store/useEditorStore'
+import { useAppStore } from '../store/useAppStore'
 import { EmptyState } from './EmptyState'
 import { accent, fg, border, surface } from '../design'
 
@@ -28,6 +29,7 @@ const SEVERITY_ORDER: Record<ProblemSeverity, number> = {
 
 function ProblemRow({ problem }: { problem: Problem }) {
   const openFile = useEditorStore((s) => s.openFile)
+  const setActiveActivity = useAppStore((s) => s.setActiveActivity)
   const [hovered, setHovered] = useState(false)
   const Icon = SEVERITY_ICON[problem.severity]
   const color = SEVERITY_COLOR[problem.severity]
@@ -46,6 +48,35 @@ function ProblemRow({ problem }: { problem: Problem }) {
     }
   }
 
+  const fixWithAI = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    let codeContext = ''
+    try {
+      const content = await window.api.fs.readFile(problem.filePath)
+      const lines = content.split('\n')
+      const start = Math.max(0, problem.line - 6)
+      const end = Math.min(lines.length, problem.line + 5)
+      const snippet = lines.slice(start, end).join('\n')
+      const fileName = problem.filePath.split('/').pop() ?? problem.filePath
+      const ext = fileName.split('.').pop() ?? ''
+      codeContext = `\`\`\`${ext}\n${snippet}\n\`\`\``
+      openFile(problem.filePath, content)
+    } catch { /* file may have moved */ }
+
+    const fileName = problem.filePath.split('/').pop() ?? problem.filePath
+    const locationStr = `Ln ${problem.line}, Col ${problem.col}`
+    const prompt =
+      `Fix this ${problem.severity} in \`${fileName}\`:\n\n` +
+      `**${problem.severity.toUpperCase()} ${locationStr}**: ${problem.message}\n\n` +
+      (codeContext ? `${codeContext}\n\n` : '') +
+      `Fix the issue. Keep all other behavior unchanged.`
+
+    setActiveActivity('chat')
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('lakoora:chat:regenerate', { detail: { content: prompt } }))
+    }, 50)
+  }
+
   return (
     <div
       onClick={handleClick}
@@ -58,6 +89,7 @@ function ProblemRow({ problem }: { problem: Problem }) {
         padding: '4px 14px 4px 28px',
         cursor: 'pointer',
         background: hovered ? surface.overlay : 'transparent',
+        position: 'relative',
       }}
     >
       <Icon size={11} style={{ color, flexShrink: 0, marginTop: 2 }} />
@@ -68,6 +100,31 @@ function ProblemRow({ problem }: { problem: Problem }) {
           {problem.source ? ` · ${problem.source}` : ''}
         </div>
       </div>
+      {hovered && (
+        <button
+          type="button"
+          onClick={fixWithAI}
+          title="Fix with AI"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            padding: '2px 7px',
+            background: surface.surface,
+            border: `1px solid ${accent.violet.border}`,
+            borderRadius: 4,
+            cursor: 'pointer',
+            color: accent.violet.fg,
+            fontSize: 10,
+            fontWeight: 600,
+            flexShrink: 0,
+            alignSelf: 'center',
+          }}
+        >
+          <Sparkles size={10} />
+          Fix
+        </button>
+      )}
     </div>
   )
 }

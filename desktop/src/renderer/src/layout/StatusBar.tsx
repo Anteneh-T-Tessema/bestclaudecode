@@ -4,7 +4,7 @@ import { useSettingsStore } from '../store/useSettingsStore'
 import { useProblemsStore } from '../store/useProblemsStore'
 import { useAppStore } from '../store/useAppStore'
 import { surface, fg, accent, border } from '../design'
-import { GitBranch, GitCommit, AlertCircle, AlertTriangle } from 'lucide-react'
+import { GitBranch, GitCommit, AlertCircle, AlertTriangle, Sun, Moon } from 'lucide-react'
 import { useState, useEffect, useRef } from 'react'
 
 type BlameEntry = { line: number; sha: string; author: string; timestamp: number; summary: string }
@@ -31,6 +31,7 @@ export function StatusBar() {
   const autoSave = useSettingsStore((s) => s.autoSave)
   const stickyScroll = useSettingsStore((s) => s.stickyScroll)
   const fontSize = useSettingsStore((s) => s.fontSize)
+  const theme = useSettingsStore((s) => s.theme)
   const setEditorSetting = useSettingsStore((s) => s.set)
   const [branch, setBranch] = useState<string | null>(null)
   const [blameMap, setBlameMap] = useState<Map<number, BlameEntry>>(new Map())
@@ -203,6 +204,14 @@ export function StatusBar() {
           style={{ ...itemStyle, cursor: 'pointer', background: 'none', border: 'none', borderLeft: `1px solid ${border[2]}`, color: autoSave ? accent.green.fg : fg[1] }}
         >
           Auto
+        </button>
+        <button
+          type="button"
+          onClick={() => setEditorSetting('theme', theme === 'dark' ? 'light' : 'dark')}
+          title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+          style={{ ...itemStyle, cursor: 'pointer', background: 'none', border: 'none', borderLeft: `1px solid ${border[2]}`, color: theme === 'light' ? accent.amber.fg : fg[2] }}
+        >
+          {theme === 'light' ? <Sun size={11} /> : <Moon size={11} />}
         </button>
         <div style={{ ...itemStyle, borderRight: 'none', borderLeft: `1px solid ${border[2]}`, color: accent.violet.fg }}>
           {modelLabel}

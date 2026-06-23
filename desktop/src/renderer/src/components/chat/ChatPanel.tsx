@@ -4,30 +4,39 @@ import { ChatMessage } from './ChatMessage'
 import { ChatInput } from './ChatInput'
 import { ModelSelector } from './ModelSelector'
 import { surface, border, fg, accent } from '../../design'
-import { Trash2, FlaskConical, Loader2, RotateCcw } from 'lucide-react'
+import { Trash2, FlaskConical, Loader2, RotateCcw, Plus, X } from 'lucide-react'
 
 export function ChatPanel() {
-  const messages = useChatStore((s) => s.messages)
+  const sessions = useChatStore((s) => s.sessions)
+  const activeSessionId = useChatStore((s) => s.activeSessionId)
+  const createSession = useChatStore((s) => s.createSession)
+  const deleteSession = useChatStore((s) => s.deleteSession)
+  const switchSession = useChatStore((s) => s.switchSession)
   const streamingId = useChatStore((s) => s.streamingId)
   const clearMessages = useChatStore((s) => s.clearMessages)
   const addUserMessage = useChatStore((s) => s.addUserMessage)
   const startAssistantMessage = useChatStore((s) => s.startAssistantMessage)
   const appendDelta = useChatStore((s) => s.appendDelta)
   const finalizeMessage = useChatStore((s) => s.finalizeMessage)
+
+  const activeSession = sessions.find((s) => s.id === activeSessionId)
+  const messages = activeSession?.messages ?? []
+
   const scrollRef = useRef<HTMLDivElement>(null)
   const [runningTests, setRunningTests] = useState(false)
 
   const regenerate = () => {
     if (streamingId !== null) return
-    const msgs = useChatStore.getState().messages
-    if (!msgs.length) return
-    let stripped = msgs
-    if (stripped[stripped.length - 1]?.role === 'assistant') {
-      stripped = stripped.slice(0, -1)
-    }
+    const { sessions: ss, activeSessionId: aid } = useChatStore.getState()
+    const sess = ss.find((s) => s.id === aid)
+    if (!sess?.messages.length) return
+    let stripped = sess.messages
+    if (stripped[stripped.length - 1]?.role === 'assistant') stripped = stripped.slice(0, -1)
     const lastUser = [...stripped].reverse().find((m) => m.role === 'user')
     if (!lastUser) return
-    useChatStore.setState({ messages: stripped })
+    useChatStore.setState({
+      sessions: ss.map((s) => s.id === aid ? { ...s, messages: stripped } : s),
+    })
     window.dispatchEvent(new CustomEvent('lakoora:chat:regenerate', { detail: { content: lastUser.content } }))
   }
 
@@ -138,8 +147,24 @@ export function ChatPanel() {
 
         <button
           type="button"
+          onClick={() => createSession()}
+          title="New chat session"
+          style={{
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            color: fg[3],
+            padding: 4,
+            display: 'flex',
+            alignItems: 'center',
+          }}
+        >
+          <Plus size={13} />
+        </button>
+        <button
+          type="button"
           onClick={clearMessages}
-          title="Clear conversation"
+          title="Clear current session"
           style={{
             background: 'none',
             border: 'none',
@@ -153,6 +178,87 @@ export function ChatPanel() {
           <Trash2 size={13} />
         </button>
       </div>
+
+      {/* Session tabs */}
+      {sessions.length > 1 && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            borderBottom: `1px solid ${border[1]}`,
+            background: surface.void,
+            overflowX: 'auto',
+            flexShrink: 0,
+          }}
+        >
+          {sessions.map((sess) => {
+            const isActive = sess.id === activeSessionId
+            return (
+              <div
+                key={sess.id}
+                onClick={() => switchSession(sess.id)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  padding: '4px 8px 4px 10px',
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                  maxWidth: 140,
+                  borderRight: `1px solid ${border[2]}`,
+                  borderBottom: isActive ? `2px solid ${accent.violet.fg}` : '2px solid transparent',
+                  background: isActive ? surface.surface : 'transparent',
+                }}
+              >
+                <span style={{
+                  fontSize: 10,
+                  color: isActive ? fg[0] : fg[3],
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  flex: 1,
+                }}>
+                  {sess.title}
+                </span>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); deleteSession(sess.id) }}
+                  title="Close session"
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: fg[4],
+                    padding: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  <X size={9} />
+                </button>
+              </div>
+            )
+          })}
+          <button
+            type="button"
+            onClick={() => createSession()}
+            title="New chat session"
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              color: fg[3],
+              padding: '4px 8px',
+              display: 'flex',
+              alignItems: 'center',
+              flexShrink: 0,
+            }}
+          >
+            <Plus size={11} />
+          </button>
+        </div>
+      )}
 
       {/* Messages */}
       <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>

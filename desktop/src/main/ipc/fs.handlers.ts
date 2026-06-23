@@ -45,7 +45,7 @@ export function registerFsHandlers(): void {
     'fs:readFile', 'fs:writeFile', 'fs:readDir',
     'fs:createDir', 'fs:deleteEntry', 'fs:rename', 'fs:exists',
     'fs:openDialog', 'fs:openFile', 'fs:watchDir', 'fs:unwatchDir',
-    'fs:searchInFiles', 'fs:replaceInFiles',
+    'fs:searchInFiles', 'fs:replaceInFiles', 'fs:findFiles',
   ]
   for (const ch of channels) ipcMain.removeHandler(ch)
 
@@ -258,5 +258,23 @@ export function registerFsHandlers(): void {
   ipcMain.handle('fs:unwatchDir', (_, dirPath: string) => {
     watchers.get(dirPath)?.close()
     watchers.delete(dirPath)
+  })
+
+  ipcMain.handle('fs:findFiles', async (_, root: string): Promise<string[]> => {
+    assertInProject(root)
+    const results: string[] = []
+    async function walk(dir: string) {
+      let entries: Dirent[]
+      try { entries = await fs.readdir(dir, { withFileTypes: true }) } catch { return }
+      for (const e of entries) {
+        if (IGNORE_DIRS.has(e.name) || e.name.startsWith('.')) continue
+        const full = path.join(dir, e.name)
+        if (e.isDirectory()) await walk(full)
+        else results.push(path.relative(root, full))
+        if (results.length >= 5000) return
+      }
+    }
+    await walk(root)
+    return results
   })
 }

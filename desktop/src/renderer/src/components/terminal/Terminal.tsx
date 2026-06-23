@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { useSettingsStore } from '../../store/useSettingsStore'
+import { useAppStore } from '../../store/useAppStore'
 import { surface } from '../../design'
 
 export function Terminal() {
@@ -79,9 +80,10 @@ export function Terminal() {
 
     termIdRef.current = termId
 
-    // Data from PTY → xterm
+    // Data from PTY → xterm + terminal output capture
     const unData = window.api.terminal.onData(termId, (data) => {
       term.write(data)
+      useAppStore.getState().appendTerminalOutput(data)
     })
 
     const unExit = window.api.terminal.onExit(termId, (_code) => {

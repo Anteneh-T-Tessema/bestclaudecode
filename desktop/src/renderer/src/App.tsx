@@ -10,15 +10,32 @@ import { KeyboardShortcuts } from './components/KeyboardShortcuts'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { useSettingsStore } from './store/useSettingsStore'
 import { useTsExtraLibs } from './hooks/useTsExtraLibs'
+import { DARK_TOKENS, LIGHT_TOKENS } from './design/tokens'
+
+function applyThemeVars(tokens: Record<string, string>) {
+  const root = document.documentElement
+  for (const [prop, val] of Object.entries(tokens)) {
+    root.style.setProperty(prop, val)
+  }
+}
+
+// Seed dark tokens synchronously so there's no flash before React mounts.
+applyThemeVars(DARK_TOKENS)
 
 export default function App() {
   const loadSettings = useSettingsStore((s) => s.load)
+  const theme = useSettingsStore((s) => s.theme)
   const zenMode = useAppStore((s) => s.zenMode)
   useTsExtraLibs()
 
   useEffect(() => {
     loadSettings()
   }, [loadSettings])
+
+  useEffect(() => {
+    applyThemeVars(theme === 'light' ? LIGHT_TOKENS : DARK_TOKENS)
+    document.documentElement.setAttribute('data-theme', theme)
+  }, [theme])
 
   return (
     <ErrorBoundary>

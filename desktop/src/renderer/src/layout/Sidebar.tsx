@@ -10,6 +10,7 @@ import { AuditTrailPanel } from '../components/audit/AuditTrailPanel'
 import { ArchDocPanel } from '../components/sidebar/ArchDocPanel'
 import { AgentProgressPanel } from '../components/agent/AgentProgressPanel'
 import { DebugPanel } from '../components/sidebar/DebugPanel'
+import { OutlinePanel } from '../components/sidebar/OutlinePanel'
 import { SettingsPanel } from '../components/settings/SettingsPanel'
 import { ErrorBoundary } from '../components/ErrorBoundary'
 
@@ -25,6 +26,7 @@ const LABELS: Record<string, string> = {
   archdoc: 'ARCHITECTURE',
   agent: 'AGENT',
   debug: 'DEBUG',
+  outline: 'OUTLINE',
   settings: 'SETTINGS',
 }
 
@@ -60,6 +62,8 @@ export function Sidebar() {
         return <AgentProgressPanel />
       case 'debug':
         return <DebugPanel />
+      case 'outline':
+        return <OutlinePanel />
       case 'settings':
         return <SettingsPanel />
       default:
