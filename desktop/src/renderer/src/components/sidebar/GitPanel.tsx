@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { DiffEditor } from '@monaco-editor/react'
-import { GitBranch, RefreshCw, Plus, GitCommit, Clock, CheckCircle, Minus, AlertCircle, X, ArrowUp, ArrowDown, ChevronRight, FileText } from 'lucide-react'
+import { GitBranch, RefreshCw, Plus, GitCommit, Clock, CheckCircle, Minus, AlertCircle, X, ArrowUp, ArrowDown, ChevronRight, FileText, Check } from 'lucide-react'
 import { useSettingsStore } from '../../store/useSettingsStore'
 import { useAppStore } from '../../store/useAppStore'
 import { toast } from '../../store/useToastStore'
@@ -19,6 +19,192 @@ function languageFromPath(p: string): string {
 interface FileEntry { status: string; path: string; staged: boolean }
 interface LogEntry { hash: string; message: string }
 interface CommitFile { status: string; path: string; oldPath?: string }
+
+function BranchDropdown({
+  projectPath,
+  currentBranch,
+  anchorRef,
+  onClose,
+  onSwitch,
+}: {
+  projectPath: string
+  currentBranch: string
+  anchorRef: React.RefObject<HTMLElement | null>
+  onClose: () => void
+  onSwitch: () => void
+}) {
+  const [branches, setBranches] = useState<string[]>([])
+  const [loading, setLoading] = useState(true)
+  const [switching, setSwitching] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [newName, setNewName] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  const rect = anchorRef.current?.getBoundingClientRect()
+  const top = rect ? rect.bottom + 4 : 40
+  const left = rect ? rect.left : 0
+
+  useEffect(() => {
+    window.api.git.listBranches(projectPath)
+      .then((r) => {
+        const res = r as { branches: string[]; current: string | null }
+        setBranches(res.branches)
+      })
+      .catch(() => setBranches([]))
+      .finally(() => setLoading(false))
+  }, [projectPath])
+
+  useEffect(() => {
+    const onMouseDown = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) onClose()
+    }
+    const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('mousedown', onMouseDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [onClose])
+
+  useEffect(() => {
+    if (creating) setTimeout(() => inputRef.current?.focus(), 10)
+  }, [creating])
+
+  const checkout = async (branch: string) => {
+    if (branch === currentBranch) return onClose()
+    setSwitching(branch)
+    try {
+      const result = await window.api.git.checkoutBranch(projectPath, branch)
+      const r = result as { success: boolean; error?: string }
+      if (r.success) {
+        toast.success(`Switched to ${branch}`)
+        onSwitch()
+        onClose()
+      } else {
+        toast.error(`Checkout failed: ${r.error ?? 'unknown'}`)
+      }
+    } finally {
+      setSwitching(null)
+    }
+  }
+
+  const createBranch = async () => {
+    const name = newName.trim()
+    if (!name) return
+    setSwitching(name)
+    try {
+      const result = await window.api.git.createBranch(projectPath, name)
+      const r = result as { success: boolean; error?: string }
+      if (r.success) {
+        toast.success(`Created and switched to ${name}`)
+        onSwitch()
+        onClose()
+      } else {
+        toast.error(`Create failed: ${r.error ?? 'unknown'}`)
+      }
+    } finally {
+      setSwitching(null)
+    }
+  }
+
+  return (
+    <div
+      ref={dropdownRef}
+      style={{
+        position: 'fixed',
+        top,
+        left,
+        zIndex: 9000,
+        width: 220,
+        background: surface.overlay,
+        border: `1px solid ${border[0]}`,
+        borderRadius: 6,
+        boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+        overflow: 'hidden',
+      }}
+    >
+      <div style={{ padding: '5px 10px 3px', fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: fg[4] }}>
+        Switch Branch
+      </div>
+      <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+        {loading && <div style={{ padding: '8px 12px', fontSize: 11, color: fg[3] }}>Loading…</div>}
+        {branches.map((b) => {
+          const isCurrent = b === currentBranch
+          const isSwitching = switching === b
+          return (
+            <div
+              key={b}
+              onClick={() => void checkout(b)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '6px 12px',
+                cursor: isCurrent ? 'default' : 'pointer',
+                background: isCurrent ? accent.green.subtle : 'transparent',
+              }}
+            >
+              {isCurrent
+                ? <Check style={{ width: 11, height: 11, color: accent.green.fg, flexShrink: 0 }} />
+                : <GitBranch style={{ width: 11, height: 11, color: isSwitching ? accent.amber.fg : fg[4], flexShrink: 0 }} />}
+              <span style={{ fontSize: 12, color: isCurrent ? accent.green.fg : fg[1], fontFamily: 'monospace', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {b}
+              </span>
+              {isSwitching && <RefreshCw style={{ width: 10, height: 10, color: accent.amber.fg, flexShrink: 0 }} className="agent-pulse" />}
+            </div>
+          )
+        })}
+      </div>
+      <div style={{ borderTop: `1px solid ${border[1]}`, padding: '6px 10px' }}>
+        {creating ? (
+          <input
+            ref={inputRef}
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void createBranch()
+              if (e.key === 'Escape') { setCreating(false); setNewName('') }
+            }}
+            placeholder="new-branch-name"
+            style={{
+              width: '100%',
+              boxSizing: 'border-box',
+              background: surface.raised,
+              border: `1px solid ${border[0]}`,
+              borderRadius: 3,
+              color: fg[0],
+              fontSize: 11,
+              padding: '4px 7px',
+              outline: 'none',
+              fontFamily: 'monospace',
+            }}
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setCreating(true)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              color: fg[2],
+              fontSize: 11,
+              padding: 0,
+            }}
+          >
+            <Plus style={{ width: 11, height: 11 }} />
+            New Branch…
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
 
 function statusLabel(s: string): { label: string; color: string } {
   if (s === 'M' || s === 'MM') return { label: 'M', color: accent.amber.fg }
@@ -118,6 +304,8 @@ export function GitPanel() {
   const [expandedCommit, setExpandedCommit] = useState<string | null>(null)
   const [commitFileMap, setCommitFileMap] = useState<Record<string, CommitFile[]>>({})
   const [commitFilesLoading, setCommitFilesLoading] = useState<string | null>(null)
+  const [branchDropdownOpen, setBranchDropdownOpen] = useState(false)
+  const branchBadgeRef = useRef<HTMLSpanElement>(null)
 
   const refresh = useCallback(async () => {
     if (!projectPath) return
@@ -297,34 +485,50 @@ export function GitPanel() {
   const headerActions = (
     <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
       {branch && (
-        <span
-          style={{
-            fontSize: 10,
-            color: accent.green.fg,
-            fontFamily: 'monospace',
-            background: accent.green.subtle,
-            border: `1px solid ${accent.green.border}`,
-            padding: '1px 6px',
-            borderRadius: 3,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4,
-          }}
-        >
-          {branch}
-          {behind > 0 && (
-            <span style={{ display: 'flex', alignItems: 'center', gap: 1, color: accent.cyan.fg }}>
-              <ArrowDown style={{ width: 9, height: 9 }} />
-              {behind}
-            </span>
+        <>
+          <span
+            ref={branchBadgeRef}
+            onClick={() => setBranchDropdownOpen((o) => !o)}
+            title="Switch branch"
+            style={{
+              fontSize: 10,
+              color: accent.green.fg,
+              fontFamily: 'monospace',
+              background: branchDropdownOpen ? accent.green.border : accent.green.subtle,
+              border: `1px solid ${accent.green.border}`,
+              padding: '1px 6px',
+              borderRadius: 3,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              cursor: 'pointer',
+              userSelect: 'none',
+            }}
+          >
+            {branch}
+            {behind > 0 && (
+              <span style={{ display: 'flex', alignItems: 'center', gap: 1, color: accent.cyan.fg }}>
+                <ArrowDown style={{ width: 9, height: 9 }} />
+                {behind}
+              </span>
+            )}
+            {ahead > 0 && (
+              <span style={{ display: 'flex', alignItems: 'center', gap: 1, color: accent.amber.fg }}>
+                <ArrowUp style={{ width: 9, height: 9 }} />
+                {ahead}
+              </span>
+            )}
+          </span>
+          {branchDropdownOpen && projectPath && (
+            <BranchDropdown
+              projectPath={projectPath}
+              currentBranch={branch}
+              anchorRef={branchBadgeRef}
+              onClose={() => setBranchDropdownOpen(false)}
+              onSwitch={refresh}
+            />
           )}
-          {ahead > 0 && (
-            <span style={{ display: 'flex', alignItems: 'center', gap: 1, color: accent.amber.fg }}>
-              <ArrowUp style={{ width: 9, height: 9 }} />
-              {ahead}
-            </span>
-          )}
-        </span>
+        </>
       )}
       <IconButton
         size={22}
