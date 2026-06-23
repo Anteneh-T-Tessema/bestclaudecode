@@ -1,14 +1,18 @@
 import { useEditorStore } from '../store/useEditorStore'
 import { useChatStore, MODELS } from '../store/useChatStore'
 import { useSettingsStore } from '../store/useSettingsStore'
+import { useProblemsStore } from '../store/useProblemsStore'
+import { useAppStore } from '../store/useAppStore'
 import { surface, fg, accent, border } from '../design'
-import { GitBranch } from 'lucide-react'
+import { GitBranch, AlertCircle, AlertTriangle } from 'lucide-react'
 import { useState, useEffect } from 'react'
 
 export function StatusBar() {
   const activeTab = useEditorStore((s) => s.getActiveTab())
   const activeModel = useChatStore((s) => s.activeModel)
   const projectPath = useSettingsStore((s) => s.projectPath)
+  const problems = useProblemsStore((s) => s.problems)
+  const openProblems = useAppStore((s) => s.openProblems)
   const [branch, setBranch] = useState<string | null>(null)
 
   useEffect(() => {
@@ -17,6 +21,8 @@ export function StatusBar() {
   }, [projectPath])
 
   const modelLabel = MODELS.find((m) => m.id === activeModel)?.label ?? activeModel
+  const errorCount = problems.filter((p) => p.severity === 'error').length
+  const warnCount = problems.filter((p) => p.severity === 'warning').length
 
   const itemStyle: React.CSSProperties = {
     display: 'flex',
@@ -60,6 +66,35 @@ export function StatusBar() {
               </span>
             )}
           </div>
+        )}
+        {(errorCount > 0 || warnCount > 0) && (
+          <button
+            type="button"
+            onClick={openProblems}
+            title="Open Problems panel"
+            style={{
+              ...itemStyle,
+              cursor: 'pointer',
+              background: 'none',
+              border: 'none',
+              borderRight: `1px solid ${border[2]}`,
+              padding: '0 8px',
+              gap: 6,
+            }}
+          >
+            {errorCount > 0 && (
+              <span style={{ display: 'flex', alignItems: 'center', gap: 3, color: accent.red.fg }}>
+                <AlertCircle size={11} />
+                <span style={{ fontSize: 11 }}>{errorCount}</span>
+              </span>
+            )}
+            {warnCount > 0 && (
+              <span style={{ display: 'flex', alignItems: 'center', gap: 3, color: accent.amber.fg }}>
+                <AlertTriangle size={11} />
+                <span style={{ fontSize: 11 }}>{warnCount}</span>
+              </span>
+            )}
+          </button>
         )}
       </div>
 

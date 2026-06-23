@@ -2,6 +2,7 @@ import { create } from 'zustand'
 
 export type ActivityId = 'files' | 'git' | 'chat' | 'search' | 'memory' | 'codesearch' | 'tasks' | 'audit' | 'archdoc' | 'agent' | 'debug' | 'settings'
 export type ActiveView = 'welcome' | 'editor'
+export type BottomPanelTab = 'terminal' | 'problems'
 
 interface AppStore {
   activeActivity: ActivityId
@@ -11,6 +12,7 @@ interface AppStore {
   shortcutsOpen: boolean
   sidebarOpen: boolean
   bottomPanelOpen: boolean
+  bottomPanelTab: BottomPanelTab
   setActiveActivity: (id: ActivityId) => void
   setActiveView: (view: ActiveView) => void
   toggleActivity: (id: ActivityId) => void
@@ -20,6 +22,8 @@ interface AppStore {
   toggleSidebar: () => void
   toggleBottomPanel: () => void
   setBottomPanelOpen: (open: boolean) => void
+  setBottomPanelTab: (tab: BottomPanelTab) => void
+  openProblems: () => void
 }
 
 export const useAppStore = create<AppStore>((set, get) => ({
@@ -30,6 +34,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   shortcutsOpen: false,
   sidebarOpen: true,
   bottomPanelOpen: true,
+  bottomPanelTab: 'terminal',
   setActiveActivity: (id) => set({ activeActivity: id }),
   setActiveView: (view) => set({ activeView: view }),
   toggleActivity: (id) => {
@@ -42,4 +47,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   toggleBottomPanel: () => set((s) => ({ bottomPanelOpen: !s.bottomPanelOpen })),
   setBottomPanelOpen: (open) => set({ bottomPanelOpen: open }),
+  setBottomPanelTab: (tab) => set({ bottomPanelTab: tab }),
+  openProblems: () => set({ bottomPanelOpen: true, bottomPanelTab: 'problems' }),
 }))

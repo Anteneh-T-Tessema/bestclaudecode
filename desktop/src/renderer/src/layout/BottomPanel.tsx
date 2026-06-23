@@ -1,23 +1,28 @@
-import { useState } from 'react'
 import { X } from 'lucide-react'
 import { surface, border, fg, accent } from '../design'
 import { Terminal } from '../components/terminal/Terminal'
 import { ProblemsPanel } from '../components/ProblemsPanel'
-
-type BottomTab = 'terminal' | 'problems'
+import { useAppStore } from '../store/useAppStore'
+import { useProblemsStore } from '../store/useProblemsStore'
 
 interface BottomPanelProps {
   onClose: () => void
 }
 
 export function BottomPanel({ onClose }: BottomPanelProps) {
-  const [activeTab, setActiveTab] = useState<BottomTab>('terminal')
+  const activeTab = useAppStore((s) => s.bottomPanelTab)
+  const setActiveTab = useAppStore((s) => s.setBottomPanelTab)
+  const problems = useProblemsStore((s) => s.problems)
 
-  const tabStyle = (id: BottomTab): React.CSSProperties => ({
+  const errorCount = problems.filter((p) => p.severity === 'error').length
+  const warnCount = problems.filter((p) => p.severity === 'warning').length
+
+  const tabStyle = (id: typeof activeTab): React.CSSProperties => ({
     padding: '0 14px',
     height: '100%',
     display: 'flex',
     alignItems: 'center',
+    gap: 5,
     fontSize: 12,
     fontWeight: 500,
     cursor: 'pointer',
@@ -38,7 +43,6 @@ export function BottomPanel({ onClose }: BottomPanelProps) {
         overflow: 'hidden',
       }}
     >
-      {/* Tab bar */}
       <div
         style={{
           height: 35,
@@ -50,11 +54,29 @@ export function BottomPanel({ onClose }: BottomPanelProps) {
           paddingLeft: 4,
         }}
       >
-        <button style={tabStyle('terminal')} onClick={() => setActiveTab('terminal')}>
+        <button type="button" style={tabStyle('terminal')} onClick={() => setActiveTab('terminal')}>
           TERMINAL
         </button>
-        <button style={tabStyle('problems')} onClick={() => setActiveTab('problems')}>
+        <button type="button" style={tabStyle('problems')} onClick={() => setActiveTab('problems')}>
           PROBLEMS
+          {(errorCount > 0 || warnCount > 0) && (
+            <span
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                marginLeft: 4,
+                fontSize: 10,
+              }}
+            >
+              {errorCount > 0 && (
+                <span style={{ color: accent.red.fg, fontWeight: 700 }}>{errorCount}</span>
+              )}
+              {warnCount > 0 && (
+                <span style={{ color: accent.amber.fg, fontWeight: 700 }}>{warnCount}</span>
+              )}
+            </span>
+          )}
         </button>
         <div style={{ flex: 1 }} />
         <button
@@ -75,7 +97,6 @@ export function BottomPanel({ onClose }: BottomPanelProps) {
         </button>
       </div>
 
-      {/* Content */}
       <div style={{ flex: 1, overflow: 'hidden' }}>
         {activeTab === 'terminal' ? <Terminal /> : <ProblemsPanel />}
       </div>
