@@ -250,4 +250,13 @@ export function registerGitHandlers(): void {
       return ''
     }
   })
+
+  // Returns the full staged diff (git diff --cached) for commit message generation.
+  ipcMain.handle('git:stagedDiff', async (_, { cwd }: { cwd: string }): Promise<string> => {
+    try {
+      return await git(cwd, ['diff', '--cached'])
+    } catch {
+      return ''
+    }
+  })
 }

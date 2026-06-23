@@ -29,6 +29,7 @@ export function StatusBar() {
   const minimapOn = useSettingsStore((s) => s.minimap)
   const tabSize = useSettingsStore((s) => s.tabSize)
   const autoSave = useSettingsStore((s) => s.autoSave)
+  const stickyScroll = useSettingsStore((s) => s.stickyScroll)
   const fontSize = useSettingsStore((s) => s.fontSize)
   const setEditorSetting = useSettingsStore((s) => s.set)
   const [branch, setBranch] = useState<string | null>(null)
@@ -186,6 +187,14 @@ export function StatusBar() {
           style={{ ...itemStyle, cursor: 'pointer', background: 'none', border: 'none', borderLeft: `1px solid ${border[2]}`, color: minimapOn ? accent.cyan.fg : fg[1] }}
         >
           Map
+        </button>
+        <button
+          type="button"
+          onClick={() => setEditorSetting('stickyScroll', !stickyScroll)}
+          title="Toggle sticky scroll"
+          style={{ ...itemStyle, cursor: 'pointer', background: 'none', border: 'none', borderLeft: `1px solid ${border[2]}`, color: stickyScroll ? accent.cyan.fg : fg[1] }}
+        >
+          Sticky
         </button>
         <button
           type="button"

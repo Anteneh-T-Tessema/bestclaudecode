@@ -3,6 +3,7 @@ import { Send, Square } from 'lucide-react'
 import { useChatStore } from '../../store/useChatStore'
 import { useEditorStore } from '../../store/useEditorStore'
 import { useSettingsStore } from '../../store/useSettingsStore'
+import { useProblemsStore } from '../../store/useProblemsStore'
 import { toast } from '../../store/useToastStore'
 import { surface, border, fg, accent } from '../../design'
 import { ModelSelector } from './ModelSelector'
@@ -173,9 +174,40 @@ export function ChatInput() {
     if (!content || isStreaming) return
     if (overrideContent === undefined) setText('')
 
-    // @file — attach current editor content
+    // @selection — attach currently selected editor text
     let finalContent = content
     const activeTab = getActiveTab()
+    const editorSelection = useEditorStore.getState().editorSelection
+    if (content.includes('@selection') && editorSelection) {
+      finalContent = finalContent.replace(
+        '@selection',
+        `\n\nSelected code (${activeTab?.label ?? 'editor'}):\n\`\`\`${activeTab?.language ?? ''}\n${editorSelection}\n\`\`\``
+      )
+    }
+
+    // @git — inject local staged diff
+    if (finalContent.includes('@git')) {
+      const projectPath = useSettingsStore.getState().projectPath
+      let gitBlock = 'No staged changes.'
+      if (projectPath) {
+        try {
+          const diff = await window.api.git.stagedDiff(projectPath)
+          gitBlock = diff.trim() ? diff.slice(0, 6000) : 'No staged changes.'
+        } catch { /* ignore */ }
+      }
+      finalContent = finalContent.replace('@git', `\n\nStaged diff:\n\`\`\`diff\n${gitBlock}\n\`\`\``)
+    }
+
+    // @problems — inject current diagnostics
+    if (finalContent.includes('@problems')) {
+      const problems = useProblemsStore.getState().problems
+      const block = problems.length === 0
+        ? 'No problems found.'
+        : problems.map((p) => `${p.severity.toUpperCase()} ${p.filePath}:${p.line}:${p.col} — ${p.message}`).join('\n')
+      finalContent = finalContent.replace('@problems', `\n\nCurrent problems:\n\`\`\`\n${block}\n\`\`\``)
+    }
+
+    // @file — attach current editor content
     if (content.includes('@file') && activeTab) {
       finalContent = finalContent.replace(
         '@file',
@@ -290,7 +322,7 @@ export function ChatInput() {
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKey}
-          placeholder="Ask anything… @file @codebase @web @docs @issue @pr · Shift+Enter new line"
+          placeholder="Ask anything… @selection @file @problems @codebase @web @docs · Shift+Enter new line"
           rows={1}
           style={{
             flex: 1,
@@ -352,7 +384,7 @@ export function ChatInput() {
       <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
         <ModelSelector />
         <span style={{ fontSize: 10, color: fg[3] }}>
-          Enter · @file @codebase @web @docs @issue @pr
+          Enter · @selection @file @problems @codebase @web @docs @issue @pr
         </span>
         {text.length > 0 && (
           <span style={{ fontSize: 10, color: text.length > 4000 ? accent.red.fg : fg[4], marginLeft: 'auto' }}>

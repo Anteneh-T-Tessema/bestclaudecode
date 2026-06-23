@@ -281,12 +281,14 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
   const updateContent = useEditorStore((s) => s.updateContent)
   const markSaved = useEditorStore((s) => s.markSaved)
   const setCursor = useEditorStore((s) => s.setCursor)
+  const setEditorSelection = useEditorStore((s) => s.setEditorSelection)
   const { openInlineEdit } = useEditorActionsStore()
   const { openGoToLine } = useEditorActionsStore()
   const fontSize = useSettingsStore((s) => s.fontSize)
   const wordWrap = useSettingsStore((s) => s.wordWrap)
   const minimapEnabled = useSettingsStore((s) => s.minimap)
   const tabSize = useSettingsStore((s) => s.tabSize)
+  const stickyScroll = useSettingsStore((s) => s.stickyScroll)
   const projectPath = useSettingsStore((s) => s.projectPath)
   const setProblems = useProblemsStore((s) => s.setProblems)
 
@@ -344,6 +346,17 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
         setCursor(tabId, e.position.lineNumber, e.position.column)
       })
 
+      // Selection tracking for @selection in chat
+      editor.onDidChangeCursorSelection(() => {
+        const sel = editor.getSelection()
+        const model = editor.getModel()
+        if (sel && model && !sel.isEmpty()) {
+          setEditorSelection(model.getValueInRange(sel))
+        } else {
+          setEditorSelection('')
+        }
+      })
+
       // Model markers → problems store
       monaco.editor.onDidChangeMarkers(([resource]) => {
         if (!resource) return
@@ -363,14 +376,19 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
         setProblems(tab.filePath, problems)
       })
 
-      // Cmd+K → inline AI edit
+      // Cmd+K → inline AI edit (selection) or generate (no selection)
       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyK, () => {
         const selection = editor.getSelection()
-        if (!selection || selection.isEmpty()) return
         const model = editor.getModel()
-        if (!model) return
-        const selectedText = model.getValueInRange(selection)
-        openInlineEdit(tabId, selection.startLineNumber, selection.endLineNumber, selectedText)
+        if (!model || !selection) return
+        if (selection.isEmpty()) {
+          // Generate mode: pass empty selectedText; cursor line used as insert point
+          const line = selection.startLineNumber
+          openInlineEdit(tabId, line, line, '')
+        } else {
+          const selectedText = model.getValueInRange(selection)
+          openInlineEdit(tabId, selection.startLineNumber, selection.endLineNumber, selectedText)
+        }
       })
 
       // Cmd+S → save
@@ -392,7 +410,7 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
         openGoToLine()
       })
     },
-    [tabId, tab, activeLsp, updateContent, markSaved, setCursor, openInlineEdit, openGoToLine, setProblems]
+    [tabId, tab, activeLsp, updateContent, markSaved, setCursor, setEditorSelection, openInlineEdit, openGoToLine, setProblems]
   )
 
   // Push edits to the active language server, debounced, so hover/definition/diagnostics
@@ -586,6 +604,7 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
         fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace",
         lineNumbers: 'on',
         minimap: { enabled: minimapEnabled, scale: 1 },
+        stickyScroll: { enabled: stickyScroll },
         scrollBeyondLastLine: false,
         wordWrap: wordWrap ? 'on' : 'off',
         tabSize,

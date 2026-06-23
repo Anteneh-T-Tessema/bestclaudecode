@@ -62,18 +62,21 @@ function getLanguage(filePath: string): string {
 interface EditorStore {
   tabs: EditorTab[]
   activeTabId: string | null
+  editorSelection: string
   openFile: (filePath: string, content: string) => void
   closeTab: (id: string) => void
   setActiveTab: (id: string) => void
   updateContent: (id: string, content: string) => void
   markSaved: (id: string) => void
   setCursor: (id: string, line: number, col: number) => void
+  setEditorSelection: (text: string) => void
   getActiveTab: () => EditorTab | null
 }
 
 export const useEditorStore = create<EditorStore>((set, get) => ({
   tabs: [],
   activeTabId: null,
+  editorSelection: '',
 
   openFile: (filePath, content) => {
     // Keep a persisted MRU list of recently opened files (max 20, deduped).
@@ -143,6 +146,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       tabs: s.tabs.map((t) => (t.id === id ? { ...t, cursorLine: line, cursorCol: col } : t)),
     }))
   },
+
+  setEditorSelection: (text) => set({ editorSelection: text }),
 
   getActiveTab: () => {
     const { tabs, activeTabId } = get()

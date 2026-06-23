@@ -14,6 +14,7 @@ interface SettingsStore {
   minimap: boolean
   tabSize: 2 | 4
   autoSave: boolean
+  stickyScroll: boolean
   recentFiles: string[]
   projectPath: string
   recentProjects: string[]
@@ -40,6 +41,7 @@ const DEFAULTS = {
   minimap: true,
   tabSize: 2 as 2 | 4,
   autoSave: true,
+  stickyScroll: true,
   recentFiles: [] as string[],
   projectPath: '',
   recentProjects: [] as string[],

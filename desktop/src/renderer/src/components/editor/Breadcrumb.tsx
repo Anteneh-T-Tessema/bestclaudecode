@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Folder, FileText, ChevronRight } from 'lucide-react'
+import { Folder, FileText, ChevronRight, Eye, EyeOff } from 'lucide-react'
 import { useEditorStore } from '../../store/useEditorStore'
 import { useSettingsStore } from '../../store/useSettingsStore'
+import { useEditorActionsStore } from '../../store/useEditorActionsStore'
 import { accent, border, fg, surface } from '../../design'
+import { isMarkdownFile } from '../../utils/fileType'
 
 interface DirEntry { name: string; path: string; isDirectory: boolean }
 interface PickerState { dirPath: string; rect: DOMRect }
@@ -130,7 +132,10 @@ function SegmentPicker({
 export function Breadcrumb() {
   const activeTab = useEditorStore((s) => s.getActiveTab())
   const projectPath = useSettingsStore((s) => s.projectPath)
+  const mdPreviewOpen = useEditorActionsStore((s) => s.mdPreviewOpen)
+  const toggleMdPreview = useEditorActionsStore((s) => s.toggleMdPreview)
   const [picker, setPicker] = useState<PickerState | null>(null)
+  const isMd = isMarkdownFile(activeTab?.filePath ?? '')
 
   if (!activeTab?.filePath || !projectPath) return null
 
@@ -212,6 +217,33 @@ export function Breadcrumb() {
           rect={picker.rect}
           onClose={() => setPicker(null)}
         />
+      )}
+
+      {isMd && (
+        <>
+          <div style={{ flex: 1 }} />
+          <button
+            type="button"
+            onClick={toggleMdPreview}
+            title={mdPreviewOpen ? 'Close preview' : 'Open Markdown preview'}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: '1px 6px',
+              borderRadius: 3,
+              fontSize: 11,
+              color: mdPreviewOpen ? accent.cyan.fg : fg[3],
+              flexShrink: 0,
+            }}
+          >
+            {mdPreviewOpen ? <EyeOff size={11} /> : <Eye size={11} />}
+            Preview
+          </button>
+        </>
       )}
     </div>
   )

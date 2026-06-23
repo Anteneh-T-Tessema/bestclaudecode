@@ -26,12 +26,23 @@ export function InlineAIEdit() {
     inputRef.current?.focus()
   }, [])
 
+  const isGenerateMode = inlineEditTarget?.selectedText === ''
+
   const runGenerate = async () => {
     if (!instruction.trim() || !inlineEditTarget || !activeTabId || !tab) return
     setPhase('loading')
     try {
-      const systemPrompt = `You are an expert code editor. The user will provide a code snippet and an instruction. Return ONLY the edited code with no explanation, no markdown fences, no extra text.`
-      const userMessage = `Code to edit:\n\`\`\`\n${inlineEditTarget.selectedText}\n\`\`\`\n\nInstruction: ${instruction}`
+      const systemPrompt = isGenerateMode
+        ? `You are an expert code editor. Generate code to insert at the cursor position based on the user's instruction and the surrounding context. Return ONLY the new code with no explanation, no markdown fences, no extra text.`
+        : `You are an expert code editor. The user will provide a code snippet and an instruction. Return ONLY the edited code with no explanation, no markdown fences, no extra text.`
+
+      const contextLines = isGenerateMode
+        ? tab.content.split('\n').slice(0, inlineEditTarget.startLine).slice(-15).join('\n')
+        : ''
+
+      const userMessage = isGenerateMode
+        ? `File: ${tab.filePath}\n\nContext above cursor:\n\`\`\`\n${contextLines}\n\`\`\`\n\nInstruction: ${instruction}`
+        : `Code to edit:\n\`\`\`\n${inlineEditTarget.selectedText}\n\`\`\`\n\nInstruction: ${instruction}`
 
       const streamId = await window.api.ai.streamChat({
         messages: [{ role: 'user', content: userMessage }],
@@ -68,11 +79,20 @@ export function InlineAIEdit() {
   const accept = () => {
     if (!inlineEditTarget || !activeTabId || !tab) return
     const lines = tab.content.split('\n')
-    const before = lines.slice(0, inlineEditTarget.startLine - 1)
-    const after = lines.slice(inlineEditTarget.endLine)
-    const newContent = [...before, result, ...after].join('\n')
+    let newContent: string
+    if (isGenerateMode) {
+      // Insert generated code after the cursor line
+      const before = lines.slice(0, inlineEditTarget.startLine)
+      const after = lines.slice(inlineEditTarget.startLine)
+      newContent = [...before, result, ...after].join('\n')
+    } else {
+      // Replace the selected lines with the edited result
+      const before = lines.slice(0, inlineEditTarget.startLine - 1)
+      const after = lines.slice(inlineEditTarget.endLine)
+      newContent = [...before, result, ...after].join('\n')
+    }
     updateContent(activeTabId, newContent)
-    toast.success('AI edit applied')
+    toast.success(isGenerateMode ? 'Code generated' : 'AI edit applied')
     closeInlineEdit()
   }
 
@@ -126,12 +146,16 @@ export function InlineAIEdit() {
           }}
         >
           <Wand2 size={14} style={{ color: accent.violet.fg }} />
-          <span style={{ fontSize: 12, fontWeight: 600, color: fg[0] }}>AI Edit</span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: fg[0] }}>
+            {isGenerateMode ? 'AI Generate' : 'AI Edit'}
+          </span>
           <span style={{ fontSize: 11, color: fg[3], marginLeft: 4 }}>
-            Lines {inlineEditTarget.startLine}–{inlineEditTarget.endLine}
+            {isGenerateMode ? `Line ${inlineEditTarget.startLine}` : `Lines ${inlineEditTarget.startLine}–${inlineEditTarget.endLine}`}
           </span>
           {reviewing && (
-            <span style={{ fontSize: 10, color: accent.amber.fg, marginLeft: 4 }}>Review before applying</span>
+            <span style={{ fontSize: 10, color: accent.amber.fg, marginLeft: 4 }}>
+              {isGenerateMode ? 'Insert after line' : 'Review before applying'}
+            </span>
           )}
           <div style={{ flex: 1 }} />
           <button
@@ -146,7 +170,7 @@ export function InlineAIEdit() {
 
         {!reviewing && (
           <>
-            {/* Selected code preview */}
+            {/* Selected code / context preview */}
             <div
               style={{
                 padding: '10px 14px',
@@ -156,9 +180,14 @@ export function InlineAIEdit() {
                 overflow: 'auto',
               }}
             >
+              {isGenerateMode ? (
+                <div style={{ fontSize: 10, color: fg[4], marginBottom: 4 }}>Context above cursor (last 15 lines)</div>
+              ) : null}
               <pre style={{ margin: 0, fontSize: 11, color: fg[2], fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
-                {inlineEditTarget.selectedText.slice(0, 400)}
-                {inlineEditTarget.selectedText.length > 400 ? '…' : ''}
+                {isGenerateMode
+                  ? tab?.content.split('\n').slice(0, inlineEditTarget.startLine).slice(-15).join('\n')
+                  : inlineEditTarget.selectedText.slice(0, 400) + (inlineEditTarget.selectedText.length > 400 ? '…' : '')
+                }
               </pre>
             </div>
 

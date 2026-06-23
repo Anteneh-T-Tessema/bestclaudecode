@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { DiffEditor } from '@monaco-editor/react'
-import { GitBranch, RefreshCw, Plus, GitCommit, Clock, CheckCircle, Minus, AlertCircle, X, ArrowUp, ArrowDown, ChevronRight, FileText, Check } from 'lucide-react'
+import { GitBranch, RefreshCw, Plus, GitCommit, Clock, CheckCircle, Minus, AlertCircle, X, ArrowUp, ArrowDown, ChevronRight, FileText, Check, Sparkles } from 'lucide-react'
 import { useSettingsStore } from '../../store/useSettingsStore'
 import { useAppStore } from '../../store/useAppStore'
+import { useChatStore } from '../../store/useChatStore'
 import { toast } from '../../store/useToastStore'
 import { EmptyState } from '../EmptyState'
 import { PanelHeader, IconButton, accent, border, fg, surface } from '../../design'
@@ -292,6 +293,8 @@ export function GitPanel() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [message, setMessage] = useState('')
   const [committing, setCommitting] = useState(false)
+  const [generatingMsg, setGeneratingMsg] = useState(false)
+  const activeModel = useChatStore((s) => s.activeModel)
   const [loading, setLoading] = useState(false)
   const [pushing, setPushing] = useState(false)
   const [pulling, setPulling] = useState(false)
@@ -421,6 +424,37 @@ export function GitPanel() {
       refresh()
     } else {
       toast.error(`Commit failed: ${result.error}`)
+    }
+  }
+
+  const generateCommitMsg = async () => {
+    if (!projectPath || generatingMsg) return
+    setGeneratingMsg(true)
+    try {
+      const diff = await window.api.git.stagedDiff(projectPath)
+      if (!diff.trim()) {
+        toast.error('No staged changes — stage files first')
+        return
+      }
+      const streamId = await window.api.ai.streamChat({
+        messages: [{
+          role: 'user',
+          content: `Write a concise git commit message for these staged changes:\n\n${diff.slice(0, 8000)}`,
+        }],
+        model: activeModel,
+        systemPrompt: 'You are a git commit message expert. Return ONLY the commit message — subject line ≤72 chars in imperative mood, optional blank line + body. No extra commentary.',
+      })
+      let msg = ''
+      await new Promise<void>((resolve, reject) => {
+        const unChunk = window.api.ai.onChunk(streamId, (d) => { msg += d })
+        const unDone = window.api.ai.onDone(streamId, () => { unChunk(); unDone(); resolve() })
+        const unErr = window.api.ai.onError(streamId, (e) => { unChunk(); unDone(); unErr(); reject(new Error(e)) })
+      })
+      setMessage(msg.trim())
+    } catch (err) {
+      toast.error(`Failed to generate commit message: ${(err as Error).message}`)
+    } finally {
+      setGeneratingMsg(false)
     }
   }
 
@@ -571,7 +605,8 @@ export function GitPanel() {
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
           <div style={{ padding: '8px 10px', borderBottom: `1px solid ${border[1]}`, flexShrink: 0 }}>
-            <textarea
+            <div style={{ position: 'relative' }}>
+              <textarea
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               placeholder="Commit message (⌘↵ to commit)"
@@ -594,6 +629,27 @@ export function GitPanel() {
                 lineHeight: 1.5,
               }}
             />
+            <button
+              type="button"
+              onClick={generateCommitMsg}
+              disabled={generatingMsg}
+              title="Generate commit message from staged diff"
+              style={{
+                position: 'absolute',
+                top: 5,
+                right: 6,
+                background: 'none',
+                border: 'none',
+                cursor: generatingMsg ? 'not-allowed' : 'pointer',
+                color: generatingMsg ? fg[4] : accent.violet.fg,
+                padding: 2,
+                display: 'flex',
+                alignItems: 'center',
+              }}
+            >
+              <Sparkles size={12} />
+            </button>
+            </div>
             <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
               <button
                 type="button"

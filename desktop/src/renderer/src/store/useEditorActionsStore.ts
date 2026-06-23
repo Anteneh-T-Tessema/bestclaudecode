@@ -6,6 +6,7 @@ interface EditorActionsStore {
   goToLineOpen: boolean
   diffViewerOpen: boolean
   diffViewerPath: string | null
+  mdPreviewOpen: boolean
 
   openInlineEdit: (tabId: string, startLine: number, endLine: number, selectedText: string) => void
   closeInlineEdit: () => void
@@ -13,6 +14,8 @@ interface EditorActionsStore {
   closeGoToLine: () => void
   openDiffViewer: (filePath: string) => void
   closeDiffViewer: () => void
+  toggleMdPreview: () => void
+  setMdPreviewOpen: (v: boolean) => void
 }
 
 export const useEditorActionsStore = create<EditorActionsStore>((set) => ({
@@ -21,6 +24,7 @@ export const useEditorActionsStore = create<EditorActionsStore>((set) => ({
   goToLineOpen: false,
   diffViewerOpen: false,
   diffViewerPath: null,
+  mdPreviewOpen: false,
 
   openInlineEdit: (tabId, startLine, endLine, selectedText) =>
     set({ inlineEditOpen: true, inlineEditTarget: { tabId, startLine, endLine, selectedText } }),
@@ -31,4 +35,7 @@ export const useEditorActionsStore = create<EditorActionsStore>((set) => ({
 
   openDiffViewer: (filePath) => set({ diffViewerOpen: true, diffViewerPath: filePath }),
   closeDiffViewer: () => set({ diffViewerOpen: false, diffViewerPath: null }),
+
+  toggleMdPreview: () => set((s) => ({ mdPreviewOpen: !s.mdPreviewOpen })),
+  setMdPreviewOpen: (v) => set({ mdPreviewOpen: v }),
 }))

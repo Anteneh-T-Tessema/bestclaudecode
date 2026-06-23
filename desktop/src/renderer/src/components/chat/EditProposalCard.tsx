@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { DiffEditor } from '@monaco-editor/react'
 import { FileEdit, Check, X, ChevronDown, ChevronRight } from 'lucide-react'
 import { useEditorStore } from '../../store/useEditorStore'
@@ -25,10 +25,10 @@ interface EditProposalCardProps {
 }
 
 export function EditProposalCard({ block, onApply, isGroupApplied }: EditProposalCardProps) {
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(true)
   const [original, setOriginal] = useState<string | null>(null)
   const [status, setStatus] = useState<Status>('pending')
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
 
   const projectPath = useSettingsStore((s) => s.projectPath)
   const openFile = useEditorStore((s) => s.openFile)
@@ -37,20 +37,16 @@ export function EditProposalCard({ block, onApply, isGroupApplied }: EditProposa
 
   const absPath = block.path.startsWith('/') ? block.path : `${projectPath}/${block.path}`
 
-  const toggleExpand = async () => {
-    if (!expanded && original === null) {
-      setLoading(true)
-      let currentContent = ''
-      try {
-        currentContent = await window.api.fs.readFile(absPath)
-      } catch {
-        currentContent = ''
-      }
-      setOriginal(currentContent)
-      setLoading(false)
-    }
-    setExpanded((e) => !e)
-  }
+  // Pre-load the original file on mount so the diff is ready immediately.
+  useEffect(() => {
+    let cancelled = false
+    window.api.fs.readFile(absPath)
+      .then((content) => { if (!cancelled) { setOriginal(content); setLoading(false) } })
+      .catch(() => { if (!cancelled) { setOriginal(''); setLoading(false) } })
+    return () => { cancelled = true }
+  }, [absPath])
+
+  const toggleExpand = () => setExpanded((e) => !e)
 
   const apply = async () => {
     try {
