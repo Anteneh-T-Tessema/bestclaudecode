@@ -119,4 +119,19 @@ export function registerSearchHandlers(): void {
     if (!result.ok) return { url, task, result: 'Browse failed to start', success: false }
     return result.stats as BrowseResult
   })
+
+  // Gap 29 — automatic hybrid retrieval for chat, deduped against manual @file/@folder mentions.
+  // chat_context.py already enriches each hit with a snippet, so results only
+  // need the lineNumber field derived to match BM25Result, not a re-read of the file.
+  ipcMain.handle('context:assemble', async (_event, query: string, manualPaths: string[]): Promise<BM25Response> => {
+    const result = await runPythonJson(['-m', 'src.chat_context', query, repoRoot(), '--json'])
+    if (!result.ok) return { docCount: 0, avgDl: 0, results: [] }
+    const raw = result.stats as { query: string; results: BM25Result[] }
+    const root = repoRoot()
+    const manualResolved = new Set(manualPaths.map((p) => path.resolve(root, p)))
+    const filtered = (raw.results ?? [])
+      .filter((r) => !manualResolved.has(path.resolve(root, r.file)))
+      .map((r) => ({ ...r, lineNumber: extractLineNumber(r.line) ?? undefined }))
+    return { docCount: filtered.length, avgDl: 0, results: filtered }
+  })
 }

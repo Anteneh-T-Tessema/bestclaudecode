@@ -46,7 +46,16 @@ async function loadProjectRules(projectPath: string | null): Promise<string> {
   }
 }
 
-/** If message contains @codebase, inject top BM25 results as context. */
+/** Escape a string for safe interpolation into an XML-ish attribute value. */
+function escapeAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
+/** If message contains @codebase, inject top hybrid (BM25 + vector) search results as context. */
 async function injectCodebaseContext(content: string): Promise<string> {
   if (!content.includes('@codebase')) return content
   const match = content.match(/@codebase\s+(.+?)(\n|$)/)
@@ -54,7 +63,7 @@ async function injectCodebaseContext(content: string): Promise<string> {
   if (!query) return content
 
   try {
-    const resp = await window.api.search.bm25(query)
+    const resp = await window.api.search.vector(query, true)
     if (!resp?.results?.length) return content
 
     const blocks = resp.results.slice(0, 5).map((r) => {
@@ -340,11 +349,16 @@ export function ChatInput() {
     // @terminal — inject last ~100 lines of captured terminal output
     finalContent = injectTerminalContext(finalContent)
 
+    // Paths the user already pulled in manually — fed into context:assemble
+    // below so the automatic baseline retrieval doesn't duplicate them.
+    const manuallyMentionedPaths: string[] = []
+
     // @file:path — inject a specific file chosen via the picker
     const fileRefRe = /@file:([^\s]+)/g
     let fileRefMatch: RegExpExecArray | null
     while ((fileRefMatch = fileRefRe.exec(finalContent)) !== null) {
       const relPath = fileRefMatch[1]
+      manuallyMentionedPaths.push(relPath)
       const pp = useSettingsStore.getState().projectPath
       if (pp) {
         try {
@@ -363,6 +377,7 @@ export function ChatInput() {
     let folderRefMatch: RegExpExecArray | null
     while ((folderRefMatch = folderRefRe.exec(finalContent)) !== null) {
       const relDir = folderRefMatch[1]
+      manuallyMentionedPaths.push(relDir)
       const pp = useSettingsStore.getState().projectPath
       if (pp) {
         try {
@@ -395,6 +410,20 @@ export function ChatInput() {
 
     // @docs — inject package documentation context
     finalContent = await injectDocsContext(finalContent)
+
+    // Gap 29 — automatic hybrid retrieval baseline, runs unconditionally (not
+    // gated on any @-mention) using the raw user input (`content`, not
+    // `finalContent`) as the retrieval query so expanded file/issue/web blocks
+    // don't pollute it. Deduped against manuallyMentionedPaths server-side.
+    if (content.trim()) {
+      try {
+        const ctx = await window.api.search.assembleContext(content, manuallyMentionedPaths)
+        if (ctx?.results?.length) {
+          const blocks = ctx.results.map((r) => `// ${r.file}${r.lineNumber ? `:${r.lineNumber}` : ''} — ${r.line}\n${r.snippet ?? ''}`)
+          finalContent = `<auto_context query="${escapeAttr(content)}">\n${blocks.join('\n\n---\n\n')}\n</auto_context>\n\n${finalContent}`
+        }
+      } catch { /* never block sending on a context-assembly failure */ }
+    }
 
     const { sessions, activeSessionId } = useChatStore.getState()
     const activeSession = sessions.find((s) => s.id === activeSessionId)

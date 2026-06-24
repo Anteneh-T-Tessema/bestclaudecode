@@ -158,6 +158,8 @@ const api = {
     vector: (query: string, hybrid?: boolean): Promise<BM25Response> =>
       ipcRenderer.invoke('search:vector', query, hybrid ?? false),
     browse: (url: string, task: string): Promise<BrowseResult> => ipcRenderer.invoke('search:browse', url, task),
+    assembleContext: (query: string, manualPaths: string[]): Promise<BM25Response> =>
+      ipcRenderer.invoke('context:assemble', query, manualPaths),
   },
 
   // ── Task Planner (subprocess bridge → src.task_planner) ─────────────────────

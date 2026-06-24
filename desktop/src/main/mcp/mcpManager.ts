@@ -1,13 +1,17 @@
 /**
  * MCP client manager — connects to configured MCP servers over stdio,
- * aggregates their tools into a single namespaced list, and dispatches
- * tool calls back to the right server. Called from mcp.handlers.ts (IPC)
- * and ai.handlers.ts (the tool-calling loop inside streamChat).
+ * aggregates their tools (plus one builtin `search_codebase` tool backed by
+ * the repo's own hybrid retrieval) into a single namespaced list, and
+ * dispatches tool calls back to the right server. Called from
+ * mcp.handlers.ts (IPC) and ai.handlers.ts (the tool-calling loop inside
+ * streamChat).
  */
 import { randomUUID } from 'crypto'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { store } from '../store'
+import { repoRoot } from '../paths'
+import { runChatContext } from '../chatContext'
 
 export interface McpServerConfig {
   id: string
@@ -40,6 +44,10 @@ interface ConnectedServer {
 const connected = new Map<string, ConnectedServer>()
 const lastError = new Map<string, string>()
 const TOOL_SEP = '__'
+// Not a real connected server — just the namespace prefix for the builtin
+// tool below. Must not contain TOOL_SEP itself, or qualified-name splitting
+// (which splits on the first occurrence) would misparse it.
+const BUILTIN_SERVER_ID = '_lakoora'
 
 export function listServerConfigs(): McpServerConfig[] {
   return (store.get('mcpServers') as McpServerConfig[] | undefined) ?? []
@@ -121,9 +129,22 @@ export async function disconnectAllServers(): Promise<void> {
   await Promise.all([...connected.keys()].map((id) => disconnectServer(id)))
 }
 
-/** Aggregated tools across all connected servers, namespaced as "<serverId>__<toolName>" to avoid collisions. */
+/** Aggregated tools across all connected servers, namespaced as "<serverId>__<toolName>" to avoid collisions, plus one builtin tool. */
 export function getAggregatedTools(): AggregatedTool[] {
-  const out: AggregatedTool[] = []
+  const out: AggregatedTool[] = [
+    {
+      qualifiedName: `${BUILTIN_SERVER_ID}${TOOL_SEP}search_codebase`,
+      description:
+        'Search this repo with hybrid (BM25 + embedding rerank) retrieval. Use this when the automatic context already injected into the conversation isn\'t sufficient and you need to look up more code.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Keywords, identifiers, or a natural-language description of what to find' },
+        },
+        required: ['query'],
+      },
+    },
+  ]
   for (const [serverId, server] of connected) {
     for (const tool of server.tools) {
       out.push({
@@ -136,11 +157,32 @@ export function getAggregatedTools(): AggregatedTool[] {
   return out
 }
 
+async function callBuiltinSearchCodebase(args: Record<string, unknown>): Promise<string> {
+  const query = args.query as string | undefined
+  if (!query) return '(no results: missing "query" argument)'
+
+  const results = await runChatContext(query, repoRoot())
+  if (!results.length) return `(no results for: "${query}")`
+
+  return results
+    .map((r) => `${r.file}:${r.line} — ${r.score}\n${r.snippet}`)
+    .join('\n\n---\n\n')
+}
+
 export async function callQualifiedTool(qualifiedName: string, args: Record<string, unknown>): Promise<string> {
   const sepIdx = qualifiedName.indexOf(TOOL_SEP)
   if (sepIdx === -1) return `Error: malformed tool name "${qualifiedName}"`
   const serverId = qualifiedName.slice(0, sepIdx)
   const toolName = qualifiedName.slice(sepIdx + TOOL_SEP.length)
+
+  if (serverId === BUILTIN_SERVER_ID) {
+    try {
+      return await callBuiltinSearchCodebase(args)
+    } catch (err) {
+      return `(no results: ${(err as Error).message})`
+    }
+  }
+
   const server = connected.get(serverId)
   if (!server) return `Error: MCP server "${serverId}" is not connected`
 

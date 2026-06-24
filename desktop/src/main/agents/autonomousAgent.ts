@@ -17,6 +17,7 @@ import { randomUUID } from 'crypto'
 import { runPythonJson, runCommand } from '../pythonBridge'
 import { repoRoot } from '../paths'
 import { store } from '../store'
+import { runChatContext } from '../chatContext'
 import * as path from 'path'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -103,6 +104,16 @@ function broadcast(progress: AgentProgress): void {
   }
 }
 
+// ── Per-subtask repo context (Gap 28) ────────────────────────────────────────
+
+/** Builds repo orientation relevant to one subtask, formatted for the agent's system prompt. */
+async function getSubtaskContext(query: string, repoRootPath: string): Promise<string> {
+  const results = await runChatContext(query, repoRootPath)
+  if (!results.length) return ''
+  const blocks = results.map((r) => `${r.file} — ${r.line}\n\`\`\`\n${r.snippet}\n\`\`\``)
+  return `## Relevant codebase context\n\n${blocks.join('\n\n')}`
+}
+
 // ── AI streaming helper ───────────────────────────────────────────────────────
 
 async function streamToString(
@@ -117,9 +128,11 @@ async function streamToString(
     const apiKey = store.get('anthropicApiKey') as string | undefined
     if (!apiKey) throw new Error('Anthropic API key not configured')
     const client = new Anthropic({ apiKey })
+    const systemMessage = messages.find((m) => m.role === 'system')
     const stream = client.messages.stream({
       model,
       max_tokens: 8192,
+      ...(systemMessage ? { system: systemMessage.content } : {}),
       messages: messages.filter((m) => m.role !== 'system').map((m) => ({
         role: m.role as 'user' | 'assistant',
         content: m.content,
@@ -252,6 +265,10 @@ export async function startAutonomousSession(opts: {
   void (async () => {
     try {
       let retryContext: string | null = null
+      // Cached per subtask id so a retry of the same subtask reuses the
+      // already-fetched context block instead of re-querying chat_context.
+      let cachedContextSubtaskId = ''
+      let cachedContextBlock = ''
 
       // eslint-disable-next-line no-constant-condition
       while (true) {
@@ -283,6 +300,17 @@ export async function startAutonomousSession(opts: {
           doneCount, totalCount,
         })
 
+        // Fetched once per subtask attempt cycle, not per retry — it goes in
+        // the system prompt rather than userContent because userContent is
+        // rebuilt on every retry (see isRetry below), so putting context there
+        // would re-fetch and duplicate it on each retry of the same subtask.
+        if (cachedContextSubtaskId !== subtask.id) {
+          cachedContextSubtaskId = subtask.id
+          cachedContextBlock = await getSubtaskContext(subtask.description, projectPath)
+        }
+        const contextBlock = cachedContextBlock
+        const systemPrompt = contextBlock ? `${AGENT_SYSTEM_PROMPT}\n\n${contextBlock}` : AGENT_SYSTEM_PROMPT
+
         const userContent = isRetry
           ? `Previous attempt failed:\n${retryContext}\n\nRetry the same subtask:\n${subtask.description}`
           : subtask.description
@@ -291,7 +319,7 @@ export async function startAutonomousSession(opts: {
         try {
           response = await streamToString(
             [
-              { role: 'system', content: AGENT_SYSTEM_PROMPT },
+              { role: 'system', content: systemPrompt },
               { role: 'user', content: userContent },
             ],
             model,
