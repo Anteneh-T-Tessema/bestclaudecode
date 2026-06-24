@@ -156,7 +156,11 @@ export function registerAiHandlers(): void {
           if (!apiKey) throw new Error('Anthropic API key not configured. Go to Settings to add it.')
 
           const client = new Anthropic({ apiKey })
-          const apiMessages = messages
+          type AnthropicMessageParam = Parameters<typeof client.messages.stream>[0]['messages'][number]
+          type AnthropicToolUnion = NonNullable<Parameters<typeof client.messages.stream>[0]['tools']>[number]
+          type AnthropicTool = Extract<AnthropicToolUnion, { input_schema: unknown }>
+
+          const apiMessages: AnthropicMessageParam[] = messages
             .filter(m => m.role !== 'system')
             .map((m) => {
               const role = m.role as 'user' | 'assistant'
@@ -177,15 +181,49 @@ export function registerAiHandlers(): void {
               return { role, content: blocks }
             })
 
-          const stream = client.messages.stream({
-            model, max_tokens: 4096, system: systemPrompt, messages: apiMessages,
-          })
+          const { getAggregatedTools, callQualifiedTool } = await import('../mcp/mcpManager')
+          const mcpTools = getAggregatedTools()
+          const anthropicTools: AnthropicTool[] = mcpTools.map((t) => ({
+            name: t.qualifiedName,
+            description: t.description,
+            input_schema: t.inputSchema as AnthropicTool['input_schema'],
+          }))
 
-          for await (const chunk of stream) {
+          // Tool-calling loop: each round streams text, then checks whether the
+          // model asked to use a tool. If so, run it via the connected MCP
+          // server and feed the result back for another round. Capped to avoid
+          // a runaway loop if a tool keeps getting re-invoked.
+          const MAX_TOOL_ROUNDS = 6
+          for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
             if (controller.signal.aborted) break
-            if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
-              send('ai:chunk', { streamId, delta: chunk.delta.text })
+
+            const stream = client.messages.stream({
+              model, max_tokens: 4096, system: systemPrompt, messages: apiMessages,
+              ...(anthropicTools.length > 0 ? { tools: anthropicTools } : {}),
+            })
+
+            for await (const chunk of stream) {
+              if (controller.signal.aborted) break
+              if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
+                send('ai:chunk', { streamId, delta: chunk.delta.text })
+              }
             }
+            if (controller.signal.aborted) break
+
+            const finalMsg = await stream.finalMessage()
+            if (finalMsg.stop_reason !== 'tool_use') break
+
+            const toolResultBlocks: Array<{ type: 'tool_result'; tool_use_id: string; content: string }> = []
+            for (const block of finalMsg.content) {
+              if (block.type !== 'tool_use') continue
+              send('ai:chunk', { streamId, delta: `\n\n*🔧 Using tool \`${block.name}\`…*\n\n` })
+              const result = await callQualifiedTool(block.name, (block.input as Record<string, unknown>) ?? {})
+              toolResultBlocks.push({ type: 'tool_result', tool_use_id: block.id, content: result })
+            }
+            if (toolResultBlocks.length === 0) break
+
+            apiMessages.push({ role: 'assistant', content: finalMsg.content as AnthropicMessageParam['content'] })
+            apiMessages.push({ role: 'user', content: toolResultBlocks })
           }
         } else if (model.startsWith('gpt') || model.startsWith('o1') || model.startsWith('o3')) {
           const { default: OpenAI } = await import('openai')

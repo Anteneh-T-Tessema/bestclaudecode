@@ -14,6 +14,7 @@ import { registerGithubHandlers } from './github.handlers'
 import { registerSandboxHandlers } from './sandbox.handlers'
 import { registerAgentHandlers } from './agent.handlers'
 import { registerDapHandlers } from './dap.handlers'
+import { registerMcpHandlers } from './mcp.handlers'
 
 export function registerAllIPC(): void {
   registerDecisionsHandlers()
@@ -31,6 +32,7 @@ export function registerAllIPC(): void {
   registerSandboxHandlers()
   registerAgentHandlers()
   registerDapHandlers()
+  registerMcpHandlers()
 
   ipcMain.on('window:minimize', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)

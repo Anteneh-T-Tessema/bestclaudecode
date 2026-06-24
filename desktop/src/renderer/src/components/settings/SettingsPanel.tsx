@@ -4,6 +4,7 @@ import { PanelHeader, Button, accent, border, fg, surface } from '../../design'
 import { useSettingsStore } from '../../store/useSettingsStore'
 import { toast } from '../../store/useToastStore'
 import { ModelSelector } from '../chat/ModelSelector'
+import { McpServersSection } from './McpServersSection'
 
 interface EngineHealth {
   repoRoot: string
@@ -432,6 +433,8 @@ export function SettingsPanel() {
             </div>
           )}
         </div>
+
+        <McpServersSection />
 
         {recentProjects.length > 0 && (
           <div>

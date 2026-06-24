@@ -229,5 +229,13 @@ export function createWebApi(): API {
       maximize: () => {},
       close: () => {},
     },
+
+    mcp: {
+      listServers: () => Promise.resolve(notPorted('mcp.listServers', [])),
+      addServer: () => Promise.resolve(notPorted('mcp.addServer', { id: '', name: '', command: '', args: [] })),
+      removeServer: () => Promise.resolve(notPorted('mcp.removeServer', undefined)),
+      connect: () => Promise.resolve(notPorted('mcp.connect', { success: false })),
+      disconnect: () => Promise.resolve(notPorted('mcp.disconnect', undefined)),
+    },
   } satisfies API
 }

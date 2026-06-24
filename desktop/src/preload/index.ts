@@ -7,6 +7,7 @@ import type { BlameEntry } from '../main/ipc/git.handlers'
 import type { ShadowInfo } from '../main/ipc/sandbox.handlers'
 import type { PlanSummary, TaskPlanDetail } from '../main/ipc/taskplanner.handlers'
 import type { ArchDocResult } from '../main/ipc/archDoc.handlers'
+import type { McpServerConfig, McpServerStatus } from '../main/mcp/mcpManager'
 
 const api = {
   // ── Decisions ──────────────────────────────────────────────────────────────
@@ -342,6 +343,17 @@ const api = {
     minimize: () => ipcRenderer.send('window:minimize'),
     maximize: () => ipcRenderer.send('window:maximize'),
     close: () => ipcRenderer.send('window:close'),
+  },
+
+  // ── MCP Servers ──────────────────────────────────────────────────────────
+  mcp: {
+    listServers: () => ipcRenderer.invoke('mcp:listServers') as Promise<McpServerStatus[]>,
+    addServer: (opts: { name: string; command: string; args: string[] }) =>
+      ipcRenderer.invoke('mcp:addServer', opts) as Promise<McpServerConfig>,
+    removeServer: (id: string) => ipcRenderer.invoke('mcp:removeServer', id) as Promise<void>,
+    connect: (id: string) =>
+      ipcRenderer.invoke('mcp:connect', id) as Promise<{ success: boolean; error?: string; toolCount?: number }>,
+    disconnect: (id: string) => ipcRenderer.invoke('mcp:disconnect', id) as Promise<void>,
   },
 }
 
