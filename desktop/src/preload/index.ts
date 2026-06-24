@@ -108,7 +108,7 @@ const api = {
 
   // ── AI Chat (streaming) ────────────────────────────────────────────────────
   ai: {
-    streamChat: (opts: { messages: Array<{ role: string; content: string }>; model: string; systemPrompt?: string }) =>
+    streamChat: (opts: { messages: Array<{ role: string; content: string; images?: string[] }>; model: string; systemPrompt?: string }) =>
       ipcRenderer.invoke('ai:streamChat', opts) as Promise<string>,
     abortStream: (id: string) => ipcRenderer.invoke('ai:abortStream', id),
     listOllamaModels: () => ipcRenderer.invoke('ai:listOllamaModels') as Promise<string[]>,

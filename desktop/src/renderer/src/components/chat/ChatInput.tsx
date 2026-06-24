@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Send, Square } from 'lucide-react'
+import { Send, Square, X, ImageIcon } from 'lucide-react'
 import { useChatStore } from '../../store/useChatStore'
 import { useEditorStore } from '../../store/useEditorStore'
 import { useSettingsStore } from '../../store/useSettingsStore'
@@ -220,6 +220,48 @@ export function ChatInput() {
   const [text, setText] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
+  // Pasted/dropped image attachments (base64 data URLs)
+  const [pendingImages, setPendingImages] = useState<string[]>([])
+  const imageFileInputRef = useRef<HTMLInputElement>(null)
+
+  const addImageFile = useCallback((file: File) => {
+    if (!file.type.startsWith('image/')) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setPendingImages((prev) => (prev.length >= 4 ? prev : [...prev, reader.result as string]))
+      }
+    }
+    reader.readAsDataURL(file)
+  }, [])
+
+  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+    let hasImage = false
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        hasImage = true
+        const file = item.getAsFile()
+        if (file) addImageFile(file)
+      }
+    }
+    if (hasImage) e.preventDefault()
+  }, [addImageFile])
+
+  const handleDrop = useCallback((e: React.DragEvent<HTMLTextAreaElement>) => {
+    const files = e.dataTransfer?.files
+    if (!files || files.length === 0) return
+    const hasImage = Array.from(files).some((f) => f.type.startsWith('image/'))
+    if (!hasImage) return
+    e.preventDefault()
+    for (const f of files) addImageFile(f)
+  }, [addImageFile])
+
+  const removeImage = useCallback((idx: number) => {
+    setPendingImages((prev) => prev.filter((_, i) => i !== idx))
+  }, [])
+
   // Mention autocomplete state
   const [mentionQuery, setMentionQuery] = useState<string | null>(null)
   const [mentionIndex, setMentionIndex] = useState(0)
@@ -258,8 +300,9 @@ export function ChatInput() {
 
   const send = useCallback(async (overrideContent?: string) => {
     const content = (overrideContent !== undefined ? overrideContent : text).trim()
-    if (!content || isStreaming) return
-    if (overrideContent === undefined) setText('')
+    const images = overrideContent !== undefined ? [] : pendingImages
+    if ((!content && images.length === 0) || isStreaming) return
+    if (overrideContent === undefined) { setText(''); setPendingImages([]) }
 
     // @selection — attach currently selected editor text
     let finalContent = content
@@ -355,14 +398,14 @@ export function ChatInput() {
 
     const { sessions, activeSessionId } = useChatStore.getState()
     const activeSession = sessions.find((s) => s.id === activeSessionId)
-    const messages = (activeSession?.messages ?? []).map((m) => ({ role: m.role, content: m.content }))
+    const messages = (activeSession?.messages ?? []).map((m) => ({ role: m.role, content: m.content, images: m.images }))
 
     // E2E test hook: broadcast the final enriched content (with any @-context
     // blocks already injected) so tests can assert on what's being sent without
     // having to patch contextBridge APIs (which are sealed in Electron 28+).
     window.dispatchEvent(new CustomEvent('lakoora:e2e:beforeSend', { detail: { content: finalContent } }))
 
-    addUserMessage(finalContent)
+    addUserMessage(finalContent, images)
 
     const assistantId = startAssistantMessage()
 
@@ -372,7 +415,7 @@ export function ChatInput() {
 
     try {
       const streamId = await window.api.ai.streamChat({
-        messages: [...messages, { role: 'user', content: finalContent }],
+        messages: [...messages, { role: 'user', content: finalContent, images }],
         model: activeModel,
         systemPrompt,
       })
@@ -853,6 +896,27 @@ export function ChatInput() {
           ))}
         </div>
       )}
+      {pendingImages.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, padding: '0 2px 6px', flexWrap: 'wrap' }}>
+          {pendingImages.map((src, i) => (
+            <div key={i} style={{ position: 'relative', width: 48, height: 48, borderRadius: 6, overflow: 'hidden', border: `1px solid ${border[0]}` }}>
+              <img src={src} alt={`attachment ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+              <button
+                type="button"
+                onClick={() => removeImage(i)}
+                title="Remove image"
+                style={{
+                  position: 'absolute', top: 1, right: 1, background: 'rgba(0,0,0,0.65)', border: 'none',
+                  borderRadius: '50%', width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: 'pointer', color: '#fff', padding: 0,
+                }}
+              >
+                <X size={9} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       <div
         style={{
           display: 'flex',
@@ -869,7 +933,10 @@ export function ChatInput() {
           value={text}
           onChange={handleChange}
           onKeyDown={handleKey}
-          placeholder="Ask anything… @selection @file @folder @terminal @problems @codebase @web @docs · Shift+Enter new line"
+          onPaste={handlePaste}
+          onDrop={handleDrop}
+          onDragOver={(e) => e.preventDefault()}
+          placeholder="Ask anything… @selection @file @folder @terminal @problems @codebase @web @docs · paste/drop an image · Shift+Enter new line"
           rows={1}
           style={{
             flex: 1,
@@ -888,6 +955,37 @@ export function ChatInput() {
             const t = e.currentTarget
             t.style.height = 'auto'
             t.style.height = `${Math.min(t.scrollHeight, 160)}px`
+          }}
+        />
+        {!isStreaming && (
+          <button
+            onClick={() => imageFileInputRef.current?.click()}
+            title="Attach image"
+            style={{
+              background: 'none',
+              border: 'none',
+              borderRadius: 6,
+              padding: '5px 8px',
+              cursor: 'pointer',
+              color: fg[3],
+              display: 'flex',
+              alignItems: 'center',
+            }}
+          >
+            <ImageIcon size={13} />
+          </button>
+        )}
+        <input
+          ref={imageFileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          aria-label="Attach image"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const files = e.target.files
+            if (files) for (const f of files) addImageFile(f)
+            e.target.value = ''
           }}
         />
         {isStreaming ? (
@@ -910,15 +1008,15 @@ export function ChatInput() {
         ) : (
           <button
             onClick={() => send()}
-            disabled={!text.trim()}
+            disabled={!text.trim() && pendingImages.length === 0}
             title="Send (Enter)"
             style={{
-              background: text.trim() ? accent.violet.fg : surface.raised,
+              background: (text.trim() || pendingImages.length > 0) ? accent.violet.fg : surface.raised,
               border: 'none',
               borderRadius: 6,
               padding: '5px 8px',
-              cursor: text.trim() ? 'pointer' : 'not-allowed',
-              color: text.trim() ? '#fff' : fg[3],
+              cursor: (text.trim() || pendingImages.length > 0) ? 'pointer' : 'not-allowed',
+              color: (text.trim() || pendingImages.length > 0) ? '#fff' : fg[3],
               display: 'flex',
               alignItems: 'center',
               transition: 'background 0.15s',

@@ -1,22 +1,13 @@
-import { useState, useEffect } from 'react'
-import { DiffEditor } from '@monaco-editor/react'
+import { useState, useEffect, useCallback } from 'react'
 import { FileEdit, Check, X, CheckCheck, XSquare } from 'lucide-react'
 import { useEditorStore } from '../../store/useEditorStore'
 import { useSettingsStore } from '../../store/useSettingsStore'
 import { toast } from '../../store/useToastStore'
 import { accent, border, fg, surface } from '../../design'
 import type { EditBlock } from '../../lib/editBlocks'
+import { diffLines, buildHunks, applyHunks, HunkCard, type Hunk } from '../../lib/hunkDiff'
 
 type FileStatus = 'pending' | 'applied' | 'rejected'
-
-function languageFromPath(p: string): string {
-  const ext = p.split('.').pop()?.toLowerCase() ?? ''
-  const map: Record<string, string> = {
-    ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
-    py: 'python', json: 'json', md: 'markdown', css: 'css', html: 'html',
-  }
-  return map[ext] ?? 'plaintext'
-}
 
 function StatusDot({ status }: { status: FileStatus }) {
   const color =
@@ -36,6 +27,9 @@ export function MultiFileEditCard({ blocks }: { blocks: EditBlock[] }) {
   const [statuses, setStatuses] = useState<FileStatus[]>(() => blocks.map(() => 'pending'))
   const [originals, setOriginals] = useState<(string | null)[]>(() => blocks.map(() => null))
   const [applyingAll, setApplyingAll] = useState(false)
+  // Per-file hunk state, computed lazily once a file's original content loads.
+  const [hunksByFile, setHunksByFile] = useState<Record<number, Hunk[]>>({})
+  const [acceptedByFile, setAcceptedByFile] = useState<Record<number, Set<number>>>({})
 
   const projectPath = useSettingsStore((s) => s.projectPath)
   const openFile = useEditorStore((s) => s.openFile)
@@ -45,25 +39,61 @@ export function MultiFileEditCard({ blocks }: { blocks: EditBlock[] }) {
   const absPath = (b: EditBlock) =>
     b.path.startsWith('/') ? b.path : `${projectPath}/${b.path}`
 
-  // Load original content for the selected file on demand
+  // Load original content for the selected file on demand, then compute hunks.
   useEffect(() => {
     if (originals[selectedIdx] !== null) return
     void (async () => {
       let content = ''
       try { content = await window.api.fs.readFile(absPath(blocks[selectedIdx])) } catch {}
       setOriginals((prev) => { const next = [...prev]; next[selectedIdx] = content; return next })
+      const hunks = buildHunks(diffLines(content, blocks[selectedIdx].content))
+      setHunksByFile((prev) => ({ ...prev, [selectedIdx]: hunks }))
+      setAcceptedByFile((prev) => ({ ...prev, [selectedIdx]: new Set(hunks.map((h) => h.id)) }))
     })()
   }, [selectedIdx, blocks])
 
+  const toggleHunk = useCallback((idx: number, hunkId: number) => {
+    setAcceptedByFile((prev) => {
+      const next = new Set(prev[idx] ?? [])
+      if (next.has(hunkId)) next.delete(hunkId)
+      else next.add(hunkId)
+      return { ...prev, [idx]: next }
+    })
+  }, [])
+
+  const acceptAllHunks = useCallback((idx: number) => {
+    setAcceptedByFile((prev) => ({ ...prev, [idx]: new Set((hunksByFile[idx] ?? []).map((h) => h.id)) }))
+  }, [hunksByFile])
+
+  const rejectAllHunks = useCallback((idx: number) => {
+    setAcceptedByFile((prev) => ({ ...prev, [idx]: new Set() }))
+  }, [])
+
+  // Resolves the content to write for a file: full block content unless the
+  // user has partially accepted hunks for it.
+  const resolvedContent = (idx: number): string => {
+    const hunks = hunksByFile[idx]
+    const accepted = acceptedByFile[idx]
+    if (!hunks || !accepted || accepted.size === hunks.length) return blocks[idx].content
+    return applyHunks(originals[idx] ?? '', hunks, accepted)
+  }
+
   const applyFile = async (idx: number) => {
     const path = absPath(blocks[idx])
+    const content = resolvedContent(idx)
     try {
-      await window.api.fs.writeFile(path, blocks[idx].content)
+      await window.api.fs.writeFile(path, content)
       const tab = tabs.find((t) => t.filePath === path)
-      if (tab) updateContent(tab.id, blocks[idx].content)
-      else openFile(path, blocks[idx].content)
+      if (tab) updateContent(tab.id, content)
+      else openFile(path, content)
       setStatuses((prev) => { const next = [...prev]; next[idx] = 'applied'; return next })
-      toast.success(`Applied ${blocks[idx].path}`)
+      const hunks = hunksByFile[idx]
+      const accepted = acceptedByFile[idx]
+      toast.success(
+        hunks && accepted && accepted.size < hunks.length
+          ? `Applied ${accepted.size}/${hunks.length} hunks in ${blocks[idx].path}`
+          : `Applied ${blocks[idx].path}`
+      )
     } catch (err) {
       toast.error(`Failed: ${(err as Error).message}`)
     }
@@ -85,10 +115,11 @@ export function MultiFileEditCard({ blocks }: { blocks: EditBlock[] }) {
     for (let i = 0; i < blocks.length; i++) {
       if (statuses[i] === 'rejected') continue
       try {
-        await window.api.fs.writeFile(paths[i], blocks[i].content)
+        const content = resolvedContent(i)
+        await window.api.fs.writeFile(paths[i], content)
         const tab = tabs.find((t) => t.filePath === paths[i])
-        if (tab) updateContent(tab.id, blocks[i].content)
-        else openFile(paths[i], blocks[i].content)
+        if (tab) updateContent(tab.id, content)
+        else openFile(paths[i], content)
         applied.push(i)
       } catch (err) {
         toast.error(`Apply failed on ${blocks[i].path}: ${(err as Error).message}`)
@@ -119,6 +150,8 @@ export function MultiFileEditCard({ blocks }: { blocks: EditBlock[] }) {
   const allDone = pendingCount === 0
   const selectedBlock = blocks[selectedIdx]
   const selectedStatus = statuses[selectedIdx]
+  const selectedHunks = hunksByFile[selectedIdx]
+  const selectedAccepted = acceptedByFile[selectedIdx]
 
   return (
     <div
@@ -219,28 +252,40 @@ export function MultiFileEditCard({ blocks }: { blocks: EditBlock[] }) {
           ))}
         </div>
 
-        {/* Diff panel */}
+        {/* Diff panel — per-hunk accept/reject */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-          <div style={{ flex: 1 }}>
-            {originals[selectedIdx] === null ? (
-              <div style={{ padding: 16, color: fg[3], fontSize: 11 }}>Loading…</div>
-            ) : (
-              <DiffEditor
-                original={originals[selectedIdx] ?? ''}
-                modified={selectedBlock.content}
-                language={languageFromPath(selectedBlock.path)}
-                theme="lakoora-dark"
-                options={{
-                  readOnly: true,
-                  renderSideBySide: true,
-                  fontSize: 11,
-                  minimap: { enabled: false },
-                  scrollBeyondLastLine: false,
-                  automaticLayout: true,
-                }}
-              />
-            )}
-          </div>
+          {originals[selectedIdx] === null || !selectedHunks ? (
+            <div style={{ flex: 1, padding: 16, color: fg[3], fontSize: 11 }}>Loading…</div>
+          ) : (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', borderBottom: `1px solid ${border[2]}`, background: surface.base, flexShrink: 0 }}>
+                <span style={{ fontSize: 10, color: fg[3] }}>
+                  {selectedHunks.length === 0 ? 'No changes' : `${selectedAccepted?.size ?? 0}/${selectedHunks.length} hunk${selectedHunks.length !== 1 ? 's' : ''} accepted`}
+                </span>
+                <div style={{ flex: 1 }} />
+                <button type="button" onClick={() => acceptAllHunks(selectedIdx)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 10, color: accent.green.fg, display: 'flex', alignItems: 'center', gap: 3 }}>
+                  <CheckCheck size={10} /> Accept all
+                </button>
+                <button type="button" onClick={() => rejectAllHunks(selectedIdx)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 10, color: fg[3], display: 'flex', alignItems: 'center', gap: 3 }}>
+                  <XSquare size={10} /> Reject all
+                </button>
+              </div>
+              <div style={{ flex: 1, overflowY: 'auto', background: surface.surface }}>
+                {selectedHunks.length === 0 ? (
+                  <div style={{ padding: '12px 14px', fontSize: 11, color: fg[3] }}>No differences found.</div>
+                ) : (
+                  selectedHunks.map((h) => (
+                    <HunkCard
+                      key={h.id}
+                      hunk={h}
+                      accepted={selectedAccepted?.has(h.id) ?? true}
+                      onToggle={() => toggleHunk(selectedIdx, h.id)}
+                    />
+                  ))
+                )}
+              </div>
+            </>
+          )}
 
           {/* Per-file action bar */}
           <div
@@ -281,7 +326,10 @@ export function MultiFileEditCard({ blocks }: { blocks: EditBlock[] }) {
                     color: '#06150c', cursor: 'pointer',
                   }}
                 >
-                  <Check size={11} /> Apply
+                  <Check size={11} />
+                  {selectedHunks && selectedAccepted && selectedAccepted.size < selectedHunks.length
+                    ? `Apply ${selectedAccepted.size} hunk${selectedAccepted.size !== 1 ? 's' : ''}`
+                    : 'Apply'}
                 </button>
               </div>
             ) : (

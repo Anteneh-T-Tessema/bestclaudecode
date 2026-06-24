@@ -5,6 +5,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   timestamp: number
+  images?: string[]
 }
 
 export interface ChatSession {
@@ -94,7 +95,7 @@ interface ChatStore {
   renameSession: (id: string, title: string) => void
 
   // Message actions (operate on active session)
-  addUserMessage: (content: string) => string
+  addUserMessage: (content: string, images?: string[]) => string
   startAssistantMessage: () => string
   appendDelta: (id: string, delta: string) => void
   finalizeMessage: (id: string) => void
@@ -153,9 +154,9 @@ export const useChatStore = create<ChatStore>((set) => ({
     })
   },
 
-  addUserMessage: (content) => {
+  addUserMessage: (content, images) => {
     const id = `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`
-    const msg: ChatMessage = { id, role: 'user', content, timestamp: Date.now() }
+    const msg: ChatMessage = { id, role: 'user', content, timestamp: Date.now(), ...(images?.length ? { images } : {}) }
     set((s) => {
       const sessions = s.sessions.map((sess) => {
         if (sess.id !== s.activeSessionId) return sess

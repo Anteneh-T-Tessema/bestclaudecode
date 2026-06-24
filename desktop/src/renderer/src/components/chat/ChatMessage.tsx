@@ -197,6 +197,18 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
           {isUser ? 'You' : 'Assistant'}
         </div>
         <div style={{ fontSize: 13, color: fg[0], lineHeight: 1.55, wordBreak: 'break-word' }}>
+          {message.images && message.images.length > 0 && (
+            <div style={{ display: 'flex', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
+              {message.images.map((src, i) => (
+                <img
+                  key={i}
+                  src={src}
+                  alt={`attachment ${i + 1}`}
+                  style={{ width: 96, height: 96, objectFit: 'cover', borderRadius: 6, border: `1px solid ${border[1]}` }}
+                />
+              ))}
+            </div>
+          )}
           {renderContent(proseContent)}
           {autoApplied && editBlocks.length > 0 ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 10px', background: accent.violet.subtle, border: `1px solid ${accent.violet.border}`, borderRadius: 6, margin: '6px 0', fontSize: 11, color: accent.violet.fg }}>

@@ -7,6 +7,13 @@ import { store } from '../store'
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
+  images?: string[]
+}
+
+// Splits a "data:image/png;base64,AAAA..." URL into { mediaType, data }.
+function splitDataUrl(dataUrl: string): { mediaType: string; data: string } | null {
+  const m = dataUrl.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/)
+  return m ? { mediaType: m[1], data: m[2] } : null
 }
 
 interface StreamChatOpts {
@@ -151,7 +158,24 @@ export function registerAiHandlers(): void {
           const client = new Anthropic({ apiKey })
           const apiMessages = messages
             .filter(m => m.role !== 'system')
-            .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }))
+            .map((m) => {
+              const role = m.role as 'user' | 'assistant'
+              if (!m.images?.length) return { role, content: m.content }
+              const blocks: Array<
+                | { type: 'image'; source: { type: 'base64'; media_type: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'; data: string } }
+                | { type: 'text'; text: string }
+              > = []
+              for (const img of m.images) {
+                const split = splitDataUrl(img)
+                if (!split) continue
+                blocks.push({
+                  type: 'image',
+                  source: { type: 'base64', media_type: split.mediaType as 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp', data: split.data },
+                })
+              }
+              if (m.content) blocks.push({ type: 'text', text: m.content })
+              return { role, content: blocks }
+            })
 
           const stream = client.messages.stream({
             model, max_tokens: 4096, system: systemPrompt, messages: apiMessages,
@@ -169,10 +193,18 @@ export function registerAiHandlers(): void {
           if (!apiKey) throw new Error('OpenAI API key not configured. Go to Settings to add it.')
 
           const client = new OpenAI({ apiKey })
-          const apiMessages = messages.map((m) => ({ role: m.role, content: m.content }))
+          const apiMessages = messages.map((m) => {
+            if (!m.images?.length) return { role: m.role, content: m.content }
+            const parts: Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }> = []
+            if (m.content) parts.push({ type: 'text', text: m.content })
+            for (const img of m.images) parts.push({ type: 'image_url', image_url: { url: img } })
+            return { role: m.role, content: parts }
+          })
           if (systemPrompt) apiMessages.unshift({ role: 'system', content: systemPrompt })
 
-          const stream = await client.chat.completions.create({ model, messages: apiMessages, stream: true })
+          const stream = await client.chat.completions.create({
+            model, messages: apiMessages as Parameters<typeof client.chat.completions.create>[0]['messages'], stream: true,
+          })
           for await (const chunk of stream) {
             if (controller.signal.aborted) break
             const delta = chunk.choices[0]?.delta?.content ?? ''
