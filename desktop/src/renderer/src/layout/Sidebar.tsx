@@ -13,6 +13,7 @@ import { DebugPanel } from '../components/sidebar/DebugPanel'
 import { OutlinePanel } from '../components/sidebar/OutlinePanel'
 import { NotepadsPanel } from '../components/sidebar/NotepadsPanel'
 import { SettingsPanel } from '../components/settings/SettingsPanel'
+import { UsageDashboardPanel } from '../components/sidebar/UsageDashboardPanel'
 import { ErrorBoundary } from '../components/ErrorBoundary'
 
 const LABELS: Record<string, string> = {
@@ -29,6 +30,7 @@ const LABELS: Record<string, string> = {
   debug: 'DEBUG',
   outline: 'OUTLINE',
   notepads: 'NOTEPADS',
+  usage: 'USAGE DASHBOARD',
   settings: 'SETTINGS',
 }
 
@@ -68,6 +70,8 @@ export function Sidebar() {
         return <OutlinePanel />
       case 'notepads':
         return <NotepadsPanel />
+      case 'usage':
+        return <UsageDashboardPanel />
       case 'settings':
         return <SettingsPanel />
       default:

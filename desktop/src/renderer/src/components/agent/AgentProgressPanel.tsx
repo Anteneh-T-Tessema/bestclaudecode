@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { Bot, Square, CheckCircle2, AlertCircle, Loader, CircleDot, Play, GitBranch, GitPullRequest, Rocket, History } from 'lucide-react'
+import { Bot, Square, CheckCircle2, AlertCircle, Loader, CircleDot, Play, GitBranch, GitPullRequest, Rocket, History, ShieldAlert, X, Check } from 'lucide-react'
 import { PanelHeader, accent, border, fg, surface } from '../../design'
 import { toast } from '../../store/useToastStore'
 import { useChatStore } from '../../store/useChatStore'
@@ -14,7 +14,7 @@ interface AgentProgress {
   status:
     | 'running' | 'done' | 'retrying' | 'blocked' | 'finished' | 'error'
     | 'preparing' | 'finalizing' | 'pr-opened' | 'push-failed-kept-locally'
-    | 'deploying' | 'deployed'
+    | 'deploying' | 'deployed' | 'pending-approval' | 'approval-rejected'
   output?: string
   error?: string
   doneCount: number
@@ -35,6 +35,8 @@ function StatusIcon({ status }: { status: AgentProgress['status'] }) {
   if (status === 'preparing' || status === 'finalizing') return <GitBranch size={11} color={accent.amber.fg} />
   if (status === 'deploying') return <Rocket size={11} color={accent.amber.fg} />
   if (status === 'push-failed-kept-locally') return <AlertCircle size={11} color={accent.amber.fg} />
+  if (status === 'pending-approval') return <ShieldAlert size={11} color={accent.violet.fg} />
+  if (status === 'approval-rejected') return <AlertCircle size={11} color={accent.red.fg} />
   return <CircleDot size={11} color={fg[4]} />
 }
 
@@ -53,6 +55,8 @@ function statusLabel(status: AgentProgress['status']): string {
     case 'push-failed-kept-locally': return 'Kept locally'
     case 'deploying': return 'Deploying…'
     case 'deployed': return 'Deployed'
+    case 'pending-approval': return 'Approval needed'
+    case 'approval-rejected': return 'Rejected'
     case 'finished': return 'Finished'
     case 'blocked': return 'Blocked'
     case 'error': return 'Error'
@@ -153,15 +157,17 @@ export function AgentProgressPanel() {
     const off = window.api.agent.onProgress((raw: unknown) => {
       const p = raw as AgentProgress
       setEvents((prev) => [...prev.slice(-99), { ...p, ts: Date.now() }])
-      const activeStatuses: AgentProgress['status'][] = ['running', 'retrying', 'preparing', 'finalizing', 'deploying']
-      const terminalStatuses: AgentProgress['status'][] = ['finished', 'blocked', 'error', 'pr-opened', 'push-failed-kept-locally', 'deployed']
+      const activeStatuses: AgentProgress['status'][] = ['running', 'retrying', 'preparing', 'finalizing', 'deploying', 'pending-approval']
+      const terminalStatuses: AgentProgress['status'][] = ['finished', 'blocked', 'error', 'pr-opened', 'push-failed-kept-locally', 'deployed', 'approval-rejected']
       if (activeStatuses.includes(p.status)) setIsRunning(true)
+      if (p.status === 'pending-approval') toast.error(`Approval needed: ${p.error ?? ''}`)
       if (terminalStatuses.includes(p.status)) {
         setIsRunning(false)
         if (p.status === 'finished' || p.status === 'deployed') toast.success('Background agent finished all subtasks')
         if (p.status === 'pr-opened') toast.success(`PR opened: ${p.prUrl ?? ''}`)
         if (p.status === 'push-failed-kept-locally') toast.error('Push failed — branch kept locally')
         if (p.status === 'error') toast.error(`Agent error: ${p.error ?? 'unknown'}`)
+        if (p.status === 'approval-rejected') toast.error('Agent halted — approval rejected')
       }
     })
 
@@ -177,6 +183,21 @@ export function AgentProgressPanel() {
   }, [])
 
   const clear = useCallback(() => setEvents([]), [])
+
+  // Gap 51 — replay a past session's persisted log through the live view.
+  const [isReplaying, setIsReplaying] = useState(false)
+  const replay = useCallback(async () => {
+    if (!selectedSession || isReplaying || isRunning) return
+    setEvents([])
+    setMode('live')
+    setIsReplaying(true)
+    try {
+      const ok = await window.api.agent.replay(selectedSession)
+      if (!ok) toast.error('Replay skipped — an agent session is already running')
+    } finally {
+      setIsReplaying(false)
+    }
+  }, [selectedSession, isReplaying, isRunning])
 
   const launch = useCallback(async () => {
     const trimmed = goal.trim()
@@ -262,17 +283,34 @@ export function AgentProgressPanel() {
           {historySessions.length === 0 ? (
             <div style={{ fontSize: 11, color: fg[4] }}>No recorded sessions yet.</div>
           ) : (
-            <select
-              value={selectedSession}
-              onChange={(e) => setSelectedSession(e.target.value)}
-              title="Select past agent session"
-              style={{
-                width: '100%', background: surface.raised, border: `1px solid ${border[0]}`,
-                borderRadius: 5, padding: '5px 8px', fontSize: 11, color: fg[0], outline: 'none',
-              }}
-            >
-              {historySessions.map((id) => <option key={id} value={id}>{id}</option>)}
-            </select>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <select
+                value={selectedSession}
+                onChange={(e) => setSelectedSession(e.target.value)}
+                title="Select past agent session"
+                style={{
+                  flex: 1, background: surface.raised, border: `1px solid ${border[0]}`,
+                  borderRadius: 5, padding: '5px 8px', fontSize: 11, color: fg[0], outline: 'none',
+                }}
+              >
+                {historySessions.map((id) => <option key={id} value={id}>{id}</option>)}
+              </select>
+              <button
+                type="button"
+                onClick={replay}
+                disabled={isReplaying || isRunning}
+                title="Replay this session's recorded events in the live view"
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0,
+                  fontSize: 11, fontWeight: 700, padding: '5px 10px', borderRadius: 5,
+                  background: isReplaying || isRunning ? surface.raised : accent.violet.fg,
+                  border: 'none', color: isReplaying || isRunning ? fg[4] : '#fff',
+                  cursor: isReplaying || isRunning ? 'not-allowed' : 'pointer',
+                }}
+              >
+                <Play size={11} /> {isReplaying ? 'Replaying…' : 'Replay'}
+              </button>
+            </div>
           )}
         </div>
       )}
@@ -353,6 +391,34 @@ export function AgentProgressPanel() {
           {(latest.error) && (
             <div style={{ fontSize: 10, color: accent.red.fg, paddingLeft: 17, marginTop: 3 }}>
               {latest.error}
+            </div>
+          )}
+          {latest.status === 'pending-approval' && (
+            <div style={{ display: 'flex', gap: 6, paddingLeft: 17, marginTop: 6 }}>
+              <button
+                type="button"
+                onClick={() => window.api.agent.approve(latest.sessionId, true)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 4,
+                  fontSize: 10, fontWeight: 700, padding: '4px 10px', borderRadius: 5,
+                  background: accent.green.subtle, border: `1px solid ${accent.green.border}`,
+                  color: accent.green.fg, cursor: 'pointer',
+                }}
+              >
+                <Check size={10} /> Approve
+              </button>
+              <button
+                type="button"
+                onClick={() => window.api.agent.approve(latest.sessionId, false)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 4,
+                  fontSize: 10, fontWeight: 700, padding: '4px 10px', borderRadius: 5,
+                  background: accent.red.subtle, border: `1px solid ${accent.red.border}`,
+                  color: accent.red.fg, cursor: 'pointer',
+                }}
+              >
+                <X size={10} /> Reject
+              </button>
             </div>
           )}
         </div>

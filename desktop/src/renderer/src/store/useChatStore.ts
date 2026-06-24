@@ -13,6 +13,8 @@ export interface ChatSession {
   title: string
   messages: ChatMessage[]
   createdAt: number
+  /** Gap 56 — accumulated token usage for this session, persisted across restarts for the usage dashboard. */
+  usage?: { inputTokens: number; outputTokens: number; costUsd: number; lastModel: string }
 }
 
 export const MODELS = [
@@ -103,6 +105,9 @@ interface ChatStore {
   setStreaming: (streamId: string | null) => void
   clearMessages: () => void
   setActiveModel: (model: ModelId) => void
+
+  // Gap 56 — per-session usage accumulation, persisted for the usage dashboard.
+  addSessionUsage: (sessionId: string, inputTokens: number, outputTokens: number, costUsd: number, model: string) => void
 }
 
 const initial = loadInitialState()
@@ -225,4 +230,24 @@ export const useChatStore = create<ChatStore>((set) => ({
   },
 
   setActiveModel: (model) => set({ activeModel: model }),
+
+  addSessionUsage: (sessionId, inputTokens, outputTokens, costUsd, model) => {
+    set((s) => {
+      const sessions = s.sessions.map((sess) => {
+        if (sess.id !== sessionId) return sess
+        const prev = sess.usage ?? { inputTokens: 0, outputTokens: 0, costUsd: 0, lastModel: '' }
+        return {
+          ...sess,
+          usage: {
+            inputTokens: prev.inputTokens + inputTokens,
+            outputTokens: prev.outputTokens + outputTokens,
+            costUsd: prev.costUsd + costUsd,
+            lastModel: model,
+          },
+        }
+      })
+      persist(sessions, s.activeSessionId)
+      return { sessions }
+    })
+  },
 }))

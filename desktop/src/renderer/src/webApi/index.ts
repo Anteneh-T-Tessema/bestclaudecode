@@ -193,6 +193,8 @@ export function createWebApi(): API {
       getActiveSession: () => Promise.resolve(notPorted('agent.getActiveSession', null)),
       listEventSessions: () => Promise.resolve(notPorted('agent.listEventSessions', [] as string[])),
       getEventLog: () => Promise.resolve(notPorted('agent.getEventLog', [] as Array<Record<string, unknown>>)),
+      replay: () => Promise.resolve(notPorted('agent.replay', false)),
+      approve: () => Promise.resolve(notPorted('agent.approve', false)),
       onProgress: () => () => {},
     },
 

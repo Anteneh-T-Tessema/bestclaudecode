@@ -7,6 +7,7 @@ import { ModelSelector } from './ModelSelector'
 import { surface, border, fg, accent } from '../../design'
 import { Trash2, FlaskConical, Loader2, RotateCcw, Plus, X, Zap, Search, Download } from 'lucide-react'
 import { toast } from '../../store/useToastStore'
+import { estimateCostUsd } from '../../modelRates'
 
 interface HistoryMatch {
   sessionId: string
@@ -48,6 +49,7 @@ export function ChatPanel() {
   const startAssistantMessage = useChatStore((s) => s.startAssistantMessage)
   const appendDelta = useChatStore((s) => s.appendDelta)
   const finalizeMessage = useChatStore((s) => s.finalizeMessage)
+  const addSessionUsage = useChatStore((s) => s.addSessionUsage)
 
   const addUsage = useUsageStore((s) => s.addUsage)
   const resetSession = useUsageStore((s) => s.resetSession)
@@ -162,12 +164,16 @@ export function ChatPanel() {
   // Gap 47 — reset token counter when the user switches to a different chat session.
   useEffect(() => { resetSession() }, [activeSessionId, resetSession])
 
-  // Subscribe to ai:usage events and accumulate session token counts.
+  // Subscribe to ai:usage events and accumulate session token counts — both the
+  // live in-memory display (addUsage) and the persisted per-session record used
+  // by the usage dashboard (Gap 56, addSessionUsage).
   useEffect(() => {
     return window.api.ai.onUsage(({ inputTokens, outputTokens, model }) => {
       addUsage(inputTokens, outputTokens, model)
+      const { activeSessionId: sid } = useChatStore.getState()
+      addSessionUsage(sid, inputTokens, outputTokens, estimateCostUsd(model, inputTokens, outputTokens), model)
     })
-  }, [addUsage])
+  }, [addUsage, addSessionUsage])
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>

@@ -25,7 +25,8 @@ import { runChatContext } from '../chatContext'
 import { queryAgentMemory } from '../agentMemory'
 import { resolveModel } from '../modelRouter'
 import { createWorktree, commitAll, push, createPr, removeWorktree, runGit } from '../gitOps'
-import { appendEvent } from '../agentEventLog'
+import { appendEvent, readEvents } from '../agentEventLog'
+import { loadPolicy, checkCommand, checkPath, checkApproval } from '../policyEngine'
 import * as path from 'path'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -38,7 +39,7 @@ export interface AgentProgress {
   status:
     | 'running' | 'done' | 'retrying' | 'blocked' | 'finished' | 'error'
     | 'preparing' | 'finalizing' | 'pr-opened' | 'push-failed-kept-locally'
-    | 'deploying' | 'deployed'
+    | 'deploying' | 'deployed' | 'pending-approval' | 'approval-rejected'
   output?: string
   error?: string
   doneCount: number
@@ -112,6 +113,26 @@ function isBlocked(cmd: string): boolean {
 // ── Active session registry ───────────────────────────────────────────────────
 
 let activeSession: { sessionId: string; abort: () => void } | null = null
+
+// ── Governance approval gate (Gap 57) ─────────────────────────────────────────
+// Only one agent session runs at a time, so a single module-level slot (rather
+// than a map) is enough to track the one outstanding approval request.
+
+let pendingApproval: { sessionId: string; resolve: (approved: boolean) => void } | null = null
+
+function requestApproval(sessionId: string): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    pendingApproval = { sessionId, resolve }
+  })
+}
+
+/** Called from the IPC handler when the user clicks Approve/Reject. Returns false if there's no matching pending request. */
+export function resolveApproval(sessionId: string, approved: boolean): boolean {
+  if (!pendingApproval || pendingApproval.sessionId !== sessionId) return false
+  pendingApproval.resolve(approved)
+  pendingApproval = null
+  return true
+}
 
 // ── Progress broadcast ────────────────────────────────────────────────────────
 
@@ -378,6 +399,69 @@ async function attemptDeploy(opts: {
   } catch { /* deploy failed — not fatal, session already succeeded */ }
 }
 
+// ── Verification report (Gap 53) ──────────────────────────────────────────────
+
+/**
+ * Writes a Markdown "evidence" report to <projectPath>/.lakoora/reports/<sessionId>.md
+ * summarizing the session: subtask completion, policy/error events pulled from the
+ * persisted event log, and the final PR link if one was opened. Generated regardless
+ * of whether the session fully succeeded — an audit trail is most useful precisely
+ * when something was blocked or failed.
+ */
+async function writeVerificationReport(opts: {
+  sessionId: string
+  projectPath: string
+  plan: TaskPlanDetail
+  branch: string
+  doneCount: number
+  totalCount: number
+  prUrl: string | null
+}): Promise<void> {
+  const { sessionId, projectPath, plan, branch, doneCount, totalCount, prUrl } = opts
+  const events = readEvents(sessionId)
+  const blocked = events.filter((e) => e.status === 'blocked')
+  const errors = events.filter((e) => e.status === 'error')
+
+  const lines: string[] = []
+  lines.push(`# Agent Session Report: ${plan.goal}`)
+  lines.push('')
+  lines.push(`- Session: ${sessionId}`)
+  lines.push(`- Branch: ${branch}`)
+  lines.push(`- Generated: ${new Date().toISOString()}`)
+  lines.push('')
+  lines.push(`## Subtasks (${doneCount}/${totalCount} done)`)
+  lines.push('')
+  for (const s of plan.subtasks) {
+    lines.push(`- [${s.done ? 'x' : ' '}] [${s.id}] ${s.description}`)
+  }
+  lines.push('')
+  lines.push('## Policy Evaluations')
+  lines.push('')
+  lines.push(blocked.length === 0
+    ? 'No policy or safety violations recorded.'
+    : blocked.map((e) => `- BLOCKED [${e.subtaskId}]: ${e.error}`).join('\n'))
+  lines.push('')
+  lines.push('## Errors')
+  lines.push('')
+  lines.push(errors.length === 0
+    ? 'No errors recorded.'
+    : errors.map((e) => `- ERROR [${e.subtaskId}]: ${e.error}`).join('\n'))
+  lines.push('')
+  lines.push('## Pull Request')
+  lines.push('')
+  lines.push(prUrl ?? 'No PR opened.')
+  lines.push('')
+
+  try {
+    const { promises: fsp } = await import('fs')
+    const reportDir = path.join(projectPath, '.lakoora', 'reports')
+    await fsp.mkdir(reportDir, { recursive: true })
+    await fsp.writeFile(path.join(reportDir, `${sessionId}.md`), lines.join('\n'))
+  } catch {
+    // Report generation must never fail the session.
+  }
+}
+
 // ── Finalize step (commit → push → PR → deploy → cleanup) ────────────────────
 
 async function finalizeSession(opts: {
@@ -397,6 +481,7 @@ async function finalizeSession(opts: {
   const { committed } = await commitAll(worktreePath, `Agent: ${plan.goal}`)
   if (!committed) {
     await removeWorktree(projectPath, worktreePath).catch(() => {})
+    await writeVerificationReport({ sessionId, projectPath, plan, branch, doneCount, totalCount, prUrl: null })
     broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: '', status: 'finished', doneCount, totalCount })
     return
   }
@@ -406,6 +491,7 @@ async function finalizeSession(opts: {
   try {
     await push(worktreePath, branch)
   } catch (err) {
+    await writeVerificationReport({ sessionId, projectPath, plan, branch, doneCount, totalCount, prUrl: null })
     broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: `Branch ${branch} exists locally only (push failed: ${err})`, status: 'push-failed-kept-locally', doneCount, totalCount, branch })
     return
   }
@@ -421,6 +507,7 @@ async function finalizeSession(opts: {
   })
 
   if (!prUrl) {
+    await writeVerificationReport({ sessionId, projectPath, plan, branch, doneCount, totalCount, prUrl: null })
     broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: `Branch ${branch} pushed but PR creation failed (no gh or not authenticated)`, status: 'push-failed-kept-locally', doneCount, totalCount, branch })
     return
   }
@@ -432,6 +519,8 @@ async function finalizeSession(opts: {
 
   // Cleanup only on full success (pushed + PR opened)
   await removeWorktree(projectPath, worktreePath, true).catch(() => {})
+
+  await writeVerificationReport({ sessionId, projectPath, plan, branch, doneCount, totalCount, prUrl })
 
   broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: '', status: 'finished', doneCount, totalCount, branch, prUrl })
 }
@@ -520,6 +609,10 @@ export async function startAutonomousSession(opts: {
       } catch { /* no rules file */ }
       const agentSystemPrompt = AGENT_SYSTEM_PROMPT + globalRulesBlock + projectRulesBlock
 
+      // Gap 52 — project-configurable policy (.lakoorapolicies.json), layered on
+      // top of the hardcoded destructive-command blocklist (isBlocked above).
+      const policy = loadPolicy(projectPath)
+
       let retryContext: string | null = null
       // Cached per subtask id so a retry of the same subtask reuses the
       // already-fetched context block instead of re-querying chat_context.
@@ -546,6 +639,7 @@ export async function startAutonomousSession(opts: {
           if (worktreePath) {
             await finalizeSession({ sessionId, planFile, plan, projectPath, worktreePath, branch: agentBranch, doneCount })
           } else {
+            await writeVerificationReport({ sessionId, projectPath, plan, branch: agentBranch, doneCount, totalCount, prUrl: null })
             broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: '', status: 'finished', doneCount, totalCount })
           }
           break
@@ -613,6 +707,11 @@ export async function startAutonomousSession(opts: {
             editError = `Edit blocked: content of ${edit.path} matches secret pattern "${secretPattern}"`
             break
           }
+          const pathViolation = checkPath(policy, edit.path)
+          if (pathViolation) {
+            editError = `Edit blocked by policy: ${edit.path} matches blocked path pattern "${pathViolation.pattern}"`
+            break
+          }
           try { await applyEdit(edit, activePath) }
           catch (err) { editError = `Edit failed for ${edit.path}: ${err}`; break }
         }
@@ -633,6 +732,28 @@ export async function startAutonomousSession(opts: {
           if (isBlocked(run.command)) {
             runError = `Command blocked by safety policy: ${run.command}`
             break
+          }
+          const commandViolation = checkCommand(policy, run.command)
+          if (commandViolation) {
+            runError = `Command blocked by project policy: ${run.command} matches "${commandViolation.pattern}"`
+            break
+          }
+          const approvalNeeded = checkApproval(policy, run.command)
+          if (approvalNeeded) {
+            broadcast({
+              sessionId, planFile, subtaskId: subtask.id, subtaskDescription: subtask.description,
+              status: 'pending-approval', error: `Approval required: ${run.command} matches "${approvalNeeded.pattern}"`,
+              doneCount, totalCount,
+            })
+            const approved = await requestApproval(sessionId)
+            if (!approved) {
+              broadcast({
+                sessionId, planFile, subtaskId: subtask.id, subtaskDescription: subtask.description,
+                status: 'approval-rejected', error: `Rejected by user: ${run.command}`, doneCount, totalCount,
+              })
+              return // human rejection halts the session cleanly — no retry, worktree left intact for review
+            }
+            broadcast({ sessionId, planFile, subtaskId: subtask.id, subtaskDescription: subtask.description, status: 'running', doneCount, totalCount })
           }
           try {
             const result = await runCommand('/bin/sh', ['-c', run.command], activePath)
@@ -712,4 +833,42 @@ export function stopAutonomousSession(): void {
 
 export function getActiveSession(): string | null {
   return activeSession?.sessionId ?? null
+}
+
+// ── Session replay (Gap 51) ───────────────────────────────────────────────────
+
+function broadcastOnly(progress: AgentProgress): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send('agent:progress', progress)
+  }
+}
+
+const REPLAY_SPEEDUP = 10
+const REPLAY_MAX_STEP_MS = 2000
+
+/**
+ * Re-emits a past session's persisted event log over the same 'agent:progress'
+ * channel the live agent uses, at REPLAY_SPEEDUP× the original pacing (capped
+ * per-step so a long real-world pause doesn't stall the replay). Re-emitted
+ * events are NOT re-appended to the log (uses broadcastOnly, not broadcast) —
+ * replaying a session must not duplicate or grow its own history.
+ * Refuses to run alongside a real active session to avoid interleaving the
+ * two on the same channel.
+ */
+export async function replaySession(sessionId: string): Promise<boolean> {
+  if (activeSession) return false
+  const events = readEvents(sessionId)
+  if (events.length === 0) return false
+
+  for (let i = 0; i < events.length; i++) {
+    if (activeSession) break // a real session started mid-replay — bail out
+    broadcastOnly(events[i] as unknown as AgentProgress)
+    if (i < events.length - 1) {
+      const curTs = events[i].ts as number
+      const nextTs = events[i + 1].ts as number
+      const delay = Math.min(Math.max(0, nextTs - curTs) / REPLAY_SPEEDUP, REPLAY_MAX_STEP_MS)
+      await new Promise((resolve) => setTimeout(resolve, delay))
+    }
+  }
+  return true
 }
