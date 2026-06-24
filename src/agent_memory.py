@@ -352,7 +352,7 @@ def _tokenise(text: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    """CLI: python -m src.agent_memory [--list|--query <text>|--write <key> <content>] [dir] [--json]"""
+    """CLI: python -m src.agent_memory [--list|--query <text>|--write <key> <content>|--delete <key>] [dir] [--json]"""
     args = sys.argv[1:]
     json_out = "--json" in args
     args = [a for a in args if a != "--json"]
@@ -406,7 +406,20 @@ def main() -> None:
         print(f"Written: {path}")
         return
 
-    print("Usage: python -m src.agent_memory [--list|--query <text>|--write <key> <content>] [--json]")
+    if "--delete" in args:
+        idx = args.index("--delete")
+        key = args[idx + 1] if idx + 1 < len(args) else ""
+        if not key:
+            print("Usage: --delete <key>", file=sys.stderr)
+            sys.exit(1)
+        deleted = store.delete(key)
+        if json_out:
+            print(json.dumps({"deleted": deleted}))
+            return
+        print(f"Deleted: {key}" if deleted else f"Not found: {key}")
+        return
+
+    print("Usage: python -m src.agent_memory [--list|--query <text>|--write <key> <content>|--delete <key>] [--json]")
 
 
 if __name__ == "__main__":

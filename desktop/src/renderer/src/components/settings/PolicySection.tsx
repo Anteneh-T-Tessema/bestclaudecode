@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { ShieldAlert, Save, FlaskConical } from 'lucide-react'
+import { ShieldAlert, Save, FlaskConical, BookmarkPlus } from 'lucide-react'
 import { accent, border, fg, surface } from '../../design'
 import { useSettingsStore } from '../../store/useSettingsStore'
 import { toast } from '../../store/useToastStore'
-import { POLICY_TEMPLATES, type PolicyConfig } from '../../policyTemplates'
+import { POLICY_TEMPLATES, type PolicyConfig, type PolicyTemplate } from '../../policyTemplates'
 
 const EMPTY_CONFIG: PolicyConfig = { block_commands: [], block_paths: [], require_approval_for: [] }
+const TEMPLATES_DIR = (projectPath: string) => `${projectPath}/.lakoora/policy-templates`
 
 function toLines(values: string[]): string {
   return values.join('\n')
@@ -41,13 +42,43 @@ function PatternField({ label, placeholder, value, onChange }: FieldProps) {
   )
 }
 
-/** Gap 62/63/67 — visual editor for .lakoorapolicies.json: load/save via plain fs (same pattern as the .lakoorarules editor), starter templates, and a dry-run tester against the current draft. */
+/** Gap 62/63/67/82 — visual editor for .lakoorapolicies.json: load/save via plain fs, starter templates, dry-run tester, and custom template save/load. */
 export function PolicySection() {
   const projectPath = useSettingsStore((s) => s.projectPath)
   const [config, setConfig] = useState<PolicyConfig>(EMPTY_CONFIG)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [customTemplates, setCustomTemplates] = useState<PolicyTemplate[]>([])
+  const [templateName, setTemplateName] = useState('')
+  const [savingTemplate, setSavingTemplate] = useState(false)
   const loadedFor = useRef<string | null>(null)
+
+  const loadCustomTemplates = useCallback(async (pp: string) => {
+    const dir = TEMPLATES_DIR(pp)
+    try {
+      const entries = await window.api.fs.readDir(dir) as Array<{ name: string; path: string; isDirectory: boolean }>
+      const loaded: PolicyTemplate[] = []
+      for (const e of entries) {
+        if (!e.name.endsWith('.json') || e.isDirectory) continue
+        try {
+          const raw = JSON.parse(await window.api.fs.readFile(e.path)) as Partial<PolicyConfig & { name?: string }>
+          loaded.push({
+            id: `custom:${e.name.replace(/\.json$/, '')}`,
+            name: raw.name ?? e.name.replace(/\.json$/, ''),
+            description: 'Custom template',
+            config: {
+              block_commands: Array.isArray(raw.block_commands) ? raw.block_commands : [],
+              block_paths: Array.isArray(raw.block_paths) ? raw.block_paths : [],
+              require_approval_for: Array.isArray(raw.require_approval_for) ? raw.require_approval_for : [],
+            },
+          })
+        } catch { /* skip corrupt file */ }
+      }
+      setCustomTemplates(loaded)
+    } catch {
+      setCustomTemplates([])
+    }
+  }, [])
 
   useEffect(() => {
     if (!projectPath || loadedFor.current === projectPath) return
@@ -66,7 +97,8 @@ export function PolicySection() {
         }
       })
       .catch(() => setConfig(EMPTY_CONFIG))
-  }, [projectPath])
+    loadCustomTemplates(projectPath)
+  }, [projectPath, loadCustomTemplates])
 
   const save = useCallback(async () => {
     if (!projectPath) return
@@ -83,9 +115,29 @@ export function PolicySection() {
   }, [projectPath, config])
 
   const applyTemplate = (templateId: string) => {
-    const template = POLICY_TEMPLATES.find((t) => t.id === templateId)
+    const all = [...POLICY_TEMPLATES, ...customTemplates]
+    const template = all.find((t) => t.id === templateId)
     if (template) { setConfig(template.config); setSaved(false) }
   }
+
+  const saveAsTemplate = useCallback(async () => {
+    if (!projectPath || !templateName.trim()) return
+    setSavingTemplate(true)
+    try {
+      const dir = TEMPLATES_DIR(projectPath)
+      await window.api.fs.createDir(dir)
+      const slug = templateName.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-')
+      const payload = { name: templateName.trim(), ...config }
+      await window.api.fs.writeFile(`${dir}/${slug}.json`, JSON.stringify(payload, null, 2))
+      setTemplateName('')
+      await loadCustomTemplates(projectPath)
+      toast.success(`Template "${templateName.trim()}" saved`)
+    } catch {
+      toast.error('Failed to save custom template')
+    } finally {
+      setSavingTemplate(false)
+    }
+  }, [projectPath, templateName, config, loadCustomTemplates])
 
   // Gap 67 — dry-run tester against the in-memory draft, not the saved file.
   const [testKind, setTestKind] = useState<'command' | 'path' | 'approval'>('command')
@@ -125,6 +177,8 @@ export function PolicySection() {
         >
           <option value="">Load a starter template…</option>
           {POLICY_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.name} — {t.description}</option>)}
+          {customTemplates.length > 0 && <option disabled>── Custom ──</option>}
+          {customTemplates.map((t) => <option key={t.id} value={t.id}>⭐ {t.name}</option>)}
         </select>
       </div>
 
@@ -147,7 +201,7 @@ export function PolicySection() {
         onChange={(v) => setConfig((c) => ({ ...c, require_approval_for: fromLines(v) }))}
       />
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 14 }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginBottom: 8 }}>
         <button
           type="button"
           onClick={save}
@@ -163,6 +217,33 @@ export function PolicySection() {
         >
           <Save size={10} />
           {saving ? 'Saving…' : saved ? 'Saved' : 'Save'}
+        </button>
+      </div>
+
+      <div style={{ display: 'flex', gap: 6, marginBottom: 14, alignItems: 'center' }}>
+        <BookmarkPlus size={11} color={fg[3]} style={{ flexShrink: 0 }} />
+        <input
+          value={templateName}
+          onChange={(e) => setTemplateName(e.target.value)}
+          placeholder="Template name…"
+          disabled={!projectPath}
+          style={{
+            flex: 1, background: surface.raised, border: `1px solid ${border[0]}`,
+            borderRadius: 4, padding: '4px 8px', fontSize: 10.5, color: fg[0], outline: 'none',
+          }}
+        />
+        <button
+          type="button"
+          onClick={saveAsTemplate}
+          disabled={!projectPath || !templateName.trim() || savingTemplate}
+          title="Save current draft as a named custom template"
+          style={{
+            flexShrink: 0, fontSize: 10, fontWeight: 600, padding: '4px 10px', borderRadius: 4,
+            border: `1px solid ${border[0]}`, background: surface.raised, color: fg[2],
+            cursor: projectPath && templateName.trim() ? 'pointer' : 'not-allowed',
+          }}
+        >
+          {savingTemplate ? 'Saving…' : 'Save as template'}
         </button>
       </div>
 

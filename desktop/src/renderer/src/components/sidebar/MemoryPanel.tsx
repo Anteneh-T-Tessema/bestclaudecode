@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Brain, RefreshCw, Search } from 'lucide-react'
+import { Brain, RefreshCw, Search, Trash2, Plus } from 'lucide-react'
 import { EmptyState } from '../EmptyState'
 import { PanelHeader, IconButton, accent, border, fg, surface } from '../../design'
 
@@ -12,7 +12,7 @@ interface MemoryEntry {
   source_task: string
 }
 
-function EntryCard({ entry }: { entry: MemoryEntry }) {
+function EntryCard({ entry, onDelete }: { entry: MemoryEntry; onDelete: (key: string) => void }) {
   return (
     <div
       style={{
@@ -23,6 +23,9 @@ function EntryCard({ entry }: { entry: MemoryEntry }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
         <span style={{ fontSize: 11, fontWeight: 700, color: fg[0], fontFamily: 'monospace' }}>{entry.key}</span>
         <span style={{ fontSize: 9, color: fg[4], marginLeft: 'auto' }}>{entry.updated_at.slice(0, 10)}</span>
+        <IconButton size={18} onClick={() => onDelete(entry.key)} title="Delete memory">
+          <Trash2 style={{ width: 10, height: 10, color: fg[4] }} />
+        </IconButton>
       </div>
       {entry.tags.length > 0 && (
         <div style={{ display: 'flex', gap: 4, marginBottom: 4, flexWrap: 'wrap' }}>
@@ -52,6 +55,10 @@ export function MemoryPanel() {
   const [entries, setEntries] = useState<MemoryEntry[]>([])
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
+  const [showAddForm, setShowAddForm] = useState(false)
+  const [newKey, setNewKey] = useState('')
+  const [newContent, setNewContent] = useState('')
+  const [saving, setSaving] = useState(false)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const refresh = useCallback(async () => {
@@ -85,11 +92,46 @@ export function MemoryPanel() {
     }, 400)
   }
 
+  const handleSave = async () => {
+    if (!newKey.trim() || !newContent.trim()) return
+    setSaving(true)
+    try {
+      await window.api.memory.write(newKey.trim(), newContent.trim())
+      setNewKey('')
+      setNewContent('')
+      setShowAddForm(false)
+      await refresh()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDelete = async (key: string) => {
+    await window.api.memory.delete(key)
+    await refresh()
+  }
+
   const headerActions = (
-    <IconButton size={22} onClick={refresh} disabled={loading} title="Refresh">
-      <RefreshCw style={{ width: 11, height: 11 }} className={loading ? 'agent-pulse' : ''} />
-    </IconButton>
+    <>
+      <IconButton size={22} onClick={() => setShowAddForm((v) => !v)} title="Add memory">
+        <Plus style={{ width: 11, height: 11 }} />
+      </IconButton>
+      <IconButton size={22} onClick={refresh} disabled={loading} title="Refresh">
+        <RefreshCw style={{ width: 11, height: 11 }} className={loading ? 'agent-pulse' : ''} />
+      </IconButton>
+    </>
   )
+
+  const inputStyle = {
+    flex: 1,
+    background: surface.raised,
+    border: `1px solid ${border[0]}`,
+    borderRadius: 4,
+    outline: 'none',
+    fontSize: 11,
+    color: fg[0],
+    padding: '5px 8px',
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
@@ -98,6 +140,66 @@ export function MemoryPanel() {
         label="Memory"
         actions={headerActions}
       />
+
+      {showAddForm && (
+        <div
+          style={{
+            padding: '8px 10px',
+            borderBottom: `1px solid ${border[1]}`,
+            flexShrink: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+          }}
+        >
+          <input
+            value={newKey}
+            onChange={(e) => setNewKey(e.target.value)}
+            placeholder="Key (e.g. src-auth-models)"
+            style={inputStyle}
+          />
+          <textarea
+            value={newContent}
+            onChange={(e) => setNewContent(e.target.value)}
+            placeholder="Memory content…"
+            rows={3}
+            style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.4 }}
+          />
+          <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+            <button
+              type="button"
+              onClick={() => setShowAddForm(false)}
+              style={{
+                fontSize: 11,
+                padding: '3px 10px',
+                borderRadius: 4,
+                border: `1px solid ${border[0]}`,
+                background: 'transparent',
+                color: fg[2],
+                cursor: 'pointer',
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving || !newKey.trim() || !newContent.trim()}
+              style={{
+                fontSize: 11,
+                padding: '3px 10px',
+                borderRadius: 4,
+                border: `1px solid ${accent.violet.border}`,
+                background: accent.violet.subtle,
+                color: accent.violet.fg,
+                cursor: 'pointer',
+              }}
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div style={{ padding: '8px 10px', borderBottom: `1px solid ${border[1]}`, flexShrink: 0 }}>
         <div
@@ -138,7 +240,7 @@ export function MemoryPanel() {
           />
         )}
         {entries.map((e) => (
-          <EntryCard key={e.key} entry={e} />
+          <EntryCard key={e.key} entry={e} onDelete={handleDelete} />
         ))}
       </div>
     </div>

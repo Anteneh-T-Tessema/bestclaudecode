@@ -281,6 +281,21 @@ async function injectDependentsContext(content: string): Promise<string> {
   }
 }
 
+/** Gap 81 — @diffreport [ref]: inject the git diff block relative to a ref (default HEAD). */
+async function injectDiffReportContext(content: string): Promise<string> {
+  if (!content.includes('@diffreport')) return content
+  const match = content.match(/@diffreport\s+(\S+)/)
+  const ref = match ? match[1].trim() : 'HEAD'
+  const tagToStrip = match ? match[0] : '@diffreport'
+  try {
+    const result = await window.api.context.withDiff(ref)
+    if (!result?.text) return content.replace(tagToStrip, `(no diff for \`${ref}\`)`).trim()
+    return `${result.text}\n\n${content.replace(tagToStrip, '').trim()}`
+  } catch {
+    return content
+  }
+}
+
 /** Gap 73 — @callers <fn>: inject Python + TS call sites for a function name. */
 async function injectCallersContext(content: string): Promise<string> {
   if (!content.includes('@callers')) return content
@@ -333,6 +348,7 @@ const MENTIONS = [
   { tag: '@memory',     desc: 'Agent memory entries matching a topic' },
   { tag: '@codebase',   desc: 'BM25 search across the project' },
   { tag: '@web',        desc: 'Live web search results' },
+  { tag: '@diffreport', desc: 'Git diff block relative to a ref (default HEAD)' },
   { tag: '@callers',    desc: 'All call sites for a function name (Python + TS)' },
   { tag: '@depends',    desc: 'What a file imports (its local dependencies)' },
   { tag: '@dependents', desc: 'Which files import a given file (reverse deps)' },
@@ -530,6 +546,9 @@ export function ChatInput() {
 
     // @web — inject live web search results
     finalContent = await injectWebContext(finalContent)
+
+    // @diffreport — inject git diff context block relative to a ref
+    finalContent = await injectDiffReportContext(finalContent)
 
     // @callers — inject call-graph results for a function name
     finalContent = await injectCallersContext(finalContent)

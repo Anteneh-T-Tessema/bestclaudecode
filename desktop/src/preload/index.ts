@@ -22,6 +22,9 @@ const api = {
     // Gap 74 — create a decision log entry from the UI
     log: (opts: DecisionLogOpts): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke('decisions:log', opts),
+    // Gap 84 — export all decisions as JSON for compliance auditors
+    export: (overrideDir?: string): Promise<{ filePath: string } | null> =>
+      ipcRenderer.invoke('decisions:export', overrideDir),
   },
 
   // ── File System ────────────────────────────────────────────────────────────
@@ -159,6 +162,9 @@ const api = {
   memory: {
     list: (): Promise<MemoryEntry[]> => ipcRenderer.invoke('memory:list'),
     query: (query: string): Promise<MemoryEntry[]> => ipcRenderer.invoke('memory:query', query),
+    // Gap 80 — create/update and delete from IDE
+    write: (key: string, content: string): Promise<boolean> => ipcRenderer.invoke('memory:write', key, content),
+    delete: (key: string): Promise<boolean> => ipcRenderer.invoke('memory:delete', key),
   },
 
   // ── Search (subprocess bridge → src.bm25_index / src.web_fetcher) ──────────
@@ -192,6 +198,8 @@ const api = {
     markDone: (path: string, subtaskId: string): Promise<{ id: string; done: number; total: number } | null> =>
       ipcRenderer.invoke('taskplanner:markDone', path, subtaskId),
     create: (goal: string): Promise<TaskPlanDetail | null> => ipcRenderer.invoke('taskplanner:new', goal),
+    // Gap 83 — delete a plan file from disk
+    delete: (planPath: string): Promise<{ deleted: boolean }> => ipcRenderer.invoke('taskplanner:delete', planPath),
   },
 
   // ── LSP (subprocess bridge → pyright-langserver + typescript-language-server)
@@ -330,7 +338,7 @@ const api = {
     generate: (): Promise<ArchDocResult | null> => ipcRenderer.invoke('archDoc:generate'),
   },
 
-  // ── Context cache + orientation (Gaps 72, 75) ─────────────────────────────
+  // ── Context cache + orientation (Gaps 72, 75, 81) ────────────────────────
   context: {
     cacheStats: (): Promise<{ total: number; bytes: number }> =>
       ipcRenderer.invoke('context:cacheStats'),
@@ -339,6 +347,9 @@ const api = {
     // Gap 75 — cached repo orientation block
     orientation: (): Promise<{ text: string; cached: boolean }> =>
       ipcRenderer.invoke('context:orientation'),
+    // Gap 81 — git diff context block relative to a ref
+    withDiff: (ref?: string): Promise<{ text: string }> =>
+      ipcRenderer.invoke('context:withDiff', ref ?? 'HEAD'),
   },
 
   // ── Settings ───────────────────────────────────────────────────────────────

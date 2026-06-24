@@ -26,6 +26,7 @@ export function createWebApi(): API {
         total: 0, withRetry: 0, retryRatePct: 0, verdictCounts: {}, topFindings: [], topFiles: [], agents: [],
       })),
       log: () => Promise.resolve(notPorted('decisions.log', { ok: false, error: 'not ported' })),
+      export: () => Promise.resolve(notPorted('decisions.export', null)),
     },
 
     fs: {
@@ -111,6 +112,8 @@ export function createWebApi(): API {
     memory: {
       list: () => Promise.resolve(notPorted('memory.list', [])),
       query: () => Promise.resolve(notPorted('memory.query', [])),
+      write: () => Promise.resolve(notPorted('memory.write', false)),
+      delete: () => Promise.resolve(notPorted('memory.delete', false)),
     },
 
     search: {
@@ -133,6 +136,7 @@ export function createWebApi(): API {
       show: () => Promise.resolve(notPorted('taskPlanner.show', null)),
       markDone: () => Promise.resolve(notPorted('taskPlanner.markDone', null)),
       create: () => Promise.resolve(notPorted('taskPlanner.create', null)),
+      delete: () => Promise.resolve(notPorted('taskPlanner.delete', { deleted: false })),
     },
 
     lsp: {
@@ -221,6 +225,7 @@ export function createWebApi(): API {
       cacheStats: () => Promise.resolve(notPorted('context.cacheStats', { total: 0, bytes: 0 })),
       evictCache: () => Promise.resolve(notPorted('context.evictCache', { deleted: 0 })),
       orientation: () => Promise.resolve(notPorted('context.orientation', { text: '', cached: false })),
+      withDiff: () => Promise.resolve(notPorted('context.withDiff', { text: '' })),
     },
 
     dap: {

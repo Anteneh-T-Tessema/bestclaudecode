@@ -169,6 +169,22 @@ export function registerDecisionsHandlers(): void {
   ipcMain.handle('decisions:search', (_event, query: string, overrideDir?: string) => searchDecisions(query, overrideDir))
   ipcMain.handle('decisions:stats', (_event, overrideDir?: string) => computeStats(loadDecisions(overrideDir)))
 
+  // Gap 84 — export decisions as a JSON file for compliance auditors.
+  ipcMain.handle('decisions:export', async (_event, overrideDir?: string): Promise<{ filePath: string } | null> => {
+    const { dialog } = await import('electron')
+    const { canceled, filePath } = await dialog.showSaveDialog({
+      title: 'Export Decision Log',
+      defaultPath: 'lakoora-decisions.json',
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+    })
+    if (canceled || !filePath) return null
+    const decisions = loadDecisions(overrideDir)
+    const stats = computeStats(decisions)
+    const payload = { exported_at: new Date().toISOString(), stats, decisions }
+    fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf-8')
+    return { filePath }
+  })
+
   // Gap 74 — create-side: write an ADR-style decision log entry via src.decision_log.
   ipcMain.handle('decisions:log', async (_event, opts: DecisionLogOpts): Promise<{ ok: boolean; error?: string }> => {
     const { task, verdict, outcome, agent = 'lakoora-agent', retries = 0, findings = [], dir } = opts

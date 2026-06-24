@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { ListTodo, Plus, ChevronRight, CheckCircle2, Circle, RefreshCw, Play, Square } from 'lucide-react'
+import { ListTodo, Plus, ChevronRight, CheckCircle2, Circle, RefreshCw, Play, Square, Trash2 } from 'lucide-react'
 import { EmptyState } from '../EmptyState'
 import { toast } from '../../store/useToastStore'
 import { useChatStore } from '../../store/useChatStore'
@@ -50,6 +50,7 @@ function PlanRow({
   onMarkDone,
   onStartAutonomous,
   onStopAutonomous,
+  onDelete,
   isRunning,
 }: {
   summary: PlanSummary
@@ -59,6 +60,7 @@ function PlanRow({
   onMarkDone: (id: string) => void
   onStartAutonomous: () => void
   onStopAutonomous: () => void
+  onDelete: () => void
   isRunning: boolean
 }) {
   return (
@@ -105,6 +107,18 @@ function PlanRow({
           }}
         >
           {isRunning ? <Square size={9} /> : <Play size={9} />}
+        </button>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onDelete() }}
+          title="Delete plan"
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            width: 20, height: 20, borderRadius: 4, border: 'none', flexShrink: 0,
+            background: 'transparent', color: fg[4], cursor: 'pointer',
+          }}
+        >
+          <Trash2 size={9} />
         </button>
       </div>
       {expanded && detail && (
@@ -207,6 +221,17 @@ export function TaskPlannerPanel() {
       }
     } finally {
       setCreating(false)
+    }
+  }
+
+  const deletePlan = async (summary: PlanSummary) => {
+    const result = await window.api.taskPlanner.delete(summary.path)
+    if (result?.deleted) {
+      if (expandedPath === summary.path) setExpandedPath(null)
+      setDetails((d) => { const next = { ...d }; delete next[summary.path]; return next })
+      setPlans((ps) => ps.filter((p) => p.path !== summary.path))
+    } else {
+      toast.error('Failed to delete plan')
     }
   }
 
@@ -325,6 +350,7 @@ export function TaskPlannerPanel() {
             onMarkDone={(id) => markDone(summary, id)}
             onStartAutonomous={() => startAutonomous(summary.path)}
             onStopAutonomous={stopAutonomous}
+            onDelete={() => deletePlan(summary)}
             isRunning={activeSessionPlanFile === summary.path}
           />
         ))}

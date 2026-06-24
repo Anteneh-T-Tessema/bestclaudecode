@@ -170,6 +170,13 @@ export function registerSettingsHandlers(): void {
     return result
   })
 
+  // Gap 81 — git diff context block: formats recent changes relative to a ref.
+  ipcMain.handle('context:withDiff', async (_event, ref = 'HEAD'): Promise<{ text: string }> => {
+    const result = await runCommand(venvPython(), ['-m', 'src.diff_context', ref, repoRoot()])
+    const text = result.exitCode === 0 ? result.stdout.trim() : ''
+    return { text }
+  })
+
   // Gap 75 — cached repo orientation block: skips the full scan when source files
   // haven't changed since the last run (fingerprint-based cache in .context-cache/).
   ipcMain.handle('context:orientation', async (): Promise<{ text: string; cached: boolean }> => {

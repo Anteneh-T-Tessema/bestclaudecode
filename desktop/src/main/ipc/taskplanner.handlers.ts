@@ -1,4 +1,5 @@
 import { ipcMain } from 'electron'
+import * as fs from 'fs'
 import { runPythonJson } from '../pythonBridge'
 
 export interface PlanSummary {
@@ -44,5 +45,15 @@ export function registerTaskPlannerHandlers(): void {
   ipcMain.handle('taskplanner:new', async (_event, goal: string): Promise<TaskPlanDetail | null> => {
     const result = await runPythonJson(['-m', 'src.task_planner', '--new', goal, '--save'])
     return result.ok ? (result.stats as TaskPlanDetail) : null
+  })
+
+  // Gap 83 — delete a plan file from disk.
+  ipcMain.handle('taskplanner:delete', async (_event, planPath: string): Promise<{ deleted: boolean }> => {
+    try {
+      fs.unlinkSync(planPath)
+      return { deleted: true }
+    } catch {
+      return { deleted: false }
+    }
   })
 }

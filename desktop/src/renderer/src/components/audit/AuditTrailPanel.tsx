@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
-import { ShieldCheck, Search, ChevronDown, ChevronRight, RefreshCw, AlertTriangle, CheckCircle2, Info } from 'lucide-react'
+import { ShieldCheck, Search, ChevronDown, ChevronRight, RefreshCw, AlertTriangle, CheckCircle2, Info, Download } from 'lucide-react'
 import { EmptyState } from '../EmptyState'
 import { PanelHeader, IconButton, accent, border, fg, surface } from '../../design'
+import { toast } from '../../store/useToastStore'
 import type { ParsedDecision, DecisionStats } from '../../../../main/ipc/decisions.handlers'
 
 function verdictColor(verdict: string): { fg: string; subtle: string; border: string } {
@@ -116,10 +117,22 @@ export function AuditTrailPanel() {
 
   useEffect(() => { load() }, [load])
 
+  const exportJson = async () => {
+    const result = await window.api.decisions.export()
+    if (result?.filePath) {
+      toast.success(`Exported to ${result.filePath.split('/').pop()}`)
+    }
+  }
+
   const headerActions = (
-    <IconButton size={22} onClick={load} title="Refresh">
-      <RefreshCw style={{ width: 11, height: 11 }} className={loading ? 'agent-pulse' : undefined} />
-    </IconButton>
+    <>
+      <IconButton size={22} onClick={exportJson} title="Export decisions as JSON">
+        <Download style={{ width: 11, height: 11 }} />
+      </IconButton>
+      <IconButton size={22} onClick={load} title="Refresh">
+        <RefreshCw style={{ width: 11, height: 11 }} className={loading ? 'agent-pulse' : undefined} />
+      </IconButton>
+    </>
   )
 
   return (

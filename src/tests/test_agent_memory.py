@@ -221,3 +221,28 @@ def test_auto_record_extracts_file_from_finding(tmp_path):
 def test_auto_record_no_findings(tmp_path):
     paths = auto_record_from_decision("task", "outcome", findings=None, memory_dir=tmp_path)
     assert len(paths) == 1  # just the summary
+
+
+# --- CLI --delete flag -------------------------------------------------------
+
+def test_cli_delete_existing_entry(tmp_path, monkeypatch, capsys):
+    import sys
+    from src.agent_memory import main as amain
+
+    store = MemoryStore(tmp_path)
+    store.write("my-key", "some content")
+    monkeypatch.setattr(sys, "argv", ["prog", "--delete", "my-key", "--json", str(tmp_path)])
+    amain()
+    out = capsys.readouterr().out
+    assert json.loads(out) == {"deleted": True}
+    assert store.get("my-key") is None
+
+
+def test_cli_delete_missing_entry(tmp_path, monkeypatch, capsys):
+    import sys
+    from src.agent_memory import main as amain
+
+    monkeypatch.setattr(sys, "argv", ["prog", "--delete", "no-such-key", "--json", str(tmp_path)])
+    amain()
+    out = capsys.readouterr().out
+    assert json.loads(out) == {"deleted": False}
