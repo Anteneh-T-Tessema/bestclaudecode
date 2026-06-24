@@ -622,7 +622,7 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
       path={tab.filePath}
       defaultLanguage={tab.language}
       defaultValue={tab.content}
-      theme={LAKOORA_THEME_ID}
+      theme={theme === 'light' ? LAKOORA_LIGHT_ID : LAKOORA_DARK_ID}
       onChange={(value) => {
         if (value === undefined) return
         updateContent(tabId, value)
