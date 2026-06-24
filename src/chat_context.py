@@ -7,12 +7,24 @@ desktop/src/main/ipc/search.handlers.ts, reimplemented in Python so this is
 callable directly (e.g. from autonomousAgent.ts via runPythonJson) without
 round-tripping through Electron's IPC layer.
 
+Each hit is also cross-referenced against the decision log
+(``vector_index.related_decisions()``) so callers can surface *why* a file
+is shaped the way it is, not just what it is.
+
+When a persistent (Qdrant-backed) index already exists for the repo,
+``build_chat_context()`` prefers it over recomputing ``hybrid_search()`` in
+memory — see ``--build-index`` below to populate one. This is a transparent
+speedup: callers don't need to know or care which path served a given call.
+
 CLI
 ---
     python -m src.chat_context <query> <repo-root> [--json] [--max-snippets N]
+    python -m src.chat_context --build-index <repo-root> [--json]
 
 Without --json: prints a human-readable list of hits. With --json: emits
-``{query, results: [{file, line, snippet, score}]}``.
+``{query, results: [{file, line, snippet, score, related_decisions}]}``.
+``--build-index`` instead builds/refreshes the persistent index and emits
+``{indexed, backend}``.
 """
 from __future__ import annotations
 
@@ -21,7 +33,13 @@ import re
 import sys
 from pathlib import Path
 
-from src.vector_index import hybrid_search
+from src.vector_index import (
+    active_backend,
+    build_persistent_index,
+    hybrid_search,
+    persistent_search,
+    related_decisions,
+)
 
 _DEFAULT_MAX_SNIPPETS = 5
 _SNIPPET_CONTEXT_LINES = 4
@@ -49,13 +67,35 @@ def _read_snippet(file_path: str, line_no: int, context: int = _SNIPPET_CONTEXT_
     return "\n".join(lines[start:end])
 
 
-def build_chat_context(repo_map: str, query: str, root: Path, max_snippets: int = _DEFAULT_MAX_SNIPPETS) -> dict:
-    """Run hybrid_search over repo_map and enrich each hit with a code snippet.
+def _search_hits(repo_map: str, query: str, root: Path, max_snippets: int) -> list[tuple[float, str, str]]:
+    """Return (score, file, line) hits, preferring a persistent index over the in-memory path.
 
-    Returns the {query, results: [{file, line, snippet, score}]} dict shape
-    shared by the CLI's --json output and any direct Python caller.
+    persistent_search()'s doc_count is the cheap, pragmatic signal for "does a
+    persistent index exist": 0 means there's nothing built yet (or it's empty),
+    so callers fall back to hybrid_search() rather than getting zero results.
     """
-    hits = hybrid_search(repo_map, query, top_k=max_snippets)
+    doc_count, hits = persistent_search(query, top_k=max_snippets, local_path=_local_index_path(root))
+    if doc_count > 0:
+        return hits
+    return hybrid_search(repo_map, query, top_k=max_snippets)
+
+
+def _local_index_path(root: Path) -> Path:
+    """Default on-disk location of this repo's persistent vector index."""
+    return Path(root) / ".cache" / "qdrant"
+
+
+def build_chat_context(repo_map: str, query: str, root: Path, max_snippets: int = _DEFAULT_MAX_SNIPPETS) -> dict:
+    """Run hybrid search (persistent index if one exists, else in-memory) and enrich each hit.
+
+    Each hit is enriched with a surrounding code snippet and any related
+    decision-log entries (vector_index.related_decisions(), at most once per
+    unique file among the hits). Returns the {query, results: [{file, line,
+    snippet, score, related_decisions}]} dict shape shared by the CLI's
+    --json output and any direct Python caller.
+    """
+    hits = _search_hits(repo_map, query, root, max_snippets)
+    decisions_by_file: dict[str, list[dict[str, object]]] = {}
     results = []
     for score, file, line in hits:
         file = file.strip()
@@ -65,20 +105,26 @@ def build_chat_context(repo_map: str, query: str, root: Path, max_snippets: int 
         if line_no is not None:
             file_path = file if Path(file).is_absolute() else str(root / file)
             snippet = _read_snippet(file_path, line_no)
+        if file not in decisions_by_file:
+            decisions_by_file[file] = related_decisions(file, top_k=2)
         results.append({
             "file": file,
             "line": line,
             "snippet": snippet,
             "score": round(score, 6),
+            "related_decisions": decisions_by_file[file],
         })
     return {"query": query, "results": results}
 
 
 def main(argv: list[str] | None = None) -> None:
     """CLI: python -m src.chat_context <query> <repo-root> [--json] [--max-snippets N]
+            python -m src.chat_context --build-index <repo-root> [--json]
 
-    Without --json: prints the query followed by each hit's file, line, and
-    snippet. With --json: {query, results: [{file, line, snippet, score}]}.
+    Without --json: prints the query followed by each hit's file, line,
+    snippet, and any related decisions. With --json:
+    {query, results: [{file, line, snippet, score, related_decisions}]}.
+    --build-index instead builds the persistent index and emits {indexed, backend}.
     """
     from src.repo_map import build_repo_map
 
@@ -87,11 +133,24 @@ def main(argv: list[str] | None = None) -> None:
     if as_json:
         args.remove("--json")
 
+    build_index = "--build-index" in args
+    if build_index:
+        args.remove("--build-index")
+
     max_snippets = _DEFAULT_MAX_SNIPPETS
     if "--max-snippets" in args:
         idx = args.index("--max-snippets")
         max_snippets = int(args[idx + 1])
         del args[idx:idx + 2]
+
+    if build_index:
+        root = Path(args[0]) if args else Path(".")
+        count = build_persistent_index(root, local_path=_local_index_path(root))
+        if as_json:
+            print(json.dumps({"indexed": count, "backend": active_backend()}))
+        else:
+            print(f"Indexed {count} chunks into the persistent vector store (backend: {active_backend()}).")
+        return
 
     query = args[0] if args else ""
     root = Path(args[1]) if len(args) > 1 else Path(".")
@@ -119,6 +178,8 @@ def main(argv: list[str] | None = None) -> None:
         if result["snippet"]:
             for snippet_line in result["snippet"].splitlines():
                 print(f"      {snippet_line}")
+        for decision in result["related_decisions"]:
+            print(f"      related decision: \"{decision['task']}\" → {decision['verdict']}")
 
 
 if __name__ == "__main__":

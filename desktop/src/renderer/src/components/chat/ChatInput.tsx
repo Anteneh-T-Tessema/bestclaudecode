@@ -425,6 +425,19 @@ export function ChatInput() {
       } catch { /* never block sending on a context-assembly failure */ }
     }
 
+    // Gap 34 — automatic agent-memory baseline, mirrors the Gap 29 auto_context
+    // block above but pulls from persisted decision/preference memory instead
+    // of codebase retrieval. Uses a distinct tag so it's visually separable.
+    if (content.trim()) {
+      try {
+        const memories = await window.api.memory.query(content)
+        if (memories?.length) {
+          const blocks = memories.map((m) => `**${m.key}**${m.tags.length ? ` [${m.tags.join(', ')}]` : ''}\n${m.content}`)
+          finalContent = `<agent_memory>\n${blocks.join('\n\n')}\n</agent_memory>\n\n${finalContent}`
+        }
+      } catch { /* never block sending on a memory-query failure */ }
+    }
+
     const { sessions, activeSessionId } = useChatStore.getState()
     const activeSession = sessions.find((s) => s.id === activeSessionId)
     const messages = (activeSession?.messages ?? []).map((m) => ({ role: m.role, content: m.content, images: m.images }))

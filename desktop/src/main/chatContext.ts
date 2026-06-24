@@ -6,11 +6,19 @@
  */
 import { runPythonJson } from './pythonBridge'
 
+export interface RelatedDecision {
+  filename: string
+  task: string
+  verdict: string
+  outcome: string
+}
+
 export interface ChatContextResult {
   file: string
   line: string
   snippet: string
   score: number
+  related_decisions: RelatedDecision[]
 }
 
 interface ChatContextResponse {

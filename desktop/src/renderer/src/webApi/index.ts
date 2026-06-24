@@ -116,6 +116,7 @@ export function createWebApi(): API {
       vector: (query, hybrid) => socket.invoke('search:vector', { query, hybrid: hybrid ?? false }),
       browse: () => Promise.resolve(notPorted('search.browse', { url: '', task: '', result: '', success: false })),
       assembleContext: (query, manualPaths) => socket.invoke('context:assemble', { query, manualPaths }),
+      buildIndex: () => socket.invoke('search:buildIndex'),
     },
 
     taskPlanner: {

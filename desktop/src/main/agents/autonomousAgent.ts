@@ -18,6 +18,7 @@ import { runPythonJson, runCommand } from '../pythonBridge'
 import { repoRoot } from '../paths'
 import { store } from '../store'
 import { runChatContext } from '../chatContext'
+import { queryAgentMemory } from '../agentMemory'
 import * as path from 'path'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -110,8 +111,22 @@ function broadcast(progress: AgentProgress): void {
 async function getSubtaskContext(query: string, repoRootPath: string): Promise<string> {
   const results = await runChatContext(query, repoRootPath)
   if (!results.length) return ''
-  const blocks = results.map((r) => `${r.file} — ${r.line}\n\`\`\`\n${r.snippet}\n\`\`\``)
+  const blocks = results.map((r) => {
+    const block = `${r.file} — ${r.line}\n\`\`\`\n${r.snippet}\n\`\`\``
+    const decisionNotes = r.related_decisions.map((d) => `_Related decision: "${d.task}" → ${d.verdict}_`)
+    return decisionNotes.length ? `${block}\n${decisionNotes.join('\n')}` : block
+  })
   return `## Relevant codebase context\n\n${blocks.join('\n\n')}`
+}
+
+// ── Per-subtask agent memory (Gap 34) ────────────────────────────────────────
+
+/** Surfaces persisted decision/preference memory relevant to one subtask. */
+async function getSubtaskMemory(query: string): Promise<string> {
+  const entries = await queryAgentMemory(query)
+  if (!entries.length) return ''
+  const blocks = entries.map((m) => `**${m.key}**${m.tags.length ? ` [${m.tags.join(', ')}]` : ''}\n${m.content}`)
+  return `## Relevant past learnings\n\n${blocks.join('\n\n')}`
 }
 
 // ── AI streaming helper ───────────────────────────────────────────────────────
@@ -269,6 +284,7 @@ export async function startAutonomousSession(opts: {
       // already-fetched context block instead of re-querying chat_context.
       let cachedContextSubtaskId = ''
       let cachedContextBlock = ''
+      let cachedMemoryBlock = ''
 
       // eslint-disable-next-line no-constant-condition
       while (true) {
@@ -307,9 +323,14 @@ export async function startAutonomousSession(opts: {
         if (cachedContextSubtaskId !== subtask.id) {
           cachedContextSubtaskId = subtask.id
           cachedContextBlock = await getSubtaskContext(subtask.description, projectPath)
+          cachedMemoryBlock = await getSubtaskMemory(subtask.description)
         }
         const contextBlock = cachedContextBlock
-        const systemPrompt = contextBlock ? `${AGENT_SYSTEM_PROMPT}\n\n${contextBlock}` : AGENT_SYSTEM_PROMPT
+        const memoryBlock = cachedMemoryBlock
+        const promptBlocks = [contextBlock, memoryBlock].filter(Boolean)
+        const systemPrompt = promptBlocks.length
+          ? `${AGENT_SYSTEM_PROMPT}\n\n${promptBlocks.join('\n\n')}`
+          : AGENT_SYSTEM_PROMPT
 
         const userContent = isRetry
           ? `Previous attempt failed:\n${retryContext}\n\nRetry the same subtask:\n${subtask.description}`

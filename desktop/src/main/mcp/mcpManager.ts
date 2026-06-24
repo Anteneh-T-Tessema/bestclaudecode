@@ -165,7 +165,11 @@ async function callBuiltinSearchCodebase(args: Record<string, unknown>): Promise
   if (!results.length) return `(no results for: "${query}")`
 
   return results
-    .map((r) => `${r.file}:${r.line} — ${r.score}\n${r.snippet}`)
+    .map((r) => {
+      const block = `${r.file}:${r.line} — ${r.score}\n${r.snippet}`
+      const decisionNotes = r.related_decisions.map((d) => `Related decision: "${d.task}" → ${d.verdict}`)
+      return decisionNotes.length ? `${block}\n${decisionNotes.join('\n')}` : block
+    })
     .join('\n\n---\n\n')
 }
 

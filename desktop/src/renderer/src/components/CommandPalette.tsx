@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   FolderOpen, Search, GitCommit, MessageSquare, ShieldCheck, Settings,
-  PanelBottom, PanelLeft, Trash2, Keyboard, FolderInput, FileText, Hash, Clock,
+  PanelBottom, PanelLeft, Trash2, Keyboard, FolderInput, FileText, Hash, Clock, RefreshCw,
 } from 'lucide-react'
 import { useAppStore, type ActivityId } from '../store/useAppStore'
 import { useEditorStore } from '../store/useEditorStore'
@@ -128,6 +128,7 @@ export function CommandPalette() {
     { id: 'quick-open', category: 'File', label: 'Go to File', icon: <FolderOpen size={13} />, shortcut: '⌘P', action: () => { setQuickOpenOpen(true); close() } },
     { id: 'go-to-line', category: 'File', label: 'Go to Line…', icon: <Hash size={13} />, shortcut: '⌘G', action: () => { openGoToLine(); close() } },
     { id: 'close-tabs', category: 'File', label: 'Close All Tabs', icon: <Trash2 size={13} />, action: () => { closeAllTabs(); close() } },
+    { id: 'rebuild-index', category: 'File', label: 'Rebuild Codebase Index', icon: <RefreshCw size={13} />, action: async () => { await window.api.search.buildIndex(); close() } },
 
     { id: 'toggle-sidebar', category: 'View', label: 'Toggle Sidebar', icon: <PanelLeft size={13} />, shortcut: '⌘B', action: () => { toggleSidebar(); close() } },
     { id: 'toggle-terminal', category: 'View', label: 'Toggle Terminal', icon: <PanelBottom size={13} />, shortcut: '⌘`', action: () => { toggleBottomPanel(); close() } },

@@ -134,4 +134,10 @@ export function registerSearchHandlers(): void {
       .map((r) => ({ ...r, lineNumber: extractLineNumber(r.line) ?? undefined }))
     return { docCount: filtered.length, avgDl: 0, results: filtered }
   })
+
+  ipcMain.handle('search:buildIndex', async (): Promise<{ indexed: number; backend: string }> => {
+    const result = await runPythonJson(['-m', 'src.chat_context', '--build-index', repoRoot(), '--json'])
+    if (!result.ok) return { indexed: 0, backend: '' }
+    return result.stats as { indexed: number; backend: string }
+  })
 }

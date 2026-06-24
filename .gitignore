@@ -6,6 +6,7 @@ __pycache__/
 node_modules/
 dist/
 .context-cache/
+.cache/
 desktop/out/
 desktop/out-web/
 desktop/.e2e-cdp-port*

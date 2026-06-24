@@ -1,14 +1,8 @@
 import { ipcMain } from 'electron'
 import { runPythonJson } from '../pythonBridge'
+import { queryAgentMemory, type MemoryEntry } from '../agentMemory'
 
-export interface MemoryEntry {
-  key: string
-  content: string
-  tags: string[]
-  created_at: string
-  updated_at: string
-  source_task: string
-}
+export type { MemoryEntry }
 
 export function registerMemoryHandlers(): void {
   ipcMain.handle('memory:list', async (): Promise<MemoryEntry[]> => {
@@ -17,7 +11,6 @@ export function registerMemoryHandlers(): void {
   })
 
   ipcMain.handle('memory:query', async (_event, query: string): Promise<MemoryEntry[]> => {
-    const result = await runPythonJson(['-m', 'src.agent_memory', '--query', query, '--json'])
-    return result.ok ? (result.stats as MemoryEntry[]) : []
+    return queryAgentMemory(query)
   })
 }
