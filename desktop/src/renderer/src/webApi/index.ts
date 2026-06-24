@@ -197,7 +197,15 @@ export function createWebApi(): API {
       replay: () => Promise.resolve(notPorted('agent.replay', false)),
       approve: () => Promise.resolve(notPorted('agent.approve', false)),
       getSessionDiff: () => Promise.resolve(notPorted('agent.getSessionDiff', '')),
+      getComplianceSummary: () => Promise.resolve(notPorted('agent.getComplianceSummary', {
+        totalSessions: 0, totalBlockedEvents: 0, totalErrorEvents: 0, totalApprovalRequests: 0, totalApproved: 0, totalRejected: 0,
+      })),
+      exportReportHtml: () => Promise.resolve(notPorted('agent.exportReportHtml', null)),
       onProgress: () => () => {},
+    },
+
+    policy: {
+      test: () => Promise.resolve(notPorted('policy.test', null)),
     },
 
     archDoc: {

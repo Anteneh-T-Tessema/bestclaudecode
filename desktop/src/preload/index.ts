@@ -8,7 +8,9 @@ import type { ShadowInfo } from '../main/ipc/sandbox.handlers'
 import type { PlanSummary, TaskPlanDetail } from '../main/ipc/taskplanner.handlers'
 import type { ArchDocResult } from '../main/ipc/archDoc.handlers'
 import type { McpServerConfig, McpServerStatus } from '../main/mcp/mcpManager'
-import type { SessionSummary, VerifyResult } from '../main/agentEventLog'
+import type { SessionSummary, VerifyResult, ComplianceSummary } from '../main/agentEventLog'
+import type { PolicyTestOpts } from '../main/ipc/policy.handlers'
+import type { PolicyViolation } from '../main/policyEngine'
 
 const api = {
   // ── Decisions ──────────────────────────────────────────────────────────────
@@ -294,11 +296,21 @@ const api = {
       ipcRenderer.invoke('agent:approve', sessionId, approved),
     getSessionDiff: (branch: string): Promise<string> =>
       ipcRenderer.invoke('agent:getSessionDiff', branch),
+    getComplianceSummary: (): Promise<ComplianceSummary> =>
+      ipcRenderer.invoke('agent:getComplianceSummary'),
+    exportReportHtml: (sessionId: string): Promise<string | null> =>
+      ipcRenderer.invoke('agent:exportReportHtml', sessionId),
     onProgress: (cb: (progress: unknown) => void) => {
       const handler = (_: Electron.IpcRendererEvent, progress: unknown) => cb(progress)
       ipcRenderer.on('agent:progress', handler)
       return (): void => { ipcRenderer.removeListener('agent:progress', handler) }
     },
+  },
+
+  // ── Policy (Gap 67 — dry-run governance rules against a sample value) ──────
+  policy: {
+    test: (opts: PolicyTestOpts): Promise<PolicyViolation | null> =>
+      ipcRenderer.invoke('policy:test', opts),
   },
 
   // ── Arch Doc (subprocess bridge → src.arch_doc) ─────────────────────────────

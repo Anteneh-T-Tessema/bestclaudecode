@@ -13,7 +13,7 @@ vi.mock('./paths', () => ({
   repoRoot: () => '/unused-fallback',
 }))
 
-import { appendEvent, readEvents, listSessions, verifyEventLog } from './agentEventLog'
+import { appendEvent, readEvents, listSessions, verifyEventLog, computeComplianceSummary } from './agentEventLog'
 
 describe('agentEventLog', () => {
   beforeEach(() => {
@@ -114,5 +114,43 @@ describe('verifyEventLog', () => {
     fs.writeFileSync(file, [lines[0], lines[2]].join('\n') + '\n') // drop the middle "blocked" record
 
     expect(verifyEventLog('s1').valid).toBe(false)
+  })
+})
+
+describe('computeComplianceSummary', () => {
+  beforeEach(() => {
+    projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'lakoora-event-log-'))
+  })
+
+  afterEach(() => {
+    fs.rmSync(projectPath, { recursive: true, force: true })
+  })
+
+  it('returns all zeros when there are no recorded sessions', () => {
+    expect(computeComplianceSummary()).toEqual({
+      totalSessions: 0, totalBlockedEvents: 0, totalErrorEvents: 0,
+      totalApprovalRequests: 0, totalApproved: 0, totalRejected: 0,
+    })
+  })
+
+  it('aggregates blocked, error, and approval events across sessions', () => {
+    appendEvent('s1', { status: 'running' })
+    appendEvent('s1', { status: 'blocked', error: 'policy violation' })
+    appendEvent('s1', { status: 'pending-approval' })
+    appendEvent('s1', { status: 'approval-rejected' })
+
+    appendEvent('s2', { status: 'running' })
+    appendEvent('s2', { status: 'pending-approval' })
+    appendEvent('s2', { status: 'running' }) // approved — no approval-rejected follows
+    appendEvent('s2', { status: 'error', error: 'boom' })
+
+    expect(computeComplianceSummary()).toEqual({
+      totalSessions: 2,
+      totalBlockedEvents: 1,
+      totalErrorEvents: 1,
+      totalApprovalRequests: 2,
+      totalApproved: 1,
+      totalRejected: 1,
+    })
   })
 })

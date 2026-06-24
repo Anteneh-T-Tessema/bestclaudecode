@@ -911,3 +911,26 @@ export async function getSessionDiff(branch: string): Promise<string> {
     return ''
   }
 }
+
+/**
+ * Renders a session's verification report (.lakoora/reports/<sessionId>.md) as a
+ * standalone styled HTML file alongside it, for sharing with an auditor who
+ * doesn't have a Markdown renderer. Returns the written file's path, or null
+ * if no report exists for that session.
+ */
+export async function exportReportHtml(sessionId: string): Promise<string | null> {
+  const projectPath = (store.get('projectPath') as string | undefined) ?? repoRoot()
+  const reportDir = path.join(projectPath, '.lakoora', 'reports')
+  const mdPath = path.join(reportDir, `${sessionId}.md`)
+  try {
+    const { promises: fsp } = await import('fs')
+    const markdown = await fsp.readFile(mdPath, 'utf-8')
+    const { markdownToHtml } = await import('../reportFormat')
+    const html = markdownToHtml(markdown, `Agent Session Report — ${sessionId}`)
+    const htmlPath = path.join(reportDir, `${sessionId}.html`)
+    await fsp.writeFile(htmlPath, html)
+    return htmlPath
+  } catch {
+    return null
+  }
+}

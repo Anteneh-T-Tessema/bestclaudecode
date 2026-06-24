@@ -1,5 +1,5 @@
-import { useMemo } from 'react'
-import { DollarSign } from 'lucide-react'
+import { useMemo, useState, useEffect } from 'react'
+import { DollarSign, ShieldCheck } from 'lucide-react'
 import { useChatStore } from '../../store/useChatStore'
 import { EmptyState } from '../EmptyState'
 import { PanelHeader, accent, border, fg, surface } from '../../design'
@@ -11,6 +11,50 @@ function formatCost(usd: number): string {
 
 function formatTokens(n: number): string {
   return n > 999 ? `${(n / 1000).toFixed(1)}k` : String(n)
+}
+
+interface ComplianceSummary {
+  totalSessions: number
+  totalBlockedEvents: number
+  totalErrorEvents: number
+  totalApprovalRequests: number
+  totalApproved: number
+  totalRejected: number
+}
+
+/** Gap 64 — aggregate governance metrics across every recorded autonomous-agent session. */
+function GovernanceCard() {
+  const [summary, setSummary] = useState<ComplianceSummary | null>(null)
+
+  useEffect(() => {
+    window.api.agent.getComplianceSummary().then(setSummary)
+  }, [])
+
+  if (!summary || summary.totalSessions === 0) return null
+
+  const stats: Array<{ label: string; value: number; color: string }> = [
+    { label: 'Agent sessions', value: summary.totalSessions, color: fg[0] },
+    { label: 'Policy blocks', value: summary.totalBlockedEvents, color: summary.totalBlockedEvents > 0 ? accent.amber.fg : fg[0] },
+    { label: 'Approvals granted', value: summary.totalApproved, color: accent.green.fg },
+    { label: 'Approvals rejected', value: summary.totalRejected, color: summary.totalRejected > 0 ? accent.red.fg : fg[0] },
+    { label: 'Errors', value: summary.totalErrorEvents, color: summary.totalErrorEvents > 0 ? accent.red.fg : fg[0] },
+  ]
+
+  return (
+    <div style={{ padding: '10px 12px', borderBottom: `1px solid ${border[1]}`, background: surface.base, flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 9, color: fg[4], textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
+        <ShieldCheck size={11} color={accent.violet.fg} /> Governance across all sessions
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14 }}>
+        {stats.map((s) => (
+          <div key={s.label}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: s.color, fontFamily: 'monospace' }}>{s.value}</div>
+            <div style={{ fontSize: 9, color: fg[4] }}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 /** Gap 56 — totals across every persisted chat session, sourced from ChatSession.usage (Gap 56 in useChatStore). */
@@ -42,6 +86,8 @@ export function UsageDashboardPanel() {
         icon={<DollarSign style={{ width: 13, height: 13, color: accent.green.fg }} />}
         label="Usage Dashboard"
       />
+
+      <GovernanceCard />
 
       {rows.length === 0 ? (
         <EmptyState

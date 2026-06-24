@@ -15,6 +15,7 @@ import { registerSandboxHandlers } from './sandbox.handlers'
 import { registerAgentHandlers } from './agent.handlers'
 import { registerDapHandlers } from './dap.handlers'
 import { registerMcpHandlers } from './mcp.handlers'
+import { registerPolicyHandlers } from './policy.handlers'
 
 export function registerAllIPC(): void {
   registerDecisionsHandlers()
@@ -33,6 +34,7 @@ export function registerAllIPC(): void {
   registerAgentHandlers()
   registerDapHandlers()
   registerMcpHandlers()
+  registerPolicyHandlers()
 
   ipcMain.on('window:minimize', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)

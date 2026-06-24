@@ -5,6 +5,7 @@ import { useSettingsStore } from '../../store/useSettingsStore'
 import { toast } from '../../store/useToastStore'
 import { ModelSelector } from '../chat/ModelSelector'
 import { McpServersSection } from './McpServersSection'
+import { PolicySection } from './PolicySection'
 
 interface EngineHealth {
   repoRoot: string
@@ -516,6 +517,8 @@ export function SettingsPanel() {
             </div>
           )}
         </div>
+
+        <PolicySection />
 
         <McpServersSection />
 

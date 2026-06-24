@@ -157,6 +157,14 @@ export function AgentProgressPanel() {
   }, [selectedBranch])
   useEffect(() => { setSessionDiff(null) }, [selectedSession])
 
+  // Gap 66 — render the session's verification report (if any) as standalone HTML for sharing.
+  const exportReport = useCallback(async () => {
+    if (!selectedSession) return
+    const htmlPath = await window.api.agent.exportReportHtml(selectedSession)
+    if (htmlPath) toast.success(`Report exported to ${htmlPath}`)
+    else toast.error('No verification report found for this session')
+  }, [selectedSession])
+
   // Gap 59 — subtask dependency graph for whichever event stream is active.
   const activeEvents = mode === 'live' ? events : historyEvents
   const planFile = activeEvents.length > 0 ? activeEvents[activeEvents.length - 1].planFile : ''
@@ -395,6 +403,18 @@ export function AgentProgressPanel() {
                     <GitBranch size={10} /> View diff
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={exportReport}
+                  title="Export this session's verification report as a standalone HTML file"
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 4,
+                    fontSize: 10, fontWeight: 700, padding: '4px 8px', borderRadius: 5,
+                    background: 'transparent', border: `1px solid ${border[1]}`, color: fg[3], cursor: 'pointer',
+                  }}
+                >
+                  <Rocket size={10} /> Export report
+                </button>
                 {verifyResult && (
                   <span style={{
                     fontSize: 10, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4,

@@ -115,3 +115,38 @@ export function listSessions(): SessionSummary[] {
     return []
   }
 }
+
+export interface ComplianceSummary {
+  totalSessions: number
+  totalBlockedEvents: number
+  totalErrorEvents: number
+  totalApprovalRequests: number
+  totalApproved: number
+  totalRejected: number
+}
+
+/** Aggregates governance metrics across every recorded session — the "executive" view of agent activity. */
+export function computeComplianceSummary(): ComplianceSummary {
+  const sessions = listSessions()
+  let totalBlockedEvents = 0
+  let totalErrorEvents = 0
+  let totalApprovalRequests = 0
+  let totalRejected = 0
+
+  for (const s of sessions) {
+    const events = readEvents(s.id)
+    totalBlockedEvents += events.filter((e) => e.status === 'blocked').length
+    totalErrorEvents += events.filter((e) => e.status === 'error').length
+    totalApprovalRequests += events.filter((e) => e.status === 'pending-approval').length
+    totalRejected += events.filter((e) => e.status === 'approval-rejected').length
+  }
+
+  return {
+    totalSessions: sessions.length,
+    totalBlockedEvents,
+    totalErrorEvents,
+    totalApprovalRequests,
+    totalApproved: totalApprovalRequests - totalRejected,
+    totalRejected,
+  }
+}

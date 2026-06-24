@@ -2,9 +2,12 @@ import { ipcMain } from 'electron'
 import * as os from 'os'
 import {
   startAutonomousSession, stopAutonomousSession, getActiveSession,
-  replaySession, resolveApproval, getSessionDiff,
+  replaySession, resolveApproval, getSessionDiff, exportReportHtml,
 } from '../agents/autonomousAgent'
-import { readEvents, listSessions, verifyEventLog, type SessionSummary, type VerifyResult } from '../agentEventLog'
+import {
+  readEvents, listSessions, verifyEventLog, computeComplianceSummary,
+  type SessionSummary, type VerifyResult, type ComplianceSummary,
+} from '../agentEventLog'
 
 export function registerAgentHandlers(): void {
   ipcMain.handle(
@@ -55,5 +58,15 @@ export function registerAgentHandlers(): void {
   // Gap 65 — recover the code diff a past session produced, even after its worktree was cleaned up.
   ipcMain.handle('agent:getSessionDiff', async (_event, branch: string): Promise<string> => {
     return await getSessionDiff(branch)
+  })
+
+  // Gap 64 — aggregate governance metrics across every recorded session.
+  ipcMain.handle('agent:getComplianceSummary', (): ComplianceSummary => {
+    return computeComplianceSummary()
+  })
+
+  // Gap 66 — render a session's verification report as standalone HTML.
+  ipcMain.handle('agent:exportReportHtml', async (_event, sessionId: string): Promise<string | null> => {
+    return await exportReportHtml(sessionId)
   })
 }
