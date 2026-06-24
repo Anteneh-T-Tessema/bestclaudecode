@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Bot, Square, CheckCircle2, AlertCircle, Loader, CircleDot, Play } from 'lucide-react'
+import { Bot, Square, CheckCircle2, AlertCircle, Loader, CircleDot, Play, GitBranch, GitPullRequest, Rocket } from 'lucide-react'
 import { PanelHeader, accent, border, fg, surface } from '../../design'
 import { toast } from '../../store/useToastStore'
 import { useChatStore } from '../../store/useChatStore'
@@ -9,11 +9,17 @@ interface AgentProgress {
   planFile: string
   subtaskId: string
   subtaskDescription: string
-  status: 'running' | 'done' | 'retrying' | 'blocked' | 'finished' | 'error'
+  status:
+    | 'running' | 'done' | 'retrying' | 'blocked' | 'finished' | 'error'
+    | 'preparing' | 'finalizing' | 'pr-opened' | 'push-failed-kept-locally'
+    | 'deploying' | 'deployed'
   output?: string
   error?: string
   doneCount: number
   totalCount: number
+  prUrl?: string
+  deployUrl?: string
+  branch?: string
 }
 
 type EventEntry = AgentProgress & { ts: number }
@@ -22,8 +28,29 @@ function StatusIcon({ status }: { status: AgentProgress['status'] }) {
   if (status === 'done') return <CheckCircle2 size={11} color={accent.green.fg} />
   if (status === 'blocked' || status === 'error') return <AlertCircle size={11} color={accent.red.fg} />
   if (status === 'running' || status === 'retrying') return <Loader size={11} color={accent.amber.fg} className="agent-pulse" />
-  if (status === 'finished') return <CheckCircle2 size={11} color={accent.cyan.fg} />
+  if (status === 'finished' || status === 'deployed') return <CheckCircle2 size={11} color={accent.cyan.fg} />
+  if (status === 'pr-opened') return <GitPullRequest size={11} color={accent.violet.fg} />
+  if (status === 'preparing' || status === 'finalizing') return <GitBranch size={11} color={accent.amber.fg} />
+  if (status === 'deploying') return <Rocket size={11} color={accent.amber.fg} />
+  if (status === 'push-failed-kept-locally') return <AlertCircle size={11} color={accent.amber.fg} />
   return <CircleDot size={11} color={fg[4]} />
+}
+
+function statusLabel(status: AgentProgress['status']): string {
+  switch (status) {
+    case 'preparing': return 'Preparing…'
+    case 'finalizing': return 'Finalizing…'
+    case 'pr-opened': return 'PR opened'
+    case 'push-failed-kept-locally': return 'Kept locally'
+    case 'deploying': return 'Deploying…'
+    case 'deployed': return 'Deployed'
+    case 'finished': return 'Finished'
+    case 'blocked': return 'Blocked'
+    case 'error': return 'Error'
+    case 'retrying': return 'Retrying…'
+    case 'done': return 'Done'
+    default: return 'Running'
+  }
 }
 
 export function AgentProgressPanel() {
@@ -38,10 +65,14 @@ export function AgentProgressPanel() {
     const off = window.api.agent.onProgress((raw: unknown) => {
       const p = raw as AgentProgress
       setEvents((prev) => [...prev.slice(-99), { ...p, ts: Date.now() }])
-      if (p.status === 'running' || p.status === 'retrying') setIsRunning(true)
-      if (p.status === 'finished' || p.status === 'blocked' || p.status === 'error') {
+      const activeStatuses: AgentProgress['status'][] = ['running', 'retrying', 'preparing', 'finalizing', 'deploying']
+      const terminalStatuses: AgentProgress['status'][] = ['finished', 'blocked', 'error', 'pr-opened', 'push-failed-kept-locally', 'deployed']
+      if (activeStatuses.includes(p.status)) setIsRunning(true)
+      if (terminalStatuses.includes(p.status)) {
         setIsRunning(false)
-        if (p.status === 'finished') toast.success('Background agent finished all subtasks')
+        if (p.status === 'finished' || p.status === 'deployed') toast.success('Background agent finished all subtasks')
+        if (p.status === 'pr-opened') toast.success(`PR opened: ${p.prUrl ?? ''}`)
+        if (p.status === 'push-failed-kept-locally') toast.error('Push failed — branch kept locally')
         if (p.status === 'error') toast.error(`Agent error: ${p.error ?? 'unknown'}`)
       }
     })
@@ -169,18 +200,28 @@ export function AgentProgressPanel() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
             <StatusIcon status={latest.status} />
             <span style={{ fontSize: 11, fontWeight: 600, color: fg[0] }}>
-              {latest.status === 'finished' ? 'Finished' :
-               latest.status === 'blocked' ? 'Blocked' :
-               latest.status === 'error' ? 'Error' :
-               latest.status === 'retrying' ? 'Retrying…' : 'Running'}
+              {statusLabel(latest.status)}
             </span>
+            {latest.branch && (
+              <span style={{ fontSize: 9, color: fg[4], fontFamily: 'monospace' }}>{latest.branch}</span>
+            )}
             <span style={{ fontSize: 10, color: fg[4], marginLeft: 'auto' }}>
               {latest.doneCount}/{latest.totalCount}
             </span>
           </div>
           {latest.subtaskDescription && (
             <div style={{ fontSize: 11, color: fg[2], paddingLeft: 17, lineHeight: 1.4 }}>
-              [{latest.subtaskId}] {latest.subtaskDescription}
+              {latest.subtaskId ? `[${latest.subtaskId}] ` : ''}{latest.subtaskDescription}
+            </div>
+          )}
+          {latest.prUrl && (
+            <div style={{ fontSize: 10, color: accent.violet.fg, paddingLeft: 17, marginTop: 3 }}>
+              PR: <a href={latest.prUrl} style={{ color: accent.violet.fg }}>{latest.prUrl}</a>
+            </div>
+          )}
+          {latest.deployUrl && (
+            <div style={{ fontSize: 10, color: accent.cyan.fg, paddingLeft: 17, marginTop: 2 }}>
+              Deployed: <a href={latest.deployUrl} style={{ color: accent.cyan.fg }}>{latest.deployUrl}</a>
             </div>
           )}
           {(latest.error) && (

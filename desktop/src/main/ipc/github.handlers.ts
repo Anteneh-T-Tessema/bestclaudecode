@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
-import { runPythonJson, runCommand } from '../pythonBridge'
+import { runPythonJson } from '../pythonBridge'
 import { repoRoot } from '../paths'
+import { createPr } from '../gitOps'
 
 export interface GithubComment {
   author: string
@@ -34,15 +35,7 @@ export function registerGithubHandlers(): void {
     _event,
     { title, body, base, head }: { title: string; body: string; base: string; head: string },
   ): Promise<{ url: string } | null> => {
-    try {
-      const result = await runCommand(
-        'gh', ['pr', 'create', '--title', title, '--body', body, '--base', base, '--head', head],
-        repoRoot(),
-      )
-      const url = result.stdout.trim()
-      return { url }
-    } catch {
-      return null
-    }
+    const url = await createPr(repoRoot(), { title, body, base, head })
+    return url ? { url } : null
   })
 }

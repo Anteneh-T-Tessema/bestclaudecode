@@ -13,12 +13,18 @@ export interface RelatedDecision {
   outcome: string
 }
 
+export interface CallerSite {
+  file: string
+  line: number
+}
+
 export interface ChatContextResult {
   file: string
   line: string
   snippet: string
   score: number
   related_decisions: RelatedDecision[]
+  callers: CallerSite[]
 }
 
 interface ChatContextResponse {

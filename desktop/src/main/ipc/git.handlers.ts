@@ -1,13 +1,5 @@
 import { ipcMain } from 'electron'
-import { execFile } from 'child_process'
-import { promisify } from 'util'
-
-const exec = promisify(execFile)
-
-async function git(cwd: string, args: string[], timeout = 30_000): Promise<string> {
-  const { stdout } = await exec('git', args, { cwd, timeout })
-  return stdout.trim()
-}
+import { runGit as git } from '../gitOps'
 
 export interface BlameEntry {
   line: number

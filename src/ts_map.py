@@ -35,6 +35,7 @@ import sys
 from pathlib import Path
 
 _TS_EXTENSIONS = frozenset({".ts", ".tsx", ".js", ".mjs", ".cjs"})
+_RESOLVE_EXTENSIONS = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
 
 _SKIP_DIR_NAMES = {"__pycache__", ".venv", "venv", ".git", "node_modules", "dist", "build", ".next"}
 
@@ -110,6 +111,72 @@ def build_ts_map(root: Path) -> str:
     if not files:
         return "(no TypeScript/JavaScript files found)"
     return "\n\n".join(_outline_ts_file(f) for f in files)
+
+
+# Matches `import ... from '<path>'`, `import('<path>')`, and `require('<path>')` —
+# the three forms that resolve to a real module specifier string. Bare named
+# imports with no `from` (e.g. side-effect `import './x'`) are also covered
+# since the path group is the same regardless of what precedes `from`.
+_IMPORT_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"""\bfrom\s+['"]([^'"]+)['"]"""),
+    re.compile(r"""\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)"""),
+    re.compile(r"""\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)"""),
+]
+
+
+def _resolve_ts_import(spec: str, from_file: Path, root: Path, known_by_resolved: dict[Path, Path]) -> Path | None:
+    """Resolve an import specifier to a file under root, or None if it doesn't point there.
+
+    Only relative specifiers (./ or ../) are considered — bare package names
+    (e.g. "react") are skipped the same way build_import_graph() skips stdlib
+    and third-party imports for Python, since there's no node_modules
+    resolution here, only this repo's own files. known_by_resolved maps each
+    known file's resolved (absolute, symlink-free) path to its original form,
+    so candidates built from from_file's resolved parent still match known
+    entries regardless of whether root/from_file were given as relative or
+    absolute paths.
+    """
+    if not (spec.startswith("./") or spec.startswith("../")):
+        return None
+    base = (from_file.resolve().parent / spec).resolve()
+    candidates = [base.with_suffix(ext) for ext in _RESOLVE_EXTENSIONS]
+    candidates.append(base)  # already has an explicit extension, e.g. "./x.ts"
+    for ext in _RESOLVE_EXTENSIONS:
+        candidates.append(base / f"index{ext}")
+    for candidate in candidates:
+        if candidate in known_by_resolved:
+            return known_by_resolved[candidate]
+    return None
+
+
+def build_ts_import_graph(root: Path) -> dict[str, list[str]]:
+    """Return {file: [files it imports from this repo]} for every TS/JS file under root.
+
+    The TypeScript/JavaScript counterpart to repo_map.build_import_graph().
+    Necessarily regex/string-based rather than a real parser (no ast module,
+    and no tree-sitter dependency is in scope here) — matches `import ...
+    from '<path>'`, `import('<path>')`, and `require('<path>')` statements,
+    resolving relative specifiers (./ , ../) against common extensions and
+    directory index files. Bare package imports (e.g. "react") are skipped,
+    same as build_import_graph() skips stdlib/third-party imports for Python.
+    """
+    files = _iter_ts_files(root)
+    known_by_resolved = {f.resolve(): f for f in files}
+    graph: dict[str, list[str]] = {}
+    for f in files:
+        try:
+            source = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            graph[str(f)] = []
+            continue
+        deps: set[Path] = set()
+        for pattern in _IMPORT_PATTERNS:
+            for match in pattern.finditer(source):
+                resolved = _resolve_ts_import(match.group(1), f, root, known_by_resolved)
+                if resolved is not None:
+                    deps.add(resolved)
+        graph[str(f)] = sorted(str(d) for d in deps)
+    return graph
 
 
 def main(argv: list[str] | None = None) -> None:

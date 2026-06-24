@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto'
 import path from 'path'
 import { spawn } from 'child_process'
 import { store } from '../store'
+import { resolveModel } from '../modelRouter'
 
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
@@ -23,6 +24,12 @@ interface StreamChatOpts {
 }
 
 const activeStreams = new Map<string, AbortController>()
+
+// Shared cap on tool-calling rounds across all providers that support it
+// (Claude, GPT, Gemini): each round streams a response, then runs any
+// requested tool calls and feeds results back for another round. Capped to
+// avoid a runaway loop if a tool keeps getting re-invoked.
+const MAX_TOOL_ROUNDS = 6
 
 // ---------------------------------------------------------------------------
 // Per-window retrieval context cache (keyed by BrowserWindow webContents id)
@@ -149,8 +156,9 @@ export function registerAiHandlers(): void {
       const timeoutHandle = setTimeout(() => controller.abort(), 90_000)
       try {
         const { messages, model, systemPrompt } = opts
+        const resolvedModel = resolveModel(model, messages[messages.length - 1]?.content ?? '')
 
-        if (model.startsWith('claude')) {
+        if (resolvedModel.startsWith('claude')) {
           const { default: Anthropic } = await import('@anthropic-ai/sdk')
           const apiKey = store.get('anthropicApiKey') as string | undefined
           if (!apiKey) throw new Error('Anthropic API key not configured. Go to Settings to add it.')
@@ -189,16 +197,11 @@ export function registerAiHandlers(): void {
             input_schema: t.inputSchema as AnthropicTool['input_schema'],
           }))
 
-          // Tool-calling loop: each round streams text, then checks whether the
-          // model asked to use a tool. If so, run it via the connected MCP
-          // server and feed the result back for another round. Capped to avoid
-          // a runaway loop if a tool keeps getting re-invoked.
-          const MAX_TOOL_ROUNDS = 6
           for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
             if (controller.signal.aborted) break
 
             const stream = client.messages.stream({
-              model, max_tokens: 4096, system: systemPrompt, messages: apiMessages,
+              model: resolvedModel, max_tokens: 4096, system: systemPrompt, messages: apiMessages,
               ...(anthropicTools.length > 0 ? { tools: anthropicTools } : {}),
             })
 
@@ -225,36 +228,150 @@ export function registerAiHandlers(): void {
             apiMessages.push({ role: 'assistant', content: finalMsg.content as AnthropicMessageParam['content'] })
             apiMessages.push({ role: 'user', content: toolResultBlocks })
           }
-        } else if (model.startsWith('gpt') || model.startsWith('o1') || model.startsWith('o3')) {
+        } else if (resolvedModel.startsWith('gpt') || resolvedModel.startsWith('o1') || resolvedModel.startsWith('o3')) {
           const { default: OpenAI } = await import('openai')
           const apiKey = store.get('openaiApiKey') as string | undefined
           if (!apiKey) throw new Error('OpenAI API key not configured. Go to Settings to add it.')
 
           const client = new OpenAI({ apiKey })
-          const apiMessages = messages.map((m) => {
-            if (!m.images?.length) return { role: m.role, content: m.content }
+          type OpenAIMessageParam = Parameters<typeof client.chat.completions.create>[0]['messages'][number]
+          type OpenAITool = NonNullable<Parameters<typeof client.chat.completions.create>[0]['tools']>[number]
+
+          const apiMessages: OpenAIMessageParam[] = messages.map((m) => {
+            if (!m.images?.length) return { role: m.role, content: m.content } as OpenAIMessageParam
             const parts: Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }> = []
             if (m.content) parts.push({ type: 'text', text: m.content })
             for (const img of m.images) parts.push({ type: 'image_url', image_url: { url: img } })
-            return { role: m.role, content: parts }
+            return { role: m.role, content: parts } as OpenAIMessageParam
           })
           if (systemPrompt) apiMessages.unshift({ role: 'system', content: systemPrompt })
 
-          const stream = await client.chat.completions.create({
-            model, messages: apiMessages as Parameters<typeof client.chat.completions.create>[0]['messages'], stream: true,
-          })
-          for await (const chunk of stream) {
+          const { getAggregatedTools, callQualifiedTool } = await import('../mcp/mcpManager')
+          const mcpTools = getAggregatedTools()
+          const openaiTools: OpenAITool[] = mcpTools.map((t) => ({
+            type: 'function',
+            function: {
+              name: t.qualifiedName,
+              description: t.description,
+              parameters: t.inputSchema,
+            },
+          }))
+
+          for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
             if (controller.signal.aborted) break
-            const delta = chunk.choices[0]?.delta?.content ?? ''
-            if (delta) send('ai:chunk', { streamId, delta })
+
+            const stream = await client.chat.completions.create({
+              model: resolvedModel, messages: apiMessages, stream: true,
+              ...(openaiTools.length > 0 ? { tools: openaiTools } : {}),
+            })
+
+            const toolCallsByIndex = new Map<number, { id: string; name: string; arguments: string }>()
+            for await (const chunk of stream) {
+              if (controller.signal.aborted) break
+              const delta = chunk.choices[0]?.delta?.content ?? ''
+              if (delta) send('ai:chunk', { streamId, delta })
+
+              for (const tc of chunk.choices[0]?.delta?.tool_calls ?? []) {
+                const existing = toolCallsByIndex.get(tc.index)
+                if (existing) {
+                  if (tc.function?.arguments) existing.arguments += tc.function.arguments
+                } else {
+                  toolCallsByIndex.set(tc.index, {
+                    id: tc.id ?? '',
+                    name: tc.function?.name ?? '',
+                    arguments: tc.function?.arguments ?? '',
+                  })
+                }
+              }
+            }
+            if (controller.signal.aborted) break
+
+            const toolCalls = [...toolCallsByIndex.values()]
+            if (toolCalls.length === 0) break
+
+            const toolResultMessages: OpenAIMessageParam[] = []
+            for (const tc of toolCalls) {
+              send('ai:chunk', { streamId, delta: `\n\n*🔧 Using tool \`${tc.name}\`…*\n\n` })
+              let result: string
+              try {
+                const args = tc.arguments ? JSON.parse(tc.arguments) as Record<string, unknown> : {}
+                result = await callQualifiedTool(tc.name, args)
+              } catch (err) {
+                result = `Error: could not parse tool arguments for "${tc.name}": ${(err as Error).message}`
+              }
+              toolResultMessages.push({ role: 'tool', tool_call_id: tc.id, content: result })
+            }
+
+            apiMessages.push({
+              role: 'assistant',
+              content: null,
+              tool_calls: toolCalls.map((tc) => ({
+                id: tc.id,
+                type: 'function',
+                function: { name: tc.name, arguments: tc.arguments },
+              })),
+            } as OpenAIMessageParam)
+            apiMessages.push(...toolResultMessages)
           }
-        } else if (model.startsWith('gemini')) {
-          const { GoogleGenerativeAI } = await import('@google/generative-ai')
+        } else if (resolvedModel.startsWith('gemini')) {
+          const { GoogleGenerativeAI, SchemaType } = await import('@google/generative-ai')
           const apiKey = store.get('googleApiKey') as string | undefined
           if (!apiKey) throw new Error('Google API key not configured. Go to Settings to add it.')
 
           const client = new GoogleGenerativeAI(apiKey)
-          const gModel = client.getGenerativeModel({ model, systemInstruction: systemPrompt ?? undefined })
+
+          // Minimal JSON-Schema -> Gemini Schema mapping: only `type` needs
+          // converting (Gemini wants the SchemaType enum, not a bare string),
+          // everything else (properties/items/required/description) already
+          // lines up with what mcpManager.ts's tool schemas produce.
+          const toGeminiSchemaType = (t: unknown): (typeof SchemaType)[keyof typeof SchemaType] => {
+            switch (t) {
+              case 'string': return SchemaType.STRING
+              case 'number': return SchemaType.NUMBER
+              case 'integer': return SchemaType.INTEGER
+              case 'boolean': return SchemaType.BOOLEAN
+              case 'array': return SchemaType.ARRAY
+              default: return SchemaType.OBJECT
+            }
+          }
+          const toGeminiSchema = (schema: Record<string, unknown>): Record<string, unknown> => {
+            const out: Record<string, unknown> = { ...schema, type: toGeminiSchemaType(schema.type) }
+            if (schema.properties && typeof schema.properties === 'object') {
+              out.properties = Object.fromEntries(
+                Object.entries(schema.properties as Record<string, unknown>).map(
+                  ([k, v]) => [k, toGeminiSchema(v as Record<string, unknown>)],
+                ),
+              )
+            }
+            if (schema.items && typeof schema.items === 'object') {
+              out.items = toGeminiSchema(schema.items as Record<string, unknown>)
+            }
+            return out
+          }
+
+          const { getAggregatedTools, callQualifiedTool } = await import('../mcp/mcpManager')
+          const mcpTools = getAggregatedTools()
+          type GenerativeModelParams = Parameters<typeof client.getGenerativeModel>[0]
+          type GeminiTool = NonNullable<GenerativeModelParams['tools']>[number]
+          // toGeminiSchema returns Record<string, unknown> by design (it's a
+          // recursive structural transform), so TS can't statically prove it
+          // matches the SDK's FunctionDeclarationSchema shape — the cast is
+          // safe because toGeminiSchemaType always normalizes `type` to a
+          // valid SchemaType enum value, satisfying that interface at runtime.
+          const geminiTools: GeminiTool[] = mcpTools.length > 0
+            ? [{
+                functionDeclarations: mcpTools.map((t) => ({
+                  name: t.qualifiedName,
+                  description: t.description,
+                  parameters: toGeminiSchema(t.inputSchema) as unknown as import('@google/generative-ai').FunctionDeclarationSchema,
+                })),
+              }]
+            : []
+
+          const gModel = client.getGenerativeModel({
+            model: resolvedModel, systemInstruction: systemPrompt ?? undefined,
+            ...(geminiTools.length > 0 ? { tools: geminiTools } : {}),
+          })
 
           const history = messages.slice(0, -1).map(m => ({
             role: m.role === 'assistant' ? 'model' : 'user',
@@ -262,12 +379,31 @@ export function registerAiHandlers(): void {
           }))
           const lastMsg = messages[messages.length - 1]
           const chat = gModel.startChat({ history })
-          const result = await chat.sendMessageStream(lastMsg?.content ?? '')
 
-          for await (const chunk of result.stream) {
+          type GeminiFunctionResponsePart = { functionResponse: { name: string; response: { content: string } } }
+          let nextRequest: string | GeminiFunctionResponsePart[] = lastMsg?.content ?? ''
+          for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
             if (controller.signal.aborted) break
-            const text = chunk.text()
-            if (text) send('ai:chunk', { streamId, delta: text })
+
+            const result = await chat.sendMessageStream(nextRequest)
+            for await (const chunk of result.stream) {
+              if (controller.signal.aborted) break
+              const text = chunk.text()
+              if (text) send('ai:chunk', { streamId, delta: text })
+            }
+            if (controller.signal.aborted) break
+
+            const finalResponse = await result.response
+            const functionCalls = finalResponse.functionCalls() ?? []
+            if (functionCalls.length === 0) break
+
+            const responseParts: GeminiFunctionResponsePart[] = []
+            for (const call of functionCalls) {
+              send('ai:chunk', { streamId, delta: `\n\n*🔧 Using tool \`${call.name}\`…*\n\n` })
+              const toolResult = await callQualifiedTool(call.name, (call.args as Record<string, unknown>) ?? {})
+              responseParts.push({ functionResponse: { name: call.name, response: { content: toolResult } } })
+            }
+            nextRequest = responseParts
           }
         } else {
           const ollamaUrl = (store.get('ollamaUrl') as string) || 'http://localhost:11434'
@@ -277,7 +413,7 @@ export function registerAiHandlers(): void {
           const resp = await fetch(`${ollamaUrl}/api/chat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model, messages: apiMessages, stream: true }),
+            body: JSON.stringify({ model: resolvedModel, messages: apiMessages, stream: true }),
             signal: controller.signal,
           })
 

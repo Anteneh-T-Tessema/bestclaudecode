@@ -12,6 +12,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { store } from '../store'
 import { repoRoot } from '../paths'
 import { runChatContext } from '../chatContext'
+import { runPythonJson } from '../pythonBridge'
 
 export interface McpServerConfig {
   id: string
@@ -144,6 +145,35 @@ export function getAggregatedTools(): AggregatedTool[] {
         required: ['query'],
       },
     },
+    {
+      qualifiedName: `${BUILTIN_SERVER_ID}${TOOL_SEP}find_callers`,
+      description:
+        'Find every call site of a function or method by name in this repo — the agent-callable equivalent of "Find references". Use this to check who depends on a function before changing its signature or behavior.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          function_name: { type: 'string', description: 'The exact function or method name to search for (no parentheses)' },
+        },
+        required: ['function_name'],
+      },
+    },
+    {
+      qualifiedName: `${BUILTIN_SERVER_ID}${TOOL_SEP}get_dependencies`,
+      description:
+        'List a file\'s direct imports ("depends_on") or the files that import it ("dependents_of") — the agent-callable equivalent of "Go to definition"/"Find references" at the file level. Works for both Python and TypeScript/JavaScript files in this repo.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          file: { type: 'string', description: 'Path to the file, relative to the repo root or absolute' },
+          direction: {
+            type: 'string',
+            enum: ['depends_on', 'dependents_of'],
+            description: 'depends_on (default): files this file imports. dependents_of: files that import this file.',
+          },
+        },
+        required: ['file'],
+      },
+    },
   ]
   for (const [serverId, server] of connected) {
     for (const tool of server.tools) {
@@ -166,11 +196,40 @@ async function callBuiltinSearchCodebase(args: Record<string, unknown>): Promise
 
   return results
     .map((r) => {
-      const block = `${r.file}:${r.line} — ${r.score}\n${r.snippet}`
+      let block = `${r.file}:${r.line} — ${r.score}\n${r.snippet}`
       const decisionNotes = r.related_decisions.map((d) => `Related decision: "${d.task}" → ${d.verdict}`)
-      return decisionNotes.length ? `${block}\n${decisionNotes.join('\n')}` : block
+      if (decisionNotes.length) block = `${block}\n${decisionNotes.join('\n')}`
+      if (r.callers.length) {
+        const sites = r.callers.map((c) => `${c.file}:${c.line}`).join(', ')
+        block = `${block}\nCalled from ${r.callers.length} other places: ${sites}`
+      }
+      return block
     })
     .join('\n\n---\n\n')
+}
+
+async function callBuiltinFindCallers(args: Record<string, unknown>): Promise<string> {
+  const functionName = args.function_name as string | undefined
+  if (!functionName) return '(no results: missing "function_name" argument)'
+
+  const result = await runPythonJson(['-m', 'src.repo_map', '--callers', functionName, repoRoot(), '--json'])
+  if (!result.ok) return `(error: ${result.error ?? 'unknown'})`
+  const { results } = result.stats as { results: Array<{ file: string; line: number }> }
+  if (!results.length) return `(no call sites found for "${functionName}")`
+  return results.map((r) => `${r.file}:${r.line}`).join('\n')
+}
+
+async function callBuiltinGetDependencies(args: Record<string, unknown>): Promise<string> {
+  const file = args.file as string | undefined
+  if (!file) return '(no results: missing "file" argument)'
+  const direction = (args.direction as string | undefined) === 'dependents_of' ? 'dependents_of' : 'depends_on'
+  const flag = direction === 'dependents_of' ? '--dependents-of' : '--depends-on'
+
+  const result = await runPythonJson(['-m', 'src.repo_map', flag, file, repoRoot(), '--json'])
+  if (!result.ok) return `(error: ${result.error ?? 'unknown'})`
+  const { results } = result.stats as { results: string[] }
+  if (!results.length) return `(no ${direction === 'dependents_of' ? 'dependents' : 'dependencies'} found for "${file}")`
+  return results.join('\n')
 }
 
 export async function callQualifiedTool(qualifiedName: string, args: Record<string, unknown>): Promise<string> {
@@ -181,6 +240,8 @@ export async function callQualifiedTool(qualifiedName: string, args: Record<stri
 
   if (serverId === BUILTIN_SERVER_ID) {
     try {
+      if (toolName === 'find_callers') return await callBuiltinFindCallers(args)
+      if (toolName === 'get_dependencies') return await callBuiltinGetDependencies(args)
       return await callBuiltinSearchCodebase(args)
     } catch (err) {
       return `(no results: ${(err as Error).message})`

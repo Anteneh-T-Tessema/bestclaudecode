@@ -10,6 +10,10 @@
  *   5. Parse <<<BROWSE>>> blocks → drive a headless browser via src.browser_context.
  *   6. On success: markDone, emit progress, advance to next subtask.
  *   7. On failure: retry once with the error as context, then pause.
+ *
+ * Isolation: all of the above runs against an isolated git worktree, not the
+ * user's live checkout — see setUpWorktree()/finalize() below. Edits never
+ * touch projectPath directly until they've been committed, pushed, and PR'd.
  */
 
 import { BrowserWindow } from 'electron'
@@ -19,6 +23,8 @@ import { repoRoot } from '../paths'
 import { store } from '../store'
 import { runChatContext } from '../chatContext'
 import { queryAgentMemory } from '../agentMemory'
+import { resolveModel } from '../modelRouter'
+import { createWorktree, commitAll, push, createPr, removeWorktree, runGit } from '../gitOps'
 import * as path from 'path'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -28,11 +34,20 @@ export interface AgentProgress {
   planFile: string
   subtaskId: string
   subtaskDescription: string
-  status: 'running' | 'done' | 'retrying' | 'blocked' | 'finished' | 'error'
+  status:
+    | 'running' | 'done' | 'retrying' | 'blocked' | 'finished' | 'error'
+    | 'preparing' | 'finalizing' | 'pr-opened' | 'push-failed-kept-locally'
+    | 'deploying' | 'deployed'
   output?: string
   error?: string
   doneCount: number
   totalCount: number
+  /** Set on 'pr-opened' (and any later status once known). */
+  prUrl?: string
+  /** Set on 'deployed' if the deploy tool printed a URL. */
+  deployUrl?: string
+  /** Branch the agent is working on, set once isolation is set up. */
+  branch?: string
 }
 
 interface Subtask {
@@ -112,9 +127,14 @@ async function getSubtaskContext(query: string, repoRootPath: string): Promise<s
   const results = await runChatContext(query, repoRootPath)
   if (!results.length) return ''
   const blocks = results.map((r) => {
-    const block = `${r.file} — ${r.line}\n\`\`\`\n${r.snippet}\n\`\`\``
+    let block = `${r.file} — ${r.line}\n\`\`\`\n${r.snippet}\n\`\`\``
     const decisionNotes = r.related_decisions.map((d) => `_Related decision: "${d.task}" → ${d.verdict}_`)
-    return decisionNotes.length ? `${block}\n${decisionNotes.join('\n')}` : block
+    if (decisionNotes.length) block = `${block}\n${decisionNotes.join('\n')}`
+    if (r.callers.length) {
+      const sites = r.callers.map((c) => `${c.file}:${c.line}`).join(', ')
+      block = `${block}\n_Called from ${r.callers.length} other places: ${sites}_`
+    }
+    return block
   })
   return `## Relevant codebase context\n\n${blocks.join('\n\n')}`
 }
@@ -127,6 +147,34 @@ async function getSubtaskMemory(query: string): Promise<string> {
   if (!entries.length) return ''
   const blocks = entries.map((m) => `**${m.key}**${m.tags.length ? ` [${m.tags.join(', ')}]` : ''}\n${m.content}`)
   return `## Relevant past learnings\n\n${blocks.join('\n\n')}`
+}
+
+// ── Test output parser ────────────────────────────────────────────────────────
+
+const TEST_RUNNER_RE = /\b(pytest|jest|vitest|go test|npm test|npm run test|cargo test)\b/
+
+/** Returns a one-line structured summary from known test runner output formats, or null if unrecognised. */
+function parseTestSummary(output: string): string | null {
+  // pytest: "3 passed, 1 failed, 2 warnings in 0.12s"
+  const pytestMatch = output.match(/(\d+ passed[^.\n]*(?:, \d+ failed)?[^\n.]*)/m)
+  if (pytestMatch) return pytestMatch[1].trim()
+  // jest/vitest: "Tests: 1 failed, 5 passed, 6 total"
+  const jestMatch = output.match(/(Tests?:\s+\d+[^\n]+)/m)
+  if (jestMatch) return jestMatch[1].trim()
+  // go test: "FAIL github.com/foo/bar (0.12s)"
+  const goMatch = output.match(/(FAIL\s+\S+[^\n]+)/m)
+  if (goMatch) return goMatch[1].trim()
+  // cargo test: "test result: FAILED. 1 passed; 2 failed;"
+  const cargoMatch = output.match(/(test result:[^\n]+)/m)
+  if (cargoMatch) return cargoMatch[1].trim()
+  return null
+}
+
+// ── Deploy URL extractor ──────────────────────────────────────────────────────
+
+function extractUrl(text: string): string | null {
+  const m = text.match(/https?:\/\/[^\s]+/)
+  return m ? m[0] : null
 }
 
 // ── AI streaming helper ───────────────────────────────────────────────────────
@@ -242,6 +290,108 @@ async function loadPlan(planFile: string): Promise<TaskPlanDetail | null> {
   return result.ok ? (result.stats as TaskPlanDetail) : null
 }
 
+// ── Deployment detection + run ────────────────────────────────────────────────
+
+async function attemptDeploy(opts: {
+  sessionId: string
+  planFile: string
+  doneCount: number
+  totalCount: number
+  branch: string
+  prUrl: string
+  worktreePath: string
+}): Promise<void> {
+  const { sessionId, planFile, doneCount, totalCount, branch, prUrl, worktreePath } = opts
+  const { promises: fs } = await import('fs')
+
+  let deployCmd: string | null = null
+
+  try {
+    const raw = await fs.readFile(path.join(worktreePath, 'package.json'), 'utf-8')
+    const pkg = JSON.parse(raw) as { scripts?: Record<string, string> }
+    if (pkg.scripts?.deploy) deployCmd = 'npm run deploy'
+  } catch { /* no package.json or no deploy script */ }
+
+  if (!deployCmd) {
+    for (const candidate of ['vercel.json', '.vercel']) {
+      try {
+        await fs.access(path.join(worktreePath, candidate))
+        deployCmd = 'vercel'
+        break
+      } catch { /* not found */ }
+    }
+  }
+
+  if (!deployCmd) return
+
+  broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: `Running ${deployCmd}…`, status: 'deploying', doneCount, totalCount, branch, prUrl })
+
+  try {
+    const result = await runCommand('/bin/sh', ['-c', deployCmd], worktreePath)
+    const combined = result.stdout + '\n' + result.stderr
+    const deployUrl = extractUrl(combined) ?? undefined
+    broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: '', status: 'deployed', doneCount, totalCount, branch, prUrl, deployUrl })
+  } catch { /* deploy failed — not fatal, session already succeeded */ }
+}
+
+// ── Finalize step (commit → push → PR → deploy → cleanup) ────────────────────
+
+async function finalizeSession(opts: {
+  sessionId: string
+  planFile: string
+  plan: TaskPlanDetail
+  projectPath: string
+  worktreePath: string
+  branch: string
+  doneCount: number
+}): Promise<void> {
+  const { sessionId, planFile, plan, projectPath, worktreePath, branch, doneCount } = opts
+  const totalCount = plan.subtasks.length
+
+  broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: 'Committing changes…', status: 'finalizing', doneCount, totalCount, branch })
+
+  const { committed } = await commitAll(worktreePath, `Agent: ${plan.goal}`)
+  if (!committed) {
+    await removeWorktree(projectPath, worktreePath).catch(() => {})
+    broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: '', status: 'finished', doneCount, totalCount })
+    return
+  }
+
+  // Push
+  broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: `Pushing branch ${branch}…`, status: 'finalizing', doneCount, totalCount, branch })
+  try {
+    await push(worktreePath, branch)
+  } catch (err) {
+    broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: `Branch ${branch} exists locally only (push failed: ${err})`, status: 'push-failed-kept-locally', doneCount, totalCount, branch })
+    return
+  }
+
+  // Create PR
+  broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: 'Opening PR…', status: 'finalizing', doneCount, totalCount, branch })
+  const base = await runGit(projectPath, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => 'main')
+  const prUrl = await createPr(worktreePath, {
+    title: `Agent: ${plan.goal}`,
+    body: `Automated changes by Lakoora autonomous agent.\n\nGoal: ${plan.goal}`,
+    base,
+    head: branch,
+  })
+
+  if (!prUrl) {
+    broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: `Branch ${branch} pushed but PR creation failed (no gh or not authenticated)`, status: 'push-failed-kept-locally', doneCount, totalCount, branch })
+    return
+  }
+
+  broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: '', status: 'pr-opened', doneCount, totalCount, branch, prUrl })
+
+  // Attempt deployment (before cleanup — deploy runs against the worktree state)
+  await attemptDeploy({ sessionId, planFile, doneCount, totalCount, branch, prUrl, worktreePath })
+
+  // Cleanup only on full success (pushed + PR opened)
+  await removeWorktree(projectPath, worktreePath, true).catch(() => {})
+
+  broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: '', status: 'finished', doneCount, totalCount, branch, prUrl })
+}
+
 // ── Main orchestration loop ───────────────────────────────────────────────────
 
 const AGENT_SYSTEM_PROMPT = `You are an autonomous coding agent running inside the Lakoora IDE.
@@ -278,7 +428,41 @@ export async function startAutonomousSession(opts: {
   const projectPath = (store.get('projectPath') as string | undefined) ?? repoRoot()
 
   void (async () => {
+    let worktreePath: string | null = null
+    let activePath = projectPath
+    let agentBranch = ''
+
     try {
+      // Initial plan load to get the goal for the branch name
+      const initialPlan = await loadPlan(planFile)
+      if (!initialPlan) {
+        broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: '', status: 'error', error: 'Failed to load plan', doneCount: 0, totalCount: 0 })
+        return
+      }
+
+      // Set up worktree isolation
+      const slug = initialPlan.goal.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30)
+      const shortId = randomUUID().slice(0, 8)
+      agentBranch = `agent/${slug}-${shortId}`
+      const candidateWorktreePath = path.join(projectPath, '.lakoora-worktrees', agentBranch)
+
+      broadcast({
+        sessionId, planFile, subtaskId: '', subtaskDescription: `Setting up worktree on branch ${agentBranch}`,
+        status: 'preparing', doneCount: 0, totalCount: initialPlan.subtasks.length, branch: agentBranch,
+      })
+
+      try {
+        await createWorktree(projectPath, candidateWorktreePath, agentBranch)
+        worktreePath = candidateWorktreePath
+        activePath = candidateWorktreePath
+      } catch {
+        // Not a git repo, or worktree creation failed — fall back to live working tree
+        broadcast({
+          sessionId, planFile, subtaskId: '', subtaskDescription: 'No git repo or worktree creation failed — using live working tree',
+          status: 'preparing', doneCount: 0, totalCount: initialPlan.subtasks.length,
+        })
+      }
+
       let retryContext: string | null = null
       // Cached per subtask id so a retry of the same subtask reuses the
       // already-fetched context block instead of re-querying chat_context.
@@ -301,7 +485,11 @@ export async function startAutonomousSession(opts: {
         const totalCount = plan.subtasks.length
 
         if (pending.length === 0) {
-          broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: '', status: 'finished', doneCount, totalCount })
+          if (worktreePath) {
+            await finalizeSession({ sessionId, planFile, plan, projectPath, worktreePath, branch: agentBranch, doneCount })
+          } else {
+            broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: '', status: 'finished', doneCount, totalCount })
+          }
           break
         }
 
@@ -314,6 +502,7 @@ export async function startAutonomousSession(opts: {
           subtaskDescription: subtask.description,
           status: isRetry ? 'retrying' : 'running',
           doneCount, totalCount,
+          branch: agentBranch || undefined,
         })
 
         // Fetched once per subtask attempt cycle, not per retry — it goes in
@@ -336,6 +525,8 @@ export async function startAutonomousSession(opts: {
           ? `Previous attempt failed:\n${retryContext}\n\nRetry the same subtask:\n${subtask.description}`
           : subtask.description
 
+        const resolvedModel = resolveModel(model, subtask.description)
+
         let response: string
         try {
           response = await streamToString(
@@ -343,7 +534,7 @@ export async function startAutonomousSession(opts: {
               { role: 'system', content: systemPrompt },
               { role: 'user', content: userContent },
             ],
-            model,
+            resolvedModel,
             controller.signal,
           )
         } catch (err) {
@@ -353,11 +544,11 @@ export async function startAutonomousSession(opts: {
 
         if (controller.signal.aborted) break
 
-        // Apply edits
+        // Apply edits — all edits go to activePath (worktree if set up, else projectPath)
         const edits = parseEdits(response)
         let editError: string | null = null
         for (const edit of edits) {
-          try { await applyEdit(edit, projectPath) }
+          try { await applyEdit(edit, activePath) }
           catch (err) { editError = `Edit failed for ${edit.path}: ${err}`; break }
         }
 
@@ -370,7 +561,7 @@ export async function startAutonomousSession(opts: {
           continue
         }
 
-        // Run commands
+        // Run commands — cwd is activePath (worktree if set up, else projectPath)
         const runs = parseRuns(response)
         let runError: string | null = null
         for (const run of runs) {
@@ -379,9 +570,17 @@ export async function startAutonomousSession(opts: {
             break
           }
           try {
-            const result = await runCommand('/bin/sh', ['-c', run.command], projectPath)
+            const result = await runCommand('/bin/sh', ['-c', run.command], activePath)
             if (result.exitCode !== 0) {
-              runError = `Command failed (exit ${result.exitCode}): ${run.command}\n${result.stderr}`
+              const isTestRun = TEST_RUNNER_RE.test(run.command)
+              let failDetail: string
+              if (isTestRun) {
+                const combined = result.stdout + '\n' + result.stderr
+                failDetail = parseTestSummary(combined) ?? combined.slice(0, 500)
+              } else {
+                failDetail = result.stderr || result.stdout
+              }
+              runError = `Command failed (exit ${result.exitCode}): ${run.command}\n${failDetail}`
               break
             }
           } catch (err) {
@@ -430,6 +629,7 @@ export async function startAutonomousSession(opts: {
           output: response.slice(0, 500),
           doneCount: doneCount + 1,
           totalCount,
+          branch: agentBranch || undefined,
         })
       }
     } finally {
@@ -448,4 +648,3 @@ export function stopAutonomousSession(): void {
 export function getActiveSession(): string | null {
   return activeSession?.sessionId ?? null
 }
-

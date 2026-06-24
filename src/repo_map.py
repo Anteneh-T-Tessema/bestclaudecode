@@ -11,6 +11,7 @@ quick orientation pass before it dives into unfamiliar code.
 from __future__ import annotations
 
 import ast
+import json
 import sys
 from pathlib import Path
 from typing import NamedTuple
@@ -298,16 +299,74 @@ def find_callers(root: Path, function_name: str) -> list[tuple[str, int]]:
     return callers
 
 
-def main(argv: list[str] | None = None) -> None:
-    """CLI entry point: print a repo map for a directory (or single file).
+def _merged_import_graph(root: Path) -> dict[str, list[str]]:
+    """Python's import graph plus the TS/JS one, merged into one {file: [deps]} dict.
 
-    Usage: python -m src.repo_map [--no-methods] [--deps] [--package-root DIR] [path]
+    Lets --depends-on/--dependents-of answer queries against either language
+    without callers needing to know which graph a given file lives in.
+    """
+    from src.ts_map import build_ts_import_graph
+
+    graph = build_import_graph(root)
+    graph.update(build_ts_import_graph(root))
+    return graph
+
+
+def _resolve_queried_file(file_arg: str, root: Path, graph: dict[str, list[str]]) -> str | None:
+    """Match a user-supplied file argument (relative or absolute) against a graph's keys."""
+    candidate = Path(file_arg)
+    if not candidate.is_absolute():
+        candidate = root / file_arg
+    candidate_str = str(candidate)
+    if candidate_str in graph:
+        return candidate_str
+    resolved = str(candidate.resolve())
+    for key in graph:
+        if key == resolved or str(Path(key).resolve()) == resolved:
+            return key
+    return None
+
+
+def main(argv: list[str] | None = None) -> None:
+    """CLI entry point: print a repo map for a directory (or single file), or
+    run one of the call-graph/dependency-graph query modes below.
+
+    Usage:
+        python -m src.repo_map [--no-methods] [--deps] [--package-root DIR] [--json] [path]
+        python -m src.repo_map --callers <function_name> [path] [--json]
+        python -m src.repo_map --depends-on <file> [path] [--json]
+        python -m src.repo_map --dependents-of <file> [path] [--json]
+
     Defaults to the current directory if no path is given. Pass
     --no-methods to omit class methods, --deps to show cross-file imports,
     --package-root DIR to set the base for resolving absolute import names
-    (defaults to path when not given).
+    (defaults to path when not given), --json for machine-readable output.
+
+    --callers prints every (file, line) call site of a function/method name
+    (find_callers(), AST-based for Python). --depends-on/--dependents-of
+    print a file's direct imports / direct importers respectively, using the
+    merged Python + TS/JS import graph so either language's files resolve.
+    --json output is always {"results": [...]} for these three modes, to
+    match this package's existing convention (see vector_index.py's main()).
     """
-    args = sys.argv[1:] if argv is None else argv
+    args = list(sys.argv[1:] if argv is None else argv)
+    as_json = "--json" in args
+    if as_json:
+        args.remove("--json")
+
+    for flag, handler in (
+        ("--callers", _run_callers_mode),
+        ("--depends-on", _run_depends_on_mode),
+        ("--dependents-of", _run_dependents_of_mode),
+    ):
+        if flag in args:
+            idx = args.index(flag)
+            target = args[idx + 1] if idx + 1 < len(args) else ""
+            del args[idx:idx + 2]
+            root = Path(args[0]) if args else Path(".")
+            handler(target, root, as_json)
+            return
+
     include_methods = "--no-methods" not in args
     show_deps = "--deps" in args
     package_root: Path | None = None
@@ -325,6 +384,46 @@ def main(argv: list[str] | None = None) -> None:
             filtered.append(a)
     root = Path(filtered[0]) if filtered else Path(".")
     print(build_repo_map(root, include_methods, show_deps, package_root))
+
+
+def _run_callers_mode(function_name: str, root: Path, as_json: bool) -> None:
+    callers = find_callers(root, function_name)
+    if as_json:
+        print(json.dumps({"results": [{"file": f, "line": ln} for f, ln in callers]}))
+        return
+    if not callers:
+        print(f"No call sites found for {function_name!r}.")
+        return
+    for f, ln in callers:
+        print(f"  {f}:{ln}")
+
+
+def _run_depends_on_mode(file_arg: str, root: Path, as_json: bool) -> None:
+    graph = _merged_import_graph(root)
+    key = _resolve_queried_file(file_arg, root, graph)
+    deps = graph.get(key, []) if key else []
+    if as_json:
+        print(json.dumps({"results": deps}))
+        return
+    if not deps:
+        print(f"{file_arg} has no resolved local dependencies.")
+        return
+    for d in deps:
+        print(f"  {d}")
+
+
+def _run_dependents_of_mode(file_arg: str, root: Path, as_json: bool) -> None:
+    graph = _merged_import_graph(root)
+    key = _resolve_queried_file(file_arg, root, graph)
+    dependents = [f for f, deps in graph.items() if key in deps] if key else []
+    if as_json:
+        print(json.dumps({"results": sorted(dependents)}))
+        return
+    if not dependents:
+        print(f"No files depend on {file_arg}.")
+        return
+    for d in sorted(dependents):
+        print(f"  {d}")
 
 
 if __name__ == "__main__":

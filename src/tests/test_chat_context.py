@@ -9,7 +9,7 @@ from src.chat_context import build_chat_context, _extract_line_number, _local_in
 from src.vector_index import build_persistent_index, persistent_search
 from src.vector_store import is_available as _qdrant_available
 
-_RESULT_KEYS = {"file", "line", "snippet", "score", "related_decisions"}
+_RESULT_KEYS = {"file", "line", "snippet", "score", "related_decisions", "callers"}
 
 pytestmark_qdrant = pytest.mark.skipif(not _qdrant_available(), reason="qdrant-client not installed")
 
@@ -152,6 +152,71 @@ def test_build_chat_context_attaches_related_decisions(tmp_path, monkeypatch):
     output = build_chat_context(repo_map, "evict lru", tmp_path)
 
     assert output["results"][0]["related_decisions"] == [fake_decision]
+
+
+# ---------------------------------------------------------------------------
+# callers
+# ---------------------------------------------------------------------------
+
+def test_build_chat_context_attaches_callers_for_called_function(tmp_path):
+    (tmp_path / "cache.py").write_text(
+        "def evict_lru():\n    \"\"\"Evict the least recently used entry.\"\"\"\n    return True\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "user.py").write_text("from cache import evict_lru\n\n\ndef run():\n    evict_lru()\n")
+    from src.repo_map import build_repo_map
+
+    repo_map = build_repo_map(tmp_path)
+    output = build_chat_context(repo_map, "evict lru cache", tmp_path)
+
+    first = output["results"][0]
+    assert first["callers"] == [{"file": str(tmp_path / "user.py"), "line": 5}]
+
+
+def test_build_chat_context_callers_empty_when_never_called(tmp_path):
+    (tmp_path / "cache.py").write_text(
+        "def evict_lru():\n    \"\"\"Evict the least recently used entry.\"\"\"\n    return True\n",
+        encoding="utf-8",
+    )
+    from src.repo_map import build_repo_map
+
+    repo_map = build_repo_map(tmp_path)
+    output = build_chat_context(repo_map, "evict lru cache", tmp_path)
+
+    assert output["results"][0]["callers"] == []
+
+
+def test_build_chat_context_callers_capped_at_three(tmp_path):
+    (tmp_path / "cache.py").write_text("def evict_lru():\n    return True\n", encoding="utf-8")
+    callers_body = "\n".join(f"def caller_{i}():\n    evict_lru()\n" for i in range(5))
+    (tmp_path / "user.py").write_text(callers_body)
+    from src.repo_map import build_repo_map
+
+    repo_map = build_repo_map(tmp_path)
+    output = build_chat_context(repo_map, "evict lru cache", tmp_path)
+
+    assert len(output["results"][0]["callers"]) == 3
+
+
+def test_build_chat_context_calls_find_callers_once_per_unique_name(tmp_path, monkeypatch):
+    """Two hits sharing the same symbol name must trigger only one find_callers() call."""
+    body = "def evict_lru():\n    pass\n\n\ndef evict_lru_helper():\n    evict_lru()\n"
+    (tmp_path / "cache.py").write_text(body, encoding="utf-8")
+    from src.repo_map import build_repo_map
+
+    call_args = []
+    import src.chat_context as chat_context_module
+
+    def fake_find_callers(root, name):
+        call_args.append(name)
+        return []
+
+    monkeypatch.setattr(chat_context_module, "find_callers", fake_find_callers)
+
+    repo_map = build_repo_map(tmp_path)
+    build_chat_context(repo_map, "evict lru", tmp_path, max_snippets=5)
+
+    assert len(call_args) == len(set(call_args))
 
 
 # ---------------------------------------------------------------------------

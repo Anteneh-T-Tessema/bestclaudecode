@@ -16,6 +16,7 @@ export interface ChatSession {
 }
 
 export const MODELS = [
+  { id: 'auto', label: 'Auto', provider: 'auto' },
   { id: 'claude-fable-5', label: 'Claude Fable 5', provider: 'anthropic' },
   { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', provider: 'anthropic' },
   { id: 'claude-opus-4-8', label: 'Claude Opus 4.8', provider: 'anthropic' },

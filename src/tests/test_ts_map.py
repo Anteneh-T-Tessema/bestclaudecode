@@ -1,7 +1,7 @@
 """Tests for src/ts_map.py — TypeScript/JavaScript repo map."""
 from pathlib import Path
 
-from src.ts_map import _outline_ts_file, _iter_ts_files, build_ts_map
+from src.ts_map import _outline_ts_file, _iter_ts_files, build_ts_map, build_ts_import_graph
 
 
 def _write(tmp_path: Path, name: str, content: str) -> Path:
@@ -109,3 +109,63 @@ def test_format_context_include_ts(tmp_path):
     result = format_context(tmp_path, "add a route", include_ts=True)
     assert "serve()" in result
     assert "run()" in result
+
+
+# ---------------------------------------------------------------------------
+# build_ts_import_graph
+# ---------------------------------------------------------------------------
+
+def test_build_ts_import_graph_resolves_relative_import(tmp_path):
+    _write(tmp_path, "b.ts", "export function foo() {}\n")
+    _write(tmp_path, "a.ts", "import { foo } from './b'\n")
+
+    graph = build_ts_import_graph(tmp_path)
+
+    a_path = str(tmp_path / "a.ts")
+    b_path = str(tmp_path / "b.ts")
+    assert graph[a_path] == [b_path]
+    assert graph[b_path] == []
+
+
+def test_build_ts_import_graph_omits_bare_package_imports(tmp_path):
+    _write(tmp_path, "a.ts", "import React from 'react'\nimport { useState } from 'react'\n")
+    graph = build_ts_import_graph(tmp_path)
+    assert graph[str(tmp_path / "a.ts")] == []
+
+
+def test_build_ts_import_graph_resolves_directory_index(tmp_path):
+    sub = tmp_path / "lib"
+    sub.mkdir()
+    _write(sub, "index.ts", "export function helper() {}\n")
+    _write(tmp_path, "a.ts", "import { helper } from './lib'\n")
+
+    graph = build_ts_import_graph(tmp_path)
+
+    assert graph[str(tmp_path / "a.ts")] == [str(sub / "index.ts")]
+
+
+def test_build_ts_import_graph_resolves_dynamic_import_and_require(tmp_path):
+    _write(tmp_path, "b.ts", "export function foo() {}\n")
+    _write(tmp_path, "c.ts", "export function bar() {}\n")
+    _write(
+        tmp_path,
+        "a.ts",
+        "const x = require('./b')\nasync function load() { return import('./c') }\n",
+    )
+
+    graph = build_ts_import_graph(tmp_path)
+
+    a_path = str(tmp_path / "a.ts")
+    assert sorted(graph[a_path]) == sorted([str(tmp_path / "b.ts"), str(tmp_path / "c.ts")])
+
+
+def test_build_ts_import_graph_can_be_inverted_to_find_dependents(tmp_path):
+    _write(tmp_path, "b.ts", "export function foo() {}\n")
+    _write(tmp_path, "a.ts", "import { foo } from './b'\n")
+    _write(tmp_path, "c.ts", "import { foo } from './b'\n")
+
+    graph = build_ts_import_graph(tmp_path)
+    b_path = str(tmp_path / "b.ts")
+
+    dependents = [f for f, deps in graph.items() if b_path in deps]
+    assert sorted(dependents) == sorted([str(tmp_path / "a.ts"), str(tmp_path / "c.ts")])

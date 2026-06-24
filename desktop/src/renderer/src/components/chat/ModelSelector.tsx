@@ -8,6 +8,7 @@ const PROVIDER_COLORS: Record<string, string> = {
   anthropic: accent.amber.fg,
   openai: accent.green.fg,
   google: accent.blue.fg,
+  auto: accent.violet.fg,
 }
 
 export function ModelSelector() {
