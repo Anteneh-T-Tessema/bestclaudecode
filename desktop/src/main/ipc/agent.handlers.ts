@@ -1,6 +1,10 @@
 import { ipcMain } from 'electron'
-import { startAutonomousSession, stopAutonomousSession, getActiveSession, replaySession, resolveApproval } from '../agents/autonomousAgent'
-import { readEvents, listSessions } from '../agentEventLog'
+import * as os from 'os'
+import {
+  startAutonomousSession, stopAutonomousSession, getActiveSession,
+  replaySession, resolveApproval, getSessionDiff,
+} from '../agents/autonomousAgent'
+import { readEvents, listSessions, verifyEventLog, type SessionSummary, type VerifyResult } from '../agentEventLog'
 
 export function registerAgentHandlers(): void {
   ipcMain.handle(
@@ -24,7 +28,7 @@ export function registerAgentHandlers(): void {
   })
 
   // Gap 54 — persisted event log read-back (audit / history view).
-  ipcMain.handle('agent:listEventSessions', (): string[] => {
+  ipcMain.handle('agent:listEventSessions', (): SessionSummary[] => {
     return listSessions()
   })
 
@@ -32,13 +36,24 @@ export function registerAgentHandlers(): void {
     return readEvents(sessionId)
   })
 
-  // Gap 51 — replay a past session's persisted event log at sped-up pacing.
-  ipcMain.handle('agent:replay', async (_event, sessionId: string): Promise<boolean> => {
-    return await replaySession(sessionId)
+  // Gap 60 — verify a session's event log hasn't been tampered with.
+  ipcMain.handle('agent:verifyEventLog', (_event, sessionId: string): VerifyResult => {
+    return verifyEventLog(sessionId)
   })
 
-  // Gap 57 — resolve a pending governance approval request.
+  // Gap 51/68 — replay a past session's persisted event log at sped-up pacing.
+  ipcMain.handle('agent:replay', async (_event, sessionId: string, speedup?: number): Promise<boolean> => {
+    return await replaySession(sessionId, speedup)
+  })
+
+  // Gap 57/61 — resolve a pending governance approval request, recording the OS
+  // user as the approver (there's no separate login system in this single-user app).
   ipcMain.handle('agent:approve', (_event, sessionId: string, approved: boolean): boolean => {
-    return resolveApproval(sessionId, approved)
+    return resolveApproval(sessionId, approved, os.userInfo().username)
+  })
+
+  // Gap 65 — recover the code diff a past session produced, even after its worktree was cleaned up.
+  ipcMain.handle('agent:getSessionDiff', async (_event, branch: string): Promise<string> => {
+    return await getSessionDiff(branch)
   })
 }

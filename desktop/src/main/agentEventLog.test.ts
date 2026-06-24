@@ -13,7 +13,7 @@ vi.mock('./paths', () => ({
   repoRoot: () => '/unused-fallback',
 }))
 
-import { appendEvent, readEvents, listSessions } from './agentEventLog'
+import { appendEvent, readEvents, listSessions, verifyEventLog } from './agentEventLog'
 
 describe('agentEventLog', () => {
   beforeEach(() => {
@@ -30,7 +30,7 @@ describe('agentEventLog', () => {
     expect(readEvents('missing-session')).toEqual([])
   })
 
-  it('appends events with incrementing sequence numbers and a timestamp', () => {
+  it('appends events with incrementing sequence numbers, a timestamp, and a hash', () => {
     appendEvent('s1', { status: 'running', subtaskId: 'a' })
     appendEvent('s1', { status: 'done', subtaskId: 'a' })
 
@@ -39,6 +39,8 @@ describe('agentEventLog', () => {
     expect(events[0]).toMatchObject({ seq: 1, status: 'running', subtaskId: 'a' })
     expect(events[1]).toMatchObject({ seq: 2, status: 'done', subtaskId: 'a' })
     expect(typeof events[0].ts).toBe('number')
+    expect(typeof events[0].hash).toBe('string')
+    expect(events[0].hash).not.toBe(events[1].hash)
   })
 
   it('keeps separate logs per session id', () => {
@@ -49,16 +51,68 @@ describe('agentEventLog', () => {
     expect(readEvents('s2')).toHaveLength(1)
   })
 
-  it('lists recorded session ids', () => {
+  it('lists recorded sessions with branch and start time', () => {
+    appendEvent('s1', { status: 'preparing', branch: 'agent/fix-auth-1' })
     appendEvent('s1', { status: 'running' })
     appendEvent('s2', { status: 'running' })
 
-    expect(listSessions().sort()).toEqual(['s1', 's2'])
+    const sessions = listSessions()
+    expect(sessions.map((s) => s.id).sort()).toEqual(['s1', 's2'])
+    const s1 = sessions.find((s) => s.id === 's1')
+    expect(s1?.branch).toBe('agent/fix-auth-1')
+    expect(typeof s1?.startedAt).toBe('number')
   })
 
   it('never throws even if the log directory cannot be created', () => {
     projectPath = '/dev/null/not-writable'
     expect(() => appendEvent('s1', { status: 'running' })).not.toThrow()
     expect(readEvents('s1')).toEqual([])
+  })
+})
+
+describe('verifyEventLog', () => {
+  beforeEach(() => {
+    projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'lakoora-event-log-'))
+  })
+
+  afterEach(() => {
+    fs.rmSync(projectPath, { recursive: true, force: true })
+  })
+
+  it('is valid (vacuously) for a session with no recorded events', () => {
+    expect(verifyEventLog('missing')).toEqual({ valid: true, totalEvents: 0 })
+  })
+
+  it('is valid for an untampered log', () => {
+    appendEvent('s1', { status: 'running' })
+    appendEvent('s1', { status: 'done' })
+    expect(verifyEventLog('s1')).toEqual({ valid: true, totalEvents: 2 })
+  })
+
+  it('detects a tampered record', () => {
+    appendEvent('s1', { status: 'running' })
+    appendEvent('s1', { status: 'blocked', error: 'original error' })
+
+    const file = path.join(projectPath, '.lakoora', 'agent-events', 's1.jsonl')
+    const lines = fs.readFileSync(file, 'utf-8').split('\n').filter(Boolean)
+    const tampered = { ...JSON.parse(lines[1]), error: 'a forged, less alarming error' }
+    lines[1] = JSON.stringify(tampered)
+    fs.writeFileSync(file, lines.join('\n') + '\n')
+
+    const result = verifyEventLog('s1')
+    expect(result.valid).toBe(false)
+    expect(result.brokenAtSeq).toBe(2)
+  })
+
+  it('detects a deleted record by breaking the chain at the next surviving one', () => {
+    appendEvent('s1', { status: 'running' })
+    appendEvent('s1', { status: 'blocked', error: 'should not be erased' })
+    appendEvent('s1', { status: 'finished' })
+
+    const file = path.join(projectPath, '.lakoora', 'agent-events', 's1.jsonl')
+    const lines = fs.readFileSync(file, 'utf-8').split('\n').filter(Boolean)
+    fs.writeFileSync(file, [lines[0], lines[2]].join('\n') + '\n') // drop the middle "blocked" record
+
+    expect(verifyEventLog('s1').valid).toBe(false)
   })
 })

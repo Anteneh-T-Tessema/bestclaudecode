@@ -8,6 +8,7 @@ import type { ShadowInfo } from '../main/ipc/sandbox.handlers'
 import type { PlanSummary, TaskPlanDetail } from '../main/ipc/taskplanner.handlers'
 import type { ArchDocResult } from '../main/ipc/archDoc.handlers'
 import type { McpServerConfig, McpServerStatus } from '../main/mcp/mcpManager'
+import type { SessionSummary, VerifyResult } from '../main/agentEventLog'
 
 const api = {
   // ── Decisions ──────────────────────────────────────────────────────────────
@@ -281,14 +282,18 @@ const api = {
       ipcRenderer.invoke('agent:stopAutonomous'),
     getActiveSession: (): Promise<string | null> =>
       ipcRenderer.invoke('agent:getActiveSession'),
-    listEventSessions: (): Promise<string[]> =>
+    listEventSessions: (): Promise<SessionSummary[]> =>
       ipcRenderer.invoke('agent:listEventSessions'),
     getEventLog: (sessionId: string): Promise<Array<Record<string, unknown>>> =>
       ipcRenderer.invoke('agent:getEventLog', sessionId),
-    replay: (sessionId: string): Promise<boolean> =>
-      ipcRenderer.invoke('agent:replay', sessionId),
+    verifyEventLog: (sessionId: string): Promise<VerifyResult> =>
+      ipcRenderer.invoke('agent:verifyEventLog', sessionId),
+    replay: (sessionId: string, speedup?: number): Promise<boolean> =>
+      ipcRenderer.invoke('agent:replay', sessionId, speedup),
     approve: (sessionId: string, approved: boolean): Promise<boolean> =>
       ipcRenderer.invoke('agent:approve', sessionId, approved),
+    getSessionDiff: (branch: string): Promise<string> =>
+      ipcRenderer.invoke('agent:getSessionDiff', branch),
     onProgress: (cb: (progress: unknown) => void) => {
       const handler = (_: Electron.IpcRendererEvent, progress: unknown) => cb(progress)
       ipcRenderer.on('agent:progress', handler)

@@ -118,18 +118,24 @@ let activeSession: { sessionId: string; abort: () => void } | null = null
 // Only one agent session runs at a time, so a single module-level slot (rather
 // than a map) is enough to track the one outstanding approval request.
 
-let pendingApproval: { sessionId: string; resolve: (approved: boolean) => void } | null = null
+interface ApprovalResult {
+  approved: boolean
+  /** OS username of whoever clicked Approve/Reject (Gap 61) — there's no separate login system in this single-user app. */
+  approver: string
+}
 
-function requestApproval(sessionId: string): Promise<boolean> {
-  return new Promise<boolean>((resolve) => {
+let pendingApproval: { sessionId: string; resolve: (result: ApprovalResult) => void } | null = null
+
+function requestApproval(sessionId: string): Promise<ApprovalResult> {
+  return new Promise<ApprovalResult>((resolve) => {
     pendingApproval = { sessionId, resolve }
   })
 }
 
 /** Called from the IPC handler when the user clicks Approve/Reject. Returns false if there's no matching pending request. */
-export function resolveApproval(sessionId: string, approved: boolean): boolean {
+export function resolveApproval(sessionId: string, approved: boolean, approver: string): boolean {
   if (!pendingApproval || pendingApproval.sessionId !== sessionId) return false
-  pendingApproval.resolve(approved)
+  pendingApproval.resolve({ approved, approver })
   pendingApproval = null
   return true
 }
@@ -421,6 +427,7 @@ async function writeVerificationReport(opts: {
   const events = readEvents(sessionId)
   const blocked = events.filter((e) => e.status === 'blocked')
   const errors = events.filter((e) => e.status === 'error')
+  const approvals = events.filter((e) => e.status === 'pending-approval' || e.status === 'approval-rejected' || /\(approved by /.test(String(e.subtaskDescription ?? '')))
 
   const lines: string[] = []
   lines.push(`# Agent Session Report: ${plan.goal}`)
@@ -446,6 +453,16 @@ async function writeVerificationReport(opts: {
   lines.push(errors.length === 0
     ? 'No errors recorded.'
     : errors.map((e) => `- ERROR [${e.subtaskId}]: ${e.error}`).join('\n'))
+  lines.push('')
+  lines.push('## Approvals')
+  lines.push('')
+  lines.push(approvals.length === 0
+    ? 'No governance approval requests recorded.'
+    : approvals.map((e) => {
+        if (e.status === 'pending-approval') return `- REQUESTED [${e.subtaskId}]: ${e.error}`
+        if (e.status === 'approval-rejected') return `- REJECTED [${e.subtaskId}]: ${e.error}`
+        return `- ${e.subtaskDescription}`
+      }).join('\n'))
   lines.push('')
   lines.push('## Pull Request')
   lines.push('')
@@ -745,15 +762,19 @@ export async function startAutonomousSession(opts: {
               status: 'pending-approval', error: `Approval required: ${run.command} matches "${approvalNeeded.pattern}"`,
               doneCount, totalCount,
             })
-            const approved = await requestApproval(sessionId)
+            const { approved, approver } = await requestApproval(sessionId)
             if (!approved) {
               broadcast({
                 sessionId, planFile, subtaskId: subtask.id, subtaskDescription: subtask.description,
-                status: 'approval-rejected', error: `Rejected by user: ${run.command}`, doneCount, totalCount,
+                status: 'approval-rejected', error: `Rejected by ${approver}: ${run.command}`, doneCount, totalCount,
               })
               return // human rejection halts the session cleanly — no retry, worktree left intact for review
             }
-            broadcast({ sessionId, planFile, subtaskId: subtask.id, subtaskDescription: subtask.description, status: 'running', doneCount, totalCount })
+            broadcast({
+              sessionId, planFile, subtaskId: subtask.id,
+              subtaskDescription: `${subtask.description} (approved by ${approver})`,
+              status: 'running', doneCount, totalCount,
+            })
           }
           try {
             const result = await runCommand('/bin/sh', ['-c', run.command], activePath)
@@ -843,19 +864,20 @@ function broadcastOnly(progress: AgentProgress): void {
   }
 }
 
-const REPLAY_SPEEDUP = 10
+const DEFAULT_REPLAY_SPEEDUP = 10
 const REPLAY_MAX_STEP_MS = 2000
 
 /**
  * Re-emits a past session's persisted event log over the same 'agent:progress'
- * channel the live agent uses, at REPLAY_SPEEDUP× the original pacing (capped
- * per-step so a long real-world pause doesn't stall the replay). Re-emitted
- * events are NOT re-appended to the log (uses broadcastOnly, not broadcast) —
- * replaying a session must not duplicate or grow its own history.
+ * channel the live agent uses, at `speedup`× the original pacing (capped
+ * per-step so a long real-world pause doesn't stall the replay; Gap 68 lets the
+ * caller override the default 10x). Re-emitted events are NOT re-appended to
+ * the log (uses broadcastOnly, not broadcast) — replaying a session must not
+ * duplicate or grow its own history.
  * Refuses to run alongside a real active session to avoid interleaving the
  * two on the same channel.
  */
-export async function replaySession(sessionId: string): Promise<boolean> {
+export async function replaySession(sessionId: string, speedup = DEFAULT_REPLAY_SPEEDUP): Promise<boolean> {
   if (activeSession) return false
   const events = readEvents(sessionId)
   if (events.length === 0) return false
@@ -866,9 +888,26 @@ export async function replaySession(sessionId: string): Promise<boolean> {
     if (i < events.length - 1) {
       const curTs = events[i].ts as number
       const nextTs = events[i + 1].ts as number
-      const delay = Math.min(Math.max(0, nextTs - curTs) / REPLAY_SPEEDUP, REPLAY_MAX_STEP_MS)
+      const delay = Math.min(Math.max(0, nextTs - curTs) / speedup, REPLAY_MAX_STEP_MS)
       await new Promise((resolve) => setTimeout(resolve, delay))
     }
   }
   return true
+}
+
+/**
+ * Recovers the code diff a past session produced via the branch's merge-base
+ * against the current HEAD, run against the main checkout (projectPath) rather
+ * than the worktree — the worktree is normally removed once a PR is opened
+ * (Gap 41's cleanup), but the branch ref itself survives, so the diff is still
+ * recoverable for audit purposes. Returns '' if the branch no longer exists.
+ */
+export async function getSessionDiff(branch: string): Promise<string> {
+  const projectPath = (store.get('projectPath') as string | undefined) ?? repoRoot()
+  try {
+    const mergeBase = (await runGit(projectPath, ['merge-base', 'HEAD', branch])).trim()
+    return await runGit(projectPath, ['diff', mergeBase, branch])
+  } catch {
+    return ''
+  }
 }

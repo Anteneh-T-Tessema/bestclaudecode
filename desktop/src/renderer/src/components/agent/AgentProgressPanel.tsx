@@ -5,6 +5,8 @@ import { toast } from '../../store/useToastStore'
 import { useChatStore } from '../../store/useChatStore'
 
 type Subtask = { id: string; description: string; depends_on: string[]; done: boolean }
+type SessionSummary = { id: string; branch?: string; startedAt: number }
+type VerifyResult = { valid: boolean; brokenAtSeq?: number; totalEvents: number }
 
 interface AgentProgress {
   sessionId: string
@@ -109,7 +111,8 @@ export function AgentProgressPanel() {
 
   // Gap 54 — history mode: browse the persisted event log of a past session.
   const [mode, setMode] = useState<'live' | 'history'>('live')
-  const [historySessions, setHistorySessions] = useState<string[]>([])
+  const [historySessions, setHistorySessions] = useState<SessionSummary[]>([])
+  const [sessionFilter, setSessionFilter] = useState('') // Gap 69
   const [selectedSession, setSelectedSession] = useState('')
   const [historyEvents, setHistoryEvents] = useState<EventEntry[]>([])
 
@@ -117,12 +120,18 @@ export function AgentProgressPanel() {
     if (mode === 'live') {
       const sessions = await window.api.agent.listEventSessions()
       setHistorySessions(sessions)
-      if (sessions.length > 0) setSelectedSession(sessions[0])
+      if (sessions.length > 0) setSelectedSession(sessions[0].id)
       setMode('history')
     } else {
       setMode('live')
     }
   }, [mode])
+
+  const filteredSessions = useMemo(() => {
+    const q = sessionFilter.trim().toLowerCase()
+    if (!q) return historySessions
+    return historySessions.filter((s) => s.id.toLowerCase().includes(q) || (s.branch ?? '').toLowerCase().includes(q))
+  }, [historySessions, sessionFilter])
 
   useEffect(() => {
     if (mode !== 'history' || !selectedSession) return
@@ -130,6 +139,23 @@ export function AgentProgressPanel() {
       setHistoryEvents(raw as unknown as EventEntry[])
     })
   }, [mode, selectedSession])
+
+  // Gap 60 — verify the selected session's event log hash chain on demand.
+  const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null)
+  const verifySelected = useCallback(async () => {
+    if (!selectedSession) return
+    setVerifyResult(await window.api.agent.verifyEventLog(selectedSession))
+  }, [selectedSession])
+  useEffect(() => { setVerifyResult(null) }, [selectedSession])
+
+  // Gap 65 — recover the code diff a past session produced, even after its worktree was cleaned up.
+  const [sessionDiff, setSessionDiff] = useState<string | null>(null)
+  const selectedBranch = historySessions.find((s) => s.id === selectedSession)?.branch
+  const viewDiff = useCallback(async () => {
+    if (!selectedBranch) return
+    setSessionDiff(await window.api.agent.getSessionDiff(selectedBranch))
+  }, [selectedBranch])
+  useEffect(() => { setSessionDiff(null) }, [selectedSession])
 
   // Gap 59 — subtask dependency graph for whichever event stream is active.
   const activeEvents = mode === 'live' ? events : historyEvents
@@ -184,20 +210,21 @@ export function AgentProgressPanel() {
 
   const clear = useCallback(() => setEvents([]), [])
 
-  // Gap 51 — replay a past session's persisted log through the live view.
+  // Gap 51/68 — replay a past session's persisted log through the live view, at a chosen speed.
   const [isReplaying, setIsReplaying] = useState(false)
+  const [replaySpeed, setReplaySpeed] = useState(10)
   const replay = useCallback(async () => {
     if (!selectedSession || isReplaying || isRunning) return
     setEvents([])
     setMode('live')
     setIsReplaying(true)
     try {
-      const ok = await window.api.agent.replay(selectedSession)
+      const ok = await window.api.agent.replay(selectedSession, replaySpeed)
       if (!ok) toast.error('Replay skipped — an agent session is already running')
     } finally {
       setIsReplaying(false)
     }
-  }, [selectedSession, isReplaying, isRunning])
+  }, [selectedSession, isReplaying, isRunning, replaySpeed])
 
   const launch = useCallback(async () => {
     const trimmed = goal.trim()
@@ -283,34 +310,112 @@ export function AgentProgressPanel() {
           {historySessions.length === 0 ? (
             <div style={{ fontSize: 11, color: fg[4] }}>No recorded sessions yet.</div>
           ) : (
-            <div style={{ display: 'flex', gap: 6 }}>
-              <select
-                value={selectedSession}
-                onChange={(e) => setSelectedSession(e.target.value)}
-                title="Select past agent session"
+            <>
+              {/* Gap 69 — filter by branch or session id */}
+              <input
+                value={sessionFilter}
+                onChange={(e) => setSessionFilter(e.target.value)}
+                placeholder="Filter by branch…"
                 style={{
-                  flex: 1, background: surface.raised, border: `1px solid ${border[0]}`,
-                  borderRadius: 5, padding: '5px 8px', fontSize: 11, color: fg[0], outline: 'none',
+                  width: '100%', background: surface.raised, border: `1px solid ${border[0]}`,
+                  borderRadius: 5, padding: '4px 8px', fontSize: 10, color: fg[0], outline: 'none',
+                  marginBottom: 6, boxSizing: 'border-box',
                 }}
-              >
-                {historySessions.map((id) => <option key={id} value={id}>{id}</option>)}
-              </select>
-              <button
-                type="button"
-                onClick={replay}
-                disabled={isReplaying || isRunning}
-                title="Replay this session's recorded events in the live view"
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0,
-                  fontSize: 11, fontWeight: 700, padding: '5px 10px', borderRadius: 5,
-                  background: isReplaying || isRunning ? surface.raised : accent.violet.fg,
-                  border: 'none', color: isReplaying || isRunning ? fg[4] : '#fff',
-                  cursor: isReplaying || isRunning ? 'not-allowed' : 'pointer',
-                }}
-              >
-                <Play size={11} /> {isReplaying ? 'Replaying…' : 'Replay'}
-              </button>
-            </div>
+              />
+              <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                <select
+                  value={selectedSession}
+                  onChange={(e) => setSelectedSession(e.target.value)}
+                  title="Select past agent session"
+                  style={{
+                    flex: 1, background: surface.raised, border: `1px solid ${border[0]}`,
+                    borderRadius: 5, padding: '5px 8px', fontSize: 11, color: fg[0], outline: 'none', minWidth: 0,
+                  }}
+                >
+                  {filteredSessions.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.branch ?? s.id.slice(0, 8)} — {new Date(s.startedAt).toLocaleString()}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={replaySpeed}
+                  onChange={(e) => setReplaySpeed(Number(e.target.value))}
+                  title="Replay speed"
+                  style={{
+                    flexShrink: 0, background: surface.raised, border: `1px solid ${border[0]}`,
+                    borderRadius: 5, padding: '5px 6px', fontSize: 11, color: fg[0], outline: 'none',
+                  }}
+                >
+                  <option value={1}>1×</option>
+                  <option value={5}>5×</option>
+                  <option value={10}>10×</option>
+                  <option value={20}>20×</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={replay}
+                  disabled={isReplaying || isRunning}
+                  title="Replay this session's recorded events in the live view"
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0,
+                    fontSize: 11, fontWeight: 700, padding: '5px 10px', borderRadius: 5,
+                    background: isReplaying || isRunning ? surface.raised : accent.violet.fg,
+                    border: 'none', color: isReplaying || isRunning ? fg[4] : '#fff',
+                    cursor: isReplaying || isRunning ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  <Play size={11} /> {isReplaying ? 'Replaying…' : 'Replay'}
+                </button>
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button
+                  type="button"
+                  onClick={verifySelected}
+                  title="Recompute the event log's hash chain and check for tampering"
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 4,
+                    fontSize: 10, fontWeight: 700, padding: '4px 8px', borderRadius: 5,
+                    background: 'transparent', border: `1px solid ${border[1]}`, color: fg[3], cursor: 'pointer',
+                  }}
+                >
+                  <ShieldAlert size={10} /> Verify integrity
+                </button>
+                {selectedBranch && (
+                  <button
+                    type="button"
+                    onClick={viewDiff}
+                    title="Show the code diff this session produced"
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 4,
+                      fontSize: 10, fontWeight: 700, padding: '4px 8px', borderRadius: 5,
+                      background: 'transparent', border: `1px solid ${border[1]}`, color: fg[3], cursor: 'pointer',
+                    }}
+                  >
+                    <GitBranch size={10} /> View diff
+                  </button>
+                )}
+                {verifyResult && (
+                  <span style={{
+                    fontSize: 10, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4,
+                    color: verifyResult.valid ? accent.green.fg : accent.red.fg,
+                  }}>
+                    {verifyResult.valid
+                      ? `✓ Verified (${verifyResult.totalEvents} events)`
+                      : `✗ Tampered — broken at seq ${verifyResult.brokenAtSeq}`}
+                  </span>
+                )}
+              </div>
+              {sessionDiff !== null && (
+                <pre style={{
+                  marginTop: 8, padding: 8, maxHeight: 200, overflow: 'auto',
+                  background: surface.void, border: `1px solid ${border[1]}`, borderRadius: 5,
+                  fontSize: 10, color: fg[2], whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                }}>
+                  {sessionDiff.trim() ? sessionDiff : '(no diff — branch may have been deleted or merged)'}
+                </pre>
+              )}
+            </>
           )}
         </div>
       )}
