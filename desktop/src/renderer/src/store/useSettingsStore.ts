@@ -19,6 +19,7 @@ interface SettingsStore {
   projectPath: string
   recentProjects: string[]
   activeModel: ModelId
+  globalRules: string
   loaded: boolean
 
   // Actions
@@ -46,6 +47,7 @@ const DEFAULTS = {
   projectPath: '',
   recentProjects: [] as string[],
   activeModel: 'claude-sonnet-4-6' as ModelId,
+  globalRules: '',
 }
 
 export const useSettingsStore = create<SettingsStore>((set) => ({

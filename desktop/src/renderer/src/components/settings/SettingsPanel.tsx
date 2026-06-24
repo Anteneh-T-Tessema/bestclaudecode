@@ -182,6 +182,7 @@ export function SettingsPanel() {
   const storeOllamaUrl = useSettingsStore((s) => s.ollamaUrl)
   const recentProjects = useSettingsStore((s) => s.recentProjects)
   const projectPath = useSettingsStore((s) => s.projectPath)
+  const storeGlobalRules = useSettingsStore((s) => s.globalRules)
   const saveSettings = useSettingsStore((s) => s.save)
 
   const [anthropicKey, setAnthropicKey] = useState('')
@@ -196,13 +197,36 @@ export function SettingsPanel() {
   const [rulesSaved, setRulesSaved] = useState(false)
   const rulesLoadedFor = useRef<string | null>(null)
 
+  // Global rules editor (cross-project, persisted via the settings store)
+  const [globalRulesDraft, setGlobalRulesDraft] = useState('')
+  const [globalRulesSaving, setGlobalRulesSaving] = useState(false)
+  const [globalRulesSaved, setGlobalRulesSaved] = useState(false)
+  const globalRulesLoaded = useRef(false)
+
   useEffect(() => {
     if (!settingsLoaded) return
     setAnthropicKey(storeAnthropicKey)
     setOpenaiKey(storeOpenaiKey)
     setGoogleKey(storeGoogleKey)
     setOllamaUrl(storeOllamaUrl)
-  }, [settingsLoaded, storeAnthropicKey, storeOpenaiKey, storeGoogleKey, storeOllamaUrl])
+    if (!globalRulesLoaded.current) {
+      setGlobalRulesDraft(storeGlobalRules)
+      globalRulesLoaded.current = true
+    }
+  }, [settingsLoaded, storeAnthropicKey, storeOpenaiKey, storeGoogleKey, storeOllamaUrl, storeGlobalRules])
+
+  const saveGlobalRules = async () => {
+    setGlobalRulesSaving(true)
+    try {
+      await saveSettings({ globalRules: globalRulesDraft })
+      setGlobalRulesSaved(true)
+      setTimeout(() => setGlobalRulesSaved(false), 1500)
+    } catch {
+      toast.error('Failed to save global rules')
+    } finally {
+      setGlobalRulesSaving(false)
+    }
+  }
 
   useEffect(() => {
     if (!projectPath || rulesLoadedFor.current === projectPath) return
@@ -322,6 +346,65 @@ export function SettingsPanel() {
             The model used for AI Chat, inline edit (Cmd+K), and ghost-text completion. Persisted across restarts.
           </p>
           <ModelSelector />
+        </div>
+
+        <div>
+          <div style={{
+            fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+            color: fg[3], marginBottom: 8, paddingBottom: 6, borderBottom: `1px solid ${border[1]}`,
+          }}>
+            Global Rules
+          </div>
+          <p style={{ fontSize: 10, color: fg[3], margin: '0 0 8px', lineHeight: 1.5 }}>
+            Rules injected into every AI chat across all projects, before any project-level .lakoorarules. Use this for personal conventions you want everywhere (e.g. tone, preferred libraries, output format).
+          </p>
+          <div style={{ position: 'relative' }}>
+            <textarea
+              value={globalRulesDraft}
+              onChange={(e) => { setGlobalRulesDraft(e.target.value); setGlobalRulesSaved(false) }}
+              onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); void saveGlobalRules() } }}
+              placeholder={'# Example\nAlways explain trade-offs before recommending an approach.\nPrefer concise answers over exhaustive ones.'}
+              rows={6}
+              style={{
+                width: '100%',
+                background: surface.raised,
+                border: `1px solid ${border[0]}`,
+                borderRadius: 4,
+                padding: '8px 10px',
+                fontSize: 11,
+                color: fg[0],
+                fontFamily: 'monospace',
+                lineHeight: 1.6,
+                resize: 'vertical',
+                outline: 'none',
+                boxSizing: 'border-box',
+              }}
+            />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
+            <button
+              type="button"
+              onClick={saveGlobalRules}
+              disabled={globalRulesSaving}
+              title="Save Global Rules (⌘S)"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '4px 10px',
+                fontSize: 10,
+                fontWeight: 600,
+                borderRadius: 4,
+                border: `1px solid ${globalRulesSaved ? accent.green.border : border[0]}`,
+                background: globalRulesSaved ? accent.green.subtle : surface.raised,
+                color: globalRulesSaved ? accent.green.fg : fg[2],
+                cursor: !globalRulesSaving ? 'pointer' : 'not-allowed',
+              }}
+            >
+              <Save size={10} />
+              {globalRulesSaving ? 'Saving…' : globalRulesSaved ? 'Saved' : 'Save'}
+            </button>
+          </div>
         </div>
 
         <div>

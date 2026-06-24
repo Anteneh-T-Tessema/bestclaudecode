@@ -15,6 +15,7 @@ interface StoreSchema {
   bottomPanelHeight: number
   projectPath: string
   recentProjects: string[]
+  globalRules: string
   [key: string]: unknown
 }
 
@@ -31,6 +32,7 @@ const DEFAULTS: StoreSchema = {
   bottomPanelHeight: 220,
   projectPath: '',
   recentProjects: [],
+  globalRules: '',
 }
 
 function getStorePath(): string {

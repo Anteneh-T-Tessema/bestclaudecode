@@ -409,9 +409,11 @@ export function ChatInput() {
 
     const assistantId = startAssistantMessage()
 
-    // Build system prompt: base + optional .lakoorarules
+    // Build system prompt: base + global rules + optional .lakoorarules
+    const globalRules = useSettingsStore.getState().globalRules
+    const globalRulesBlock = globalRules.trim() ? `\n\n# Global Rules\n${globalRules.trim()}` : ''
     const projectRules = await loadProjectRules(projectPath)
-    const systemPrompt = BASE_SYSTEM_PROMPT + projectRules
+    const systemPrompt = BASE_SYSTEM_PROMPT + globalRulesBlock + projectRules
 
     try {
       const streamId = await window.api.ai.streamChat({
