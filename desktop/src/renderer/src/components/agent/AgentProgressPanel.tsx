@@ -165,6 +165,14 @@ export function AgentProgressPanel() {
     else toast.error('No verification report found for this session')
   }, [selectedSession])
 
+  // Gap 76 — export the session report as PDF.
+  const exportReportPdf = useCallback(async () => {
+    if (!selectedSession) return
+    const pdfPath = await window.api.agent.exportReportPdf(selectedSession)
+    if (pdfPath) toast.success(`PDF exported to ${pdfPath}`)
+    else toast.error('PDF export failed — try HTML export first')
+  }, [selectedSession])
+
   // Gap 59 — subtask dependency graph for whichever event stream is active.
   const activeEvents = mode === 'live' ? events : historyEvents
   const planFile = activeEvents.length > 0 ? activeEvents[activeEvents.length - 1].planFile : ''
@@ -413,7 +421,19 @@ export function AgentProgressPanel() {
                     background: 'transparent', border: `1px solid ${border[1]}`, color: fg[3], cursor: 'pointer',
                   }}
                 >
-                  <Rocket size={10} /> Export report
+                  <Rocket size={10} /> Export HTML
+                </button>
+                <button
+                  type="button"
+                  onClick={exportReportPdf}
+                  title="Export this session's verification report as PDF"
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 4,
+                    fontSize: 10, fontWeight: 700, padding: '4px 8px', borderRadius: 5,
+                    background: 'transparent', border: `1px solid ${border[1]}`, color: fg[3], cursor: 'pointer',
+                  }}
+                >
+                  <Rocket size={10} /> Export PDF
                 </button>
                 {verifyResult && (
                   <span style={{

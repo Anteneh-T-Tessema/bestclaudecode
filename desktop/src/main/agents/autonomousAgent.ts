@@ -793,6 +793,15 @@ export async function startAutonomousSession(opts: {
               status: 'pending-approval', error: `Approval required: ${run.command} matches "${approvalNeeded.pattern}"`,
               doneCount, totalCount,
             })
+            // Gap 78 — OS-level desktop notification so the user knows approval is needed
+            // even when the IDE is in the background.
+            const { Notification } = await import('electron')
+            if (Notification.isSupported()) {
+              new Notification({
+                title: 'Lakoora — Approval Required',
+                body: `Agent paused: "${run.command}" requires your approval.`,
+              }).show()
+            }
             const { approved, approver } = await requestApproval(sessionId)
             if (!approved) {
               broadcast({
@@ -963,5 +972,37 @@ export async function exportReportHtml(sessionId: string): Promise<string | null
     return htmlPath
   } catch {
     return null
+  }
+}
+
+/** Gap 76 — export the session verification report as PDF using Electron's
+ *  built-in printToPDF — no external PDF library needed. Generates the HTML
+ *  first if it does not exist, then renders it in an offscreen window. */
+export async function exportReportPdf(sessionId: string): Promise<string | null> {
+  const projectPath = (store.get('projectPath') as string | undefined) ?? repoRoot()
+  const reportDir = path.join(projectPath, '.lakoora', 'reports')
+  const { promises: fsp } = await import('fs')
+
+  // Ensure the HTML report exists (generate if not).
+  let htmlPath = path.join(reportDir, `${sessionId}.html`)
+  try {
+    await fsp.access(htmlPath)
+  } catch {
+    htmlPath = (await exportReportHtml(sessionId)) ?? ''
+    if (!htmlPath) return null
+  }
+
+  const pdfPath = path.join(reportDir, `${sessionId}.pdf`)
+  const { BrowserWindow } = await import('electron')
+  const win = new BrowserWindow({ show: false, webPreferences: { offscreen: true } })
+  try {
+    await win.loadFile(htmlPath)
+    const pdfBuffer = await win.webContents.printToPDF({ printBackground: true })
+    await fsp.writeFile(pdfPath, pdfBuffer)
+    return pdfPath
+  } catch {
+    return null
+  } finally {
+    win.destroy()
   }
 }

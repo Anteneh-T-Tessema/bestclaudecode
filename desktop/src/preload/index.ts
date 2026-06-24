@@ -310,6 +310,8 @@ const api = {
       ipcRenderer.invoke('agent:getComplianceSummary'),
     exportReportHtml: (sessionId: string): Promise<string | null> =>
       ipcRenderer.invoke('agent:exportReportHtml', sessionId),
+    exportReportPdf: (sessionId: string): Promise<string | null> =>
+      ipcRenderer.invoke('agent:exportReportPdf', sessionId),
     onProgress: (cb: (progress: unknown) => void) => {
       const handler = (_: Electron.IpcRendererEvent, progress: unknown) => cb(progress)
       ipcRenderer.on('agent:progress', handler)
@@ -328,12 +330,15 @@ const api = {
     generate: (): Promise<ArchDocResult | null> => ipcRenderer.invoke('archDoc:generate'),
   },
 
-  // ── Context cache (Gap 72) ─────────────────────────────────────────────────
+  // ── Context cache + orientation (Gaps 72, 75) ─────────────────────────────
   context: {
     cacheStats: (): Promise<{ total: number; bytes: number }> =>
       ipcRenderer.invoke('context:cacheStats'),
     evictCache: (maxFiles?: number): Promise<{ deleted: number }> =>
       ipcRenderer.invoke('context:evictCache', maxFiles ?? 0),
+    // Gap 75 — cached repo orientation block
+    orientation: (): Promise<{ text: string; cached: boolean }> =>
+      ipcRenderer.invoke('context:orientation'),
   },
 
   // ── Settings ───────────────────────────────────────────────────────────────

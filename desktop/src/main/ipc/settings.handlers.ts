@@ -170,6 +170,17 @@ export function registerSettingsHandlers(): void {
     return result
   })
 
+  // Gap 75 — cached repo orientation block: skips the full scan when source files
+  // haven't changed since the last run (fingerprint-based cache in .context-cache/).
+  ipcMain.handle('context:orientation', async (): Promise<{ text: string; cached: boolean }> => {
+    const cacheDir = path.join(repoRoot(), '.context-cache')
+    const hadCache = fs.existsSync(cacheDir) && fs.readdirSync(cacheDir).some((f) => f.endsWith('.json'))
+    const result = await runCommand(venvPython(), ['-m', 'src.cached_context', repoRoot()])
+    const text = result.exitCode === 0 ? result.stdout.trim() : ''
+    const cached = hadCache
+    return { text, cached }
+  })
+
   // Gap 72 — context cache health: stats and LRU eviction for .context-cache/.
   ipcMain.handle('context:cacheStats', (): { total: number; bytes: number } => {
     const cacheDir = path.join(repoRoot(), '.context-cache')

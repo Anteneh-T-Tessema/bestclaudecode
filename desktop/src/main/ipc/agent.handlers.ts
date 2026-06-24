@@ -2,7 +2,7 @@ import { ipcMain } from 'electron'
 import * as os from 'os'
 import {
   startAutonomousSession, stopAutonomousSession, getActiveSession,
-  replaySession, resolveApproval, getSessionDiff, exportReportHtml,
+  replaySession, resolveApproval, getSessionDiff, exportReportHtml, exportReportPdf,
 } from '../agents/autonomousAgent'
 import {
   readEvents, listSessions, verifyEventLog, computeComplianceSummary,
@@ -68,5 +68,10 @@ export function registerAgentHandlers(): void {
   // Gap 66 — render a session's verification report as standalone HTML.
   ipcMain.handle('agent:exportReportHtml', async (_event, sessionId: string): Promise<string | null> => {
     return await exportReportHtml(sessionId)
+  })
+
+  // Gap 76 — export the session report as PDF via Electron's built-in printToPDF.
+  ipcMain.handle('agent:exportReportPdf', async (_event, sessionId: string): Promise<string | null> => {
+    return await exportReportPdf(sessionId)
   })
 }

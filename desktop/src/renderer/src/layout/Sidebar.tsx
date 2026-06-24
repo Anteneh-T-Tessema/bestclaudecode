@@ -14,6 +14,7 @@ import { OutlinePanel } from '../components/sidebar/OutlinePanel'
 import { NotepadsPanel } from '../components/sidebar/NotepadsPanel'
 import { SettingsPanel } from '../components/settings/SettingsPanel'
 import { UsageDashboardPanel } from '../components/sidebar/UsageDashboardPanel'
+import { CodebaseMapPanel } from '../components/sidebar/CodebaseMapPanel'
 import { ErrorBoundary } from '../components/ErrorBoundary'
 
 const LABELS: Record<string, string> = {
@@ -31,6 +32,7 @@ const LABELS: Record<string, string> = {
   outline: 'OUTLINE',
   notepads: 'NOTEPADS',
   usage: 'USAGE DASHBOARD',
+  map: 'CODEBASE MAP',
   settings: 'SETTINGS',
 }
 
@@ -72,6 +74,8 @@ export function Sidebar() {
         return <NotepadsPanel />
       case 'usage':
         return <UsageDashboardPanel />
+      case 'map':
+        return <CodebaseMapPanel />
       case 'settings':
         return <SettingsPanel />
       default:

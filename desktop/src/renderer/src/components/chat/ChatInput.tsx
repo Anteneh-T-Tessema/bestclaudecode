@@ -245,6 +245,42 @@ async function injectDocsContext(content: string): Promise<string> {
   }
 }
 
+/** Gap 77 — @depends <file>: inject what a file imports (its dependencies). */
+async function injectDependsContext(content: string): Promise<string> {
+  if (!content.includes('@depends')) return content
+  const match = content.match(/@depends\s+(\S+)/)
+  const file = match ? match[1].trim() : ''
+  if (!file) return content.replace(/@depends\s*/g, '').trim()
+
+  try {
+    const results = await window.api.search.dependsOn(file)
+    const tagToStrip = match ? match[0] : '@depends'
+    if (!results?.length) return content.replace(tagToStrip, `(no dependencies found for \`${file}\`)`).trim()
+    const block = `<depends_on file="${file}">\n${results.join('\n')}\n</depends_on>`
+    return `${block}\n\n${content.replace(tagToStrip, '').trim()}`
+  } catch {
+    return content
+  }
+}
+
+/** Gap 77 — @dependents <file>: inject which files import a given file. */
+async function injectDependentsContext(content: string): Promise<string> {
+  if (!content.includes('@dependents')) return content
+  const match = content.match(/@dependents\s+(\S+)/)
+  const file = match ? match[1].trim() : ''
+  if (!file) return content.replace(/@dependents\s*/g, '').trim()
+
+  try {
+    const results = await window.api.search.dependentsOf(file)
+    const tagToStrip = match ? match[0] : '@dependents'
+    if (!results?.length) return content.replace(tagToStrip, `(no dependents found for \`${file}\`)`).trim()
+    const block = `<dependents_of file="${file}">\n${results.join('\n')}\n</dependents_of>`
+    return `${block}\n\n${content.replace(tagToStrip, '').trim()}`
+  } catch {
+    return content
+  }
+}
+
 /** Gap 73 — @callers <fn>: inject Python + TS call sites for a function name. */
 async function injectCallersContext(content: string): Promise<string> {
   if (!content.includes('@callers')) return content
@@ -298,6 +334,8 @@ const MENTIONS = [
   { tag: '@codebase',   desc: 'BM25 search across the project' },
   { tag: '@web',        desc: 'Live web search results' },
   { tag: '@callers',    desc: 'All call sites for a function name (Python + TS)' },
+  { tag: '@depends',    desc: 'What a file imports (its local dependencies)' },
+  { tag: '@dependents', desc: 'Which files import a given file (reverse deps)' },
   { tag: '@docs',       desc: 'Package documentation' },
   { tag: '@issue',      desc: 'GitHub issue by number' },
   { tag: '@pr',         desc: 'GitHub pull request by number' },
@@ -495,6 +533,10 @@ export function ChatInput() {
 
     // @callers — inject call-graph results for a function name
     finalContent = await injectCallersContext(finalContent)
+
+    // @depends / @dependents — inject import-graph context
+    finalContent = await injectDependsContext(finalContent)
+    finalContent = await injectDependentsContext(finalContent)
 
     // @issue / @pr — inject GitHub item context
     finalContent = await injectGithubContext(finalContent)

@@ -205,6 +205,7 @@ export function createWebApi(): API {
         totalSessions: 0, totalBlockedEvents: 0, totalErrorEvents: 0, totalApprovalRequests: 0, totalApproved: 0, totalRejected: 0,
       })),
       exportReportHtml: () => Promise.resolve(notPorted('agent.exportReportHtml', null)),
+      exportReportPdf: () => Promise.resolve(notPorted('agent.exportReportPdf', null)),
       onProgress: () => () => {},
     },
 
@@ -219,6 +220,7 @@ export function createWebApi(): API {
     context: {
       cacheStats: () => Promise.resolve(notPorted('context.cacheStats', { total: 0, bytes: 0 })),
       evictCache: () => Promise.resolve(notPorted('context.evictCache', { deleted: 0 })),
+      orientation: () => Promise.resolve(notPorted('context.orientation', { text: '', cached: false })),
     },
 
     dap: {
