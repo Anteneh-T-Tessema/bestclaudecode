@@ -281,6 +281,10 @@ const api = {
       ipcRenderer.invoke('agent:stopAutonomous'),
     getActiveSession: (): Promise<string | null> =>
       ipcRenderer.invoke('agent:getActiveSession'),
+    listEventSessions: (): Promise<string[]> =>
+      ipcRenderer.invoke('agent:listEventSessions'),
+    getEventLog: (sessionId: string): Promise<Array<Record<string, unknown>>> =>
+      ipcRenderer.invoke('agent:getEventLog', sessionId),
     onProgress: (cb: (progress: unknown) => void) => {
       const handler = (_: Electron.IpcRendererEvent, progress: unknown) => cb(progress)
       ipcRenderer.on('agent:progress', handler)

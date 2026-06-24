@@ -53,6 +53,7 @@ export function ChatPanel() {
   const resetSession = useUsageStore((s) => s.resetSession)
   const sessionInputTokens = useUsageStore((s) => s.sessionInputTokens)
   const sessionOutputTokens = useUsageStore((s) => s.sessionOutputTokens)
+  const sessionCostUsd = useUsageStore((s) => s.sessionCostUsd)
 
   const activeSession = sessions.find((s) => s.id === activeSessionId)
   const messages = activeSession?.messages ?? []
@@ -187,13 +188,14 @@ export function ChatPanel() {
         <span style={{ fontSize: 12, fontWeight: 700, color: fg[0], flex: 1 }}>AI CHAT</span>
 
         {(sessionInputTokens > 0 || sessionOutputTokens > 0) && (
-          <span title={`Tokens this session: ${sessionInputTokens.toLocaleString()} in / ${sessionOutputTokens.toLocaleString()} out`} style={{
+          <span title={`Tokens this session: ${sessionInputTokens.toLocaleString()} in / ${sessionOutputTokens.toLocaleString()} out${sessionCostUsd > 0 ? ` (~$${sessionCostUsd.toFixed(4)})` : ''}`} style={{
             fontSize: 9, color: fg[4], fontFamily: 'monospace', padding: '1px 5px',
             borderRadius: 3, background: surface.raised, border: `1px solid ${border[1]}`,
             cursor: 'default', flexShrink: 0,
           }}>
             {sessionInputTokens > 999 ? `${(sessionInputTokens / 1000).toFixed(1)}k` : sessionInputTokens}↑{' '}
             {sessionOutputTokens > 999 ? `${(sessionOutputTokens / 1000).toFixed(1)}k` : sessionOutputTokens}↓
+            {sessionCostUsd > 0 && ` $${sessionCostUsd < 0.01 ? sessionCostUsd.toFixed(4) : sessionCostUsd.toFixed(2)}`}
           </span>
         )}
 

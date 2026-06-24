@@ -191,6 +191,8 @@ export function createWebApi(): API {
       startAutonomous: () => Promise.resolve(notPorted('agent.startAutonomous', null)),
       stopAutonomous: () => Promise.resolve(notPorted('agent.stopAutonomous', undefined)),
       getActiveSession: () => Promise.resolve(notPorted('agent.getActiveSession', null)),
+      listEventSessions: () => Promise.resolve(notPorted('agent.listEventSessions', [] as string[])),
+      getEventLog: () => Promise.resolve(notPorted('agent.getEventLog', [] as Array<Record<string, unknown>>)),
       onProgress: () => () => {},
     },
 

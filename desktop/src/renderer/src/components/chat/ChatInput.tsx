@@ -75,6 +75,29 @@ async function injectScreenshotContext(content: string): Promise<string> {
   return result
 }
 
+/**
+ * If message contains @memory <query>, inject agent memory entries matching that
+ * specific query — distinct from the automatic <agent_memory> baseline (Gap 34),
+ * which always queries using the raw message text instead of a user-chosen topic.
+ */
+async function injectMemoryContext(content: string): Promise<string> {
+  if (!content.includes('@memory')) return content
+  const match = content.match(/@memory\s+(.+?)(\n|$)/)
+  const query = match ? match[1].trim() : ''
+  const tagToStrip = match ? match[0] : '@memory'
+  if (!query) return content.replace(tagToStrip, '').trim()
+
+  try {
+    const memories = await window.api.memory.query(query)
+    if (!memories?.length) return content.replace(tagToStrip, '').trim()
+    const blocks = memories.map((m) => `**${m.key}**${m.tags.length ? ` [${m.tags.join(', ')}]` : ''}\n${m.content}`)
+    const contextBlock = `<agent_memory_query query="${escapeAttr(query)}">\n${blocks.join('\n\n')}\n</agent_memory_query>`
+    return `${contextBlock}\n\n${content.replace(tagToStrip, '').trim()}`
+  } catch {
+    return content
+  }
+}
+
 /** If message contains @diff, inject the full working-tree diff vs HEAD. */
 async function injectDiffContext(content: string, projectPath: string | null): Promise<string> {
   if (!content.includes('@diff')) return content
@@ -252,6 +275,7 @@ const MENTIONS = [
   { tag: '@problems',   desc: 'Current diagnostics / lint errors' },
   { tag: '@git',        desc: 'Staged git diff' },
   { tag: '@diff',       desc: 'Full working-tree diff vs HEAD' },
+  { tag: '@memory',     desc: 'Agent memory entries matching a topic' },
   { tag: '@codebase',   desc: 'BM25 search across the project' },
   { tag: '@web',        desc: 'Live web search results' },
   { tag: '@docs',       desc: 'Package documentation' },
@@ -377,6 +401,9 @@ export function ChatInput() {
 
     // @screenshot:<path> — describe an image file via the vision model
     finalContent = await injectScreenshotContext(finalContent)
+
+    // @memory <query> — inject agent memory entries matching a specific topic
+    finalContent = await injectMemoryContext(finalContent)
 
     // @problems — inject current diagnostics
     if (finalContent.includes('@problems')) {

@@ -25,6 +25,7 @@ import { runChatContext } from '../chatContext'
 import { queryAgentMemory } from '../agentMemory'
 import { resolveModel } from '../modelRouter'
 import { createWorktree, commitAll, push, createPr, removeWorktree, runGit } from '../gitOps'
+import { appendEvent } from '../agentEventLog'
 import * as path from 'path'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -115,6 +116,7 @@ let activeSession: { sessionId: string; abort: () => void } | null = null
 // ── Progress broadcast ────────────────────────────────────────────────────────
 
 function broadcast(progress: AgentProgress): void {
+  appendEvent(progress.sessionId, progress as unknown as Record<string, unknown>)
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send('agent:progress', progress)
   }

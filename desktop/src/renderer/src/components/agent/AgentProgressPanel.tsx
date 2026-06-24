@@ -1,8 +1,10 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { Bot, Square, CheckCircle2, AlertCircle, Loader, CircleDot, Play, GitBranch, GitPullRequest, Rocket } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { Bot, Square, CheckCircle2, AlertCircle, Loader, CircleDot, Play, GitBranch, GitPullRequest, Rocket, History } from 'lucide-react'
 import { PanelHeader, accent, border, fg, surface } from '../../design'
 import { toast } from '../../store/useToastStore'
 import { useChatStore } from '../../store/useChatStore'
+
+type Subtask = { id: string; description: string; depends_on: string[]; done: boolean }
 
 interface AgentProgress {
   sessionId: string
@@ -36,6 +38,13 @@ function StatusIcon({ status }: { status: AgentProgress['status'] }) {
   return <CircleDot size={11} color={fg[4]} />
 }
 
+function SubtaskIcon({ status }: { status: string }) {
+  if (status === 'done') return <CheckCircle2 size={10} color={accent.green.fg} />
+  if (status === 'blocked' || status === 'error') return <AlertCircle size={10} color={accent.red.fg} />
+  if (status === 'running' || status === 'retrying') return <Loader size={10} color={accent.amber.fg} className="agent-pulse" />
+  return <CircleDot size={10} color={fg[4]} />
+}
+
 function statusLabel(status: AgentProgress['status']): string {
   switch (status) {
     case 'preparing': return 'Preparing…'
@@ -53,6 +62,39 @@ function statusLabel(status: AgentProgress['status']): string {
   }
 }
 
+function EventRow({ e }: { e: EventEntry }) {
+  return (
+    <div
+      style={{
+        padding: '5px 12px',
+        borderBottom: `1px solid ${border[2]}`,
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 6,
+      }}
+    >
+      <StatusIcon status={e.status} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 10, color: fg[2], display: 'flex', justifyContent: 'space-between' }}>
+          <span style={{ fontWeight: 600 }}>{e.status}</span>
+          <span style={{ color: fg[4] }}>{new Date(e.ts).toLocaleTimeString()}</span>
+        </div>
+        {e.subtaskDescription && (
+          <div style={{ fontSize: 10, color: fg[3], marginTop: 1 }}>
+            [{e.subtaskId}] {e.subtaskDescription.slice(0, 80)}{e.subtaskDescription.length > 80 ? '…' : ''}
+          </div>
+        )}
+        {e.error && (
+          <div style={{ fontSize: 10, color: accent.red.fg, marginTop: 1 }}>{e.error.slice(0, 120)}</div>
+        )}
+        {e.output && e.status === 'done' && (
+          <div style={{ fontSize: 10, color: fg[4], marginTop: 1 }}>{e.output.slice(0, 100)}{e.output.length > 100 ? '…' : ''}</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export function AgentProgressPanel() {
   const [events, setEvents] = useState<EventEntry[]>([])
   const [isRunning, setIsRunning] = useState(false)
@@ -60,6 +102,52 @@ export function AgentProgressPanel() {
   const [launching, setLaunching] = useState(false)
   const activeModel = useChatStore((s) => s.activeModel)
   const goalRef = useRef<HTMLInputElement>(null)
+
+  // Gap 54 — history mode: browse the persisted event log of a past session.
+  const [mode, setMode] = useState<'live' | 'history'>('live')
+  const [historySessions, setHistorySessions] = useState<string[]>([])
+  const [selectedSession, setSelectedSession] = useState('')
+  const [historyEvents, setHistoryEvents] = useState<EventEntry[]>([])
+
+  const toggleHistory = useCallback(async () => {
+    if (mode === 'live') {
+      const sessions = await window.api.agent.listEventSessions()
+      setHistorySessions(sessions)
+      if (sessions.length > 0) setSelectedSession(sessions[0])
+      setMode('history')
+    } else {
+      setMode('live')
+    }
+  }, [mode])
+
+  useEffect(() => {
+    if (mode !== 'history' || !selectedSession) return
+    window.api.agent.getEventLog(selectedSession).then((raw) => {
+      setHistoryEvents(raw as unknown as EventEntry[])
+    })
+  }, [mode, selectedSession])
+
+  // Gap 59 — subtask dependency graph for whichever event stream is active.
+  const activeEvents = mode === 'live' ? events : historyEvents
+  const planFile = activeEvents.length > 0 ? activeEvents[activeEvents.length - 1].planFile : ''
+  const [planSubtasks, setPlanSubtasks] = useState<Subtask[]>([])
+
+  useEffect(() => {
+    if (!planFile) { setPlanSubtasks([]); return }
+    window.api.taskPlanner.show(planFile).then((detail) => {
+      setPlanSubtasks(detail?.subtasks ?? [])
+    })
+  }, [planFile])
+
+  // Last known status per subtask id, derived from the event stream (authoritative
+  // over the plan file's static `done` flag, which only updates on disk).
+  const subtaskStatus = useMemo(() => {
+    const map: Record<string, AgentProgress['status']> = {}
+    for (const e of activeEvents) {
+      if (e.subtaskId) map[e.subtaskId] = e.status
+    }
+    return map
+  }, [activeEvents])
 
   useEffect(() => {
     const off = window.api.agent.onProgress((raw: unknown) => {
@@ -137,6 +225,20 @@ export function AgentProgressPanel() {
             )}
             <button
               type="button"
+              onClick={toggleHistory}
+              title="Browse past session event logs"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 4,
+                fontSize: 9, fontWeight: 700, padding: '2px 8px', borderRadius: 4,
+                background: mode === 'history' ? accent.violet.subtle : 'transparent',
+                border: `1px solid ${mode === 'history' ? accent.violet.border : border[1]}`,
+                color: mode === 'history' ? accent.violet.fg : fg[3], cursor: 'pointer',
+              }}
+            >
+              <History size={9} /> {mode === 'history' ? 'Live' : 'History'}
+            </button>
+            <button
+              type="button"
               onClick={clear}
               title="Clear log"
               style={{
@@ -150,6 +252,30 @@ export function AgentProgressPanel() {
           </div>
         }
       />
+
+      {/* History mode — session picker over the persisted event log */}
+      {mode === 'history' && (
+        <div style={{ padding: '8px 10px', borderBottom: `1px solid ${border[1]}`, flexShrink: 0, background: surface.base }}>
+          <div style={{ fontSize: 10, color: fg[4], marginBottom: 4, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+            Past sessions
+          </div>
+          {historySessions.length === 0 ? (
+            <div style={{ fontSize: 11, color: fg[4] }}>No recorded sessions yet.</div>
+          ) : (
+            <select
+              value={selectedSession}
+              onChange={(e) => setSelectedSession(e.target.value)}
+              title="Select past agent session"
+              style={{
+                width: '100%', background: surface.raised, border: `1px solid ${border[0]}`,
+                borderRadius: 5, padding: '5px 8px', fontSize: 11, color: fg[0], outline: 'none',
+              }}
+            >
+              {historySessions.map((id) => <option key={id} value={id}>{id}</option>)}
+            </select>
+          )}
+        </div>
+      )}
 
       {/* Goal input — launch a new background agent */}
       {!isRunning && (
@@ -232,44 +358,52 @@ export function AgentProgressPanel() {
         </div>
       )}
 
-      {/* Event log */}
-      <div style={{ flex: 1, overflowY: 'auto', fontFamily: 'monospace' }}>
-        {events.length === 0 && (
-          <div style={{ padding: 16, textAlign: 'center', color: fg[4], fontSize: 11 }}>
-            No agent activity yet. Start an autonomous run from the Task Planner panel.
+      {/* Subtask dependency graph (Gap 59) — flat list with explicit "needs:" annotations
+          rather than a nested tree, since depends_on can have multiple parents (a DAG, not
+          strictly a tree), and nesting would misrepresent that. */}
+      {planSubtasks.length > 0 && (
+        <div style={{ padding: '8px 12px', borderBottom: `1px solid ${border[1]}`, flexShrink: 0, maxHeight: 160, overflowY: 'auto' }}>
+          <div style={{ fontSize: 10, color: fg[4], marginBottom: 4, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+            Subtasks ({planSubtasks.filter((s) => (subtaskStatus[s.id] ?? (s.done ? 'done' : 'pending')) === 'done').length}/{planSubtasks.length})
           </div>
-        )}
-        {events.map((e, i) => (
-          <div
-            key={i}
-            style={{
-              padding: '5px 12px',
-              borderBottom: `1px solid ${border[2]}`,
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: 6,
-            }}
-          >
-            <StatusIcon status={e.status} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 10, color: fg[2], display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ fontWeight: 600 }}>{e.status}</span>
-                <span style={{ color: fg[4] }}>{new Date(e.ts).toLocaleTimeString()}</span>
+          {planSubtasks.map((s) => {
+            const status = subtaskStatus[s.id] ?? (s.done ? 'done' : 'pending')
+            return (
+              <div key={s.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, padding: '2px 0' }}>
+                <SubtaskIcon status={status} />
+                <span style={{ color: fg[2], flex: 1, minWidth: 0, fontSize: 10.5, lineHeight: 1.4 }}>
+                  [{s.id}] {s.description}
+                  {s.depends_on.length > 0 && (
+                    <span style={{ color: fg[4] }}> (needs: {s.depends_on.join(', ')})</span>
+                  )}
+                </span>
               </div>
-              {e.subtaskDescription && (
-                <div style={{ fontSize: 10, color: fg[3], marginTop: 1 }}>
-                  [{e.subtaskId}] {e.subtaskDescription.slice(0, 80)}{e.subtaskDescription.length > 80 ? '…' : ''}
-                </div>
-              )}
-              {e.error && (
-                <div style={{ fontSize: 10, color: accent.red.fg, marginTop: 1 }}>{e.error.slice(0, 120)}</div>
-              )}
-              {e.output && e.status === 'done' && (
-                <div style={{ fontSize: 10, color: fg[4], marginTop: 1 }}>{e.output.slice(0, 100)}{e.output.length > 100 ? '…' : ''}</div>
-              )}
-            </div>
-          </div>
-        ))}
+            )
+          })}
+        </div>
+      )}
+
+      {/* Event log — live session events, or the persisted log of a past session */}
+      <div style={{ flex: 1, overflowY: 'auto', fontFamily: 'monospace' }}>
+        {mode === 'live' ? (
+          <>
+            {events.length === 0 && (
+              <div style={{ padding: 16, textAlign: 'center', color: fg[4], fontSize: 11 }}>
+                No agent activity yet. Start an autonomous run from the Task Planner panel.
+              </div>
+            )}
+            {events.map((e, i) => <EventRow key={i} e={e} />)}
+          </>
+        ) : (
+          <>
+            {historyEvents.length === 0 && (
+              <div style={{ padding: 16, textAlign: 'center', color: fg[4], fontSize: 11 }}>
+                {selectedSession ? 'No events recorded for this session.' : 'Select a session above.'}
+              </div>
+            )}
+            {historyEvents.map((e, i) => <EventRow key={i} e={e} />)}
+          </>
+        )}
       </div>
     </div>
   )
