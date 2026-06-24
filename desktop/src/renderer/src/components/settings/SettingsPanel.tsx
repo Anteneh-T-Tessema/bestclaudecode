@@ -6,6 +6,7 @@ import { toast } from '../../store/useToastStore'
 import { ModelSelector } from '../chat/ModelSelector'
 import { McpServersSection } from './McpServersSection'
 import { PolicySection } from './PolicySection'
+import { CacheSection } from './CacheSection'
 
 interface EngineHealth {
   repoRoot: string
@@ -519,6 +520,8 @@ export function SettingsPanel() {
         </div>
 
         <PolicySection />
+
+        <CacheSection />
 
         <McpServersSection />
 

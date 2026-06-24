@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { ParsedDecision, DecisionStats } from '../main/ipc/decisions.handlers'
+import type { ParsedDecision, DecisionStats, DecisionLogOpts } from '../main/ipc/decisions.handlers'
 import type { MemoryEntry } from '../main/ipc/memory.handlers'
 import type { BM25Response, DocsResult, BrowseResult } from '../main/ipc/search.handlers'
 import type { GithubItem } from '../main/ipc/github.handlers'
@@ -19,6 +19,9 @@ const api = {
     search: (query: string, overrideDir?: string): Promise<ParsedDecision[]> =>
       ipcRenderer.invoke('decisions:search', query, overrideDir),
     stats: (overrideDir?: string): Promise<DecisionStats> => ipcRenderer.invoke('decisions:stats', overrideDir),
+    // Gap 74 — create a decision log entry from the UI
+    log: (opts: DecisionLogOpts): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('decisions:log', opts),
   },
 
   // ── File System ────────────────────────────────────────────────────────────
@@ -173,6 +176,13 @@ const api = {
     buildIndex: (): Promise<{ indexed: number; backend: string }> => ipcRenderer.invoke('search:buildIndex'),
     screenshot: (imagePath: string): Promise<{ description: string } | null> =>
       ipcRenderer.invoke('search:screenshot', imagePath),
+    // Gap 70 — call-graph browser
+    callers: (fn: string): Promise<Array<{ file: string; line: number }>> =>
+      ipcRenderer.invoke('search:callers', fn),
+    dependsOn: (file: string): Promise<string[]> =>
+      ipcRenderer.invoke('search:dependsOn', file),
+    dependentsOf: (file: string): Promise<string[]> =>
+      ipcRenderer.invoke('search:dependentsOf', file),
   },
 
   // ── Task Planner (subprocess bridge → src.task_planner) ─────────────────────
@@ -316,6 +326,14 @@ const api = {
   // ── Arch Doc (subprocess bridge → src.arch_doc) ─────────────────────────────
   archDoc: {
     generate: (): Promise<ArchDocResult | null> => ipcRenderer.invoke('archDoc:generate'),
+  },
+
+  // ── Context cache (Gap 72) ─────────────────────────────────────────────────
+  context: {
+    cacheStats: (): Promise<{ total: number; bytes: number }> =>
+      ipcRenderer.invoke('context:cacheStats'),
+    evictCache: (maxFiles?: number): Promise<{ deleted: number }> =>
+      ipcRenderer.invoke('context:evictCache', maxFiles ?? 0),
   },
 
   // ── Settings ───────────────────────────────────────────────────────────────

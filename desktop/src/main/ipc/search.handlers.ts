@@ -149,4 +149,25 @@ export function registerSearchHandlers(): void {
     const description = result.stdout.trim()
     return description ? { description } : null
   })
+
+  // Gap 70 — call-graph browser: Python + TS callers of a function name.
+  ipcMain.handle('search:callers', async (_event, fn: string): Promise<Array<{ file: string; line: number }>> => {
+    const result = await runPythonJson(['-m', 'src.repo_map', '--callers', fn, repoRoot(), '--json'])
+    if (!result.ok) return []
+    return ((result.stats as { results: Array<{ file: string; line: number }> }).results) ?? []
+  })
+
+  // Gap 70 — imports of a file (what does file X depend on?).
+  ipcMain.handle('search:dependsOn', async (_event, file: string): Promise<string[]> => {
+    const result = await runPythonJson(['-m', 'src.repo_map', '--depends-on', file, repoRoot(), '--json'])
+    if (!result.ok) return []
+    return ((result.stats as { results: string[] }).results) ?? []
+  })
+
+  // Gap 70 — reverse deps (what files import X?).
+  ipcMain.handle('search:dependentsOf', async (_event, file: string): Promise<string[]> => {
+    const result = await runPythonJson(['-m', 'src.repo_map', '--dependents-of', file, repoRoot(), '--json'])
+    if (!result.ok) return []
+    return ((result.stats as { results: string[] }).results) ?? []
+  })
 }

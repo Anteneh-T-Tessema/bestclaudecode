@@ -245,6 +245,25 @@ async function injectDocsContext(content: string): Promise<string> {
   }
 }
 
+/** Gap 73 — @callers <fn>: inject Python + TS call sites for a function name. */
+async function injectCallersContext(content: string): Promise<string> {
+  if (!content.includes('@callers')) return content
+  const match = content.match(/@callers\s+(\S+)/)
+  const fn = match ? match[1].trim() : ''
+  if (!fn) return content.replace(/@callers\s*/g, '').trim()
+
+  try {
+    const results = await window.api.search.callers(fn)
+    const tagToStrip = match ? match[0] : '@callers'
+    if (!results?.length) return content.replace(tagToStrip, `(no call sites found for \`${fn}\`)`).trim()
+    const lines = results.map((r) => `${r.file}:${r.line}`).join('\n')
+    const block = `<callers fn="${fn}">\n${lines}\n</callers>`
+    return `${block}\n\n${content.replace(tagToStrip, '').trim()}`
+  } catch {
+    return content
+  }
+}
+
 /** If message contains @web, inject live web search results as context. */
 async function injectWebContext(content: string): Promise<string> {
   if (!content.includes('@web')) return content
@@ -278,6 +297,7 @@ const MENTIONS = [
   { tag: '@memory',     desc: 'Agent memory entries matching a topic' },
   { tag: '@codebase',   desc: 'BM25 search across the project' },
   { tag: '@web',        desc: 'Live web search results' },
+  { tag: '@callers',    desc: 'All call sites for a function name (Python + TS)' },
   { tag: '@docs',       desc: 'Package documentation' },
   { tag: '@issue',      desc: 'GitHub issue by number' },
   { tag: '@pr',         desc: 'GitHub pull request by number' },
@@ -472,6 +492,9 @@ export function ChatInput() {
 
     // @web — inject live web search results
     finalContent = await injectWebContext(finalContent)
+
+    // @callers — inject call-graph results for a function name
+    finalContent = await injectCallersContext(finalContent)
 
     // @issue / @pr — inject GitHub item context
     finalContent = await injectGithubContext(finalContent)

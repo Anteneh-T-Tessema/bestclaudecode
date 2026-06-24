@@ -16,7 +16,8 @@
 import { ipcMain } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
-import { repoRoot } from '../paths'
+import { repoRoot, venvPython } from '../paths'
+import { runCommand } from '../pythonBridge'
 
 export interface ParsedDecision {
   filename: string
@@ -153,8 +154,36 @@ export function computeStats(decisions: ParsedDecision[]): DecisionStats {
   }
 }
 
+export interface DecisionLogOpts {
+  task: string
+  verdict: string
+  outcome: string
+  agent?: string
+  retries?: number
+  findings?: string[]
+  dir?: string
+}
+
 export function registerDecisionsHandlers(): void {
   ipcMain.handle('decisions:list', (_event, overrideDir?: string) => loadDecisions(overrideDir))
   ipcMain.handle('decisions:search', (_event, query: string, overrideDir?: string) => searchDecisions(query, overrideDir))
   ipcMain.handle('decisions:stats', (_event, overrideDir?: string) => computeStats(loadDecisions(overrideDir)))
+
+  // Gap 74 — create-side: write an ADR-style decision log entry via src.decision_log.
+  ipcMain.handle('decisions:log', async (_event, opts: DecisionLogOpts): Promise<{ ok: boolean; error?: string }> => {
+    const { task, verdict, outcome, agent = 'lakoora-agent', retries = 0, findings = [], dir } = opts
+    const args = [
+      '-m', 'src.decision_log', '--log',
+      '--task', task,
+      '--verdict', verdict,
+      '--outcome', outcome,
+      '--agent', agent,
+      '--retries', String(retries),
+      ...findings.flatMap((f) => ['--finding', f]),
+    ]
+    if (dir) args.push('--dir', dir)
+    else if (process.env.LAKOORA_DECISIONS_DIR) args.push('--dir', process.env.LAKOORA_DECISIONS_DIR)
+    const result = await runCommand(venvPython(), args, repoRoot())
+    return result.exitCode === 0 ? { ok: true } : { ok: false, error: result.stderr.trim().slice(0, 200) }
+  })
 }

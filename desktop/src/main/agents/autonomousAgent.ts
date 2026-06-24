@@ -477,6 +477,37 @@ async function writeVerificationReport(opts: {
   } catch {
     // Report generation must never fail the session.
   }
+
+  // Gap 71 — write an ADR-style decision log entry so the Decisions audit panel
+  // gets an automatic entry for every completed autonomous agent session.
+  const rejectedByApprover = events.some((e) => e.status === 'approval-rejected')
+  const verdict = rejectedByApprover
+    ? 'Rejected'
+    : errors.length > 0
+      ? 'Completed with errors'
+      : prUrl
+        ? 'LGTM'
+        : 'Completed'
+  const outcome = prUrl
+    ? `Completed ${doneCount}/${totalCount} subtasks; PR: ${prUrl}`
+    : `Completed ${doneCount}/${totalCount} subtasks on branch ${branch}`
+  const findings: string[] = [
+    ...blocked.map((e) => `Policy block: ${e.error ?? e.subtaskId}`),
+    ...errors.map((e) => `Error: ${e.error ?? e.subtaskId}`),
+  ]
+  const decisionArgs = [
+    '-m', 'src.decision_log', '--log',
+    '--task', plan.goal,
+    '--verdict', verdict,
+    '--outcome', outcome,
+    '--agent', 'lakoora-agent',
+    '--retries', String(events.filter((e) => e.status === 'error').length),
+    '--dir', path.join(projectPath, 'docs', 'decisions'),
+    ...findings.flatMap((f) => ['--finding', f]),
+  ]
+  runPythonJson(decisionArgs).catch(() => {
+    // Decision log is best-effort — never fail the session.
+  })
 }
 
 // ── Finalize step (commit → push → PR → deploy → cleanup) ────────────────────

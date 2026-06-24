@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
 import * as fs from 'fs'
+import * as path from 'path'
 import { repoRoot, venvPython, venvPytest, venvRuff } from '../paths'
 import { store } from '../store'
 import { runPythonJson, runCommand, type PythonBridgeResult, type CommandResult } from '../pythonBridge'
@@ -167,6 +168,31 @@ export function registerSettingsHandlers(): void {
       result[key] = store.get(key)
     }
     return result
+  })
+
+  // Gap 72 — context cache health: stats and LRU eviction for .context-cache/.
+  ipcMain.handle('context:cacheStats', (): { total: number; bytes: number } => {
+    const cacheDir = path.join(repoRoot(), '.context-cache')
+    if (!fs.existsSync(cacheDir)) return { total: 0, bytes: 0 }
+    const files = fs.readdirSync(cacheDir).filter((f) => f.endsWith('.json'))
+    const bytes = files.reduce((sum, f) => {
+      try { return sum + fs.statSync(path.join(cacheDir, f)).size } catch { return sum }
+    }, 0)
+    return { total: files.length, bytes }
+  })
+
+  ipcMain.handle('context:evictCache', (_event, maxFiles = 0): { deleted: number } => {
+    const cacheDir = path.join(repoRoot(), '.context-cache')
+    if (!fs.existsSync(cacheDir)) return { deleted: 0 }
+    const files = fs.readdirSync(cacheDir)
+      .filter((f) => f.endsWith('.json'))
+      .map((f) => ({ filePath: path.join(cacheDir, f), mtime: fs.statSync(path.join(cacheDir, f)).mtimeMs }))
+      .sort((a, b) => a.mtime - b.mtime)
+    const toDelete = files.slice(0, Math.max(0, files.length - maxFiles))
+    for (const { filePath } of toDelete) {
+      try { fs.unlinkSync(filePath) } catch { /* ignore */ }
+    }
+    return { deleted: toDelete.length }
   })
 
 }

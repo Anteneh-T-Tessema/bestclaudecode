@@ -25,6 +25,7 @@ export function createWebApi(): API {
       stats: () => Promise.resolve(notPorted('decisions.stats', {
         total: 0, withRetry: 0, retryRatePct: 0, verdictCounts: {}, topFindings: [], topFiles: [], agents: [],
       })),
+      log: () => Promise.resolve(notPorted('decisions.log', { ok: false, error: 'not ported' })),
     },
 
     fs: {
@@ -122,6 +123,9 @@ export function createWebApi(): API {
       assembleContext: (query, manualPaths) => socket.invoke('context:assemble', { query, manualPaths }),
       buildIndex: () => socket.invoke('search:buildIndex'),
       screenshot: () => Promise.resolve(notPorted('search.screenshot', null)),
+      callers: () => Promise.resolve(notPorted('search.callers', [] as Array<{ file: string; line: number }>)),
+      dependsOn: () => Promise.resolve(notPorted('search.dependsOn', [] as string[])),
+      dependentsOf: () => Promise.resolve(notPorted('search.dependentsOf', [] as string[])),
     },
 
     taskPlanner: {
@@ -210,6 +214,11 @@ export function createWebApi(): API {
 
     archDoc: {
       generate: () => Promise.resolve(notPorted('archDoc.generate', null)),
+    },
+
+    context: {
+      cacheStats: () => Promise.resolve(notPorted('context.cacheStats', { total: 0, bytes: 0 })),
+      evictCache: () => Promise.resolve(notPorted('context.evictCache', { deleted: 0 })),
     },
 
     dap: {
