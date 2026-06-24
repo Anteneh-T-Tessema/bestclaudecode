@@ -5,6 +5,7 @@ import * as fsSync from 'fs'
 import * as path from 'path'
 import { store } from '../store'
 import { repoRoot } from '../paths'
+import { loadIgnoreRules, isIgnored } from '../ignoreRules'
 
 interface FlatEntry {
   name: string
@@ -15,8 +16,12 @@ interface FlatEntry {
 const IGNORE_DIRS = new Set(['.git', 'node_modules', '__pycache__', '.DS_Store', '.idea'])
 const MAX_READ_BYTES = 5 * 1024 * 1024
 
+function projectRoot(): string {
+  return path.resolve((store.get('projectPath') as string | undefined) || repoRoot())
+}
+
 function assertInProject(p: string): void {
-  const root = path.resolve((store.get('projectPath') as string | undefined) || repoRoot())
+  const root = projectRoot()
   const resolved = path.resolve(p)
   if (resolved !== root && !resolved.startsWith(root + path.sep)) {
     throw new Error(`Access denied: "${p}" is outside the project root`)
@@ -25,8 +30,11 @@ function assertInProject(p: string): void {
 
 async function listDir(dirPath: string): Promise<FlatEntry[]> {
   const entries = await fs.readdir(dirPath, { withFileTypes: true })
+  const root = projectRoot()
+  const rules = loadIgnoreRules(root)
   return entries
     .filter((entry) => !IGNORE_DIRS.has(entry.name))
+    .filter((entry) => !isIgnored(path.relative(root, path.join(dirPath, entry.name)), rules))
     .map((entry) => ({
       name: entry.name,
       path: path.join(dirPath, entry.name),
@@ -262,6 +270,7 @@ export function registerFsHandlers(): void {
 
   ipcMain.handle('fs:findFiles', async (_, root: string): Promise<string[]> => {
     assertInProject(root)
+    const rules = loadIgnoreRules(root)
     const results: string[] = []
     async function walk(dir: string) {
       let entries: Dirent[]
@@ -269,6 +278,7 @@ export function registerFsHandlers(): void {
       for (const e of entries) {
         if (IGNORE_DIRS.has(e.name) || e.name.startsWith('.')) continue
         const full = path.join(dir, e.name)
+        if (isIgnored(path.relative(root, full), rules)) continue
         if (e.isDirectory()) await walk(full)
         else results.push(path.relative(root, full))
         if (results.length >= 5000) return
