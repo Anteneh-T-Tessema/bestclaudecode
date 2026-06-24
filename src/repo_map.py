@@ -387,14 +387,18 @@ def main(argv: list[str] | None = None) -> None:
 
 
 def _run_callers_mode(function_name: str, root: Path, as_json: bool) -> None:
-    callers = find_callers(root, function_name)
+    py_callers = find_callers(root, function_name)
+    from src.ts_map import find_ts_callers
+    ts_callers = find_ts_callers(function_name, root)
     if as_json:
-        print(json.dumps({"results": [{"file": f, "line": ln} for f, ln in callers]}))
+        py_results = [{"file": f, "line": ln} for f, ln in py_callers]
+        print(json.dumps({"results": py_results + ts_callers}))
         return
-    if not callers:
+    all_callers = [(f, ln) for f, ln in py_callers] + [(str(r["file"]), int(r["line"])) for r in ts_callers]
+    if not all_callers:
         print(f"No call sites found for {function_name!r}.")
         return
-    for f, ln in callers:
+    for f, ln in all_callers:
         print(f"  {f}:{ln}")
 
 

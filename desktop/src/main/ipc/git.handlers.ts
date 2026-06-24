@@ -252,6 +252,15 @@ export function registerGitHandlers(): void {
     }
   })
 
+  // Returns the full working-tree diff vs HEAD (staged + unstaged).
+  ipcMain.handle('git:headDiff', async (_, { cwd }: { cwd: string }): Promise<string> => {
+    try {
+      return await git(cwd, ['diff', 'HEAD'])
+    } catch {
+      return ''
+    }
+  })
+
   // ── Checkpoints (named git stashes with "lakoora:" prefix) ─────────────────
 
   ipcMain.handle('git:stashCreate', async (_, { cwd, name }: { cwd: string; name: string }) => {

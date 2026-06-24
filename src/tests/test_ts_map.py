@@ -1,7 +1,47 @@
 """Tests for src/ts_map.py — TypeScript/JavaScript repo map."""
 from pathlib import Path
 
-from src.ts_map import _outline_ts_file, _iter_ts_files, build_ts_map, build_ts_import_graph
+from src.ts_map import _outline_ts_file, _iter_ts_files, build_ts_map, build_ts_import_graph, find_ts_callers
+
+
+# ── find_ts_callers ────────────────────────────────────────────────────────────
+
+
+def test_find_ts_callers_finds_direct_call(tmp_path):
+    _write(tmp_path, "a.ts", "function greet(name: string) { return name }\n")
+    _write(tmp_path, "b.ts", "import { greet } from './a'\nconst msg = greet('world')\n")
+    results = find_ts_callers("greet", tmp_path)
+    files = [r["file"] for r in results]
+    assert str(tmp_path / "b.ts") in files
+
+
+def test_find_ts_callers_finds_generic_call(tmp_path):
+    _write(tmp_path, "a.ts", "export function createStore<T>() {}\n")
+    _write(tmp_path, "b.ts", "const s = createStore<MyState>()\n")
+    results = find_ts_callers("createStore", tmp_path)
+    assert any(r["file"].endswith("b.ts") for r in results)
+
+
+def test_find_ts_callers_returns_line_numbers(tmp_path):
+    _write(tmp_path, "a.ts", "// line 1\nconst x = myFunc(42)\n// line 3\n")
+    results = find_ts_callers("myFunc", tmp_path)
+    assert results
+    assert results[0]["line"] == 2
+
+
+def test_find_ts_callers_returns_empty_when_no_match(tmp_path):
+    _write(tmp_path, "a.ts", "export function foo() {}\n")
+    results = find_ts_callers("bar", tmp_path)
+    assert results == []
+
+
+def test_find_ts_callers_skips_node_modules(tmp_path):
+    nm = tmp_path / "node_modules" / "lib"
+    nm.mkdir(parents=True)
+    _write(nm.parent, "index.ts", "const x = myFunc()\n")
+    _write(tmp_path, "src.ts", "// no call here\n")
+    results = find_ts_callers("myFunc", tmp_path)
+    assert all("node_modules" not in r["file"] for r in results)
 
 
 def _write(tmp_path: Path, name: str, content: str) -> Path:

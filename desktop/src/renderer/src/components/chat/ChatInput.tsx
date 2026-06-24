@@ -55,6 +55,39 @@ function escapeAttr(value: string): string {
     .replace(/>/g, '&gt;')
 }
 
+/** If message contains @screenshot:<path>, describe the image via the vision model. */
+async function injectScreenshotContext(content: string): Promise<string> {
+  const re = /@screenshot:([^\s]+)/g
+  let result = content
+  let match: RegExpExecArray | null
+  while ((match = re.exec(content)) !== null) {
+    const imgPath = match[1]
+    try {
+      const resp = await window.api.search.screenshot(imgPath)
+      const block = resp?.description
+        ? `\n\n<screenshot path="${imgPath}">\n${resp.description}\n</screenshot>`
+        : `\n\n[Screenshot ${imgPath} — could not be described]`
+      result = result.replace(match[0], block)
+    } catch {
+      result = result.replace(match[0], `\n\n[Screenshot ${imgPath} — could not be described]`)
+    }
+  }
+  return result
+}
+
+/** If message contains @diff, inject the full working-tree diff vs HEAD. */
+async function injectDiffContext(content: string, projectPath: string | null): Promise<string> {
+  if (!content.includes('@diff')) return content
+  let diffBlock = 'No changes vs HEAD.'
+  if (projectPath) {
+    try {
+      const diff = await window.api.git.headDiff(projectPath)
+      diffBlock = diff.trim() ? diff.slice(0, 8000) : 'No changes vs HEAD.'
+    } catch { /* ignore */ }
+  }
+  return content.replace('@diff', `\n\nWorking-tree diff vs HEAD:\n\`\`\`diff\n${diffBlock}\n\`\`\``)
+}
+
 /** If message contains @codebase, inject top hybrid (BM25 + vector) search results as context. */
 async function injectCodebaseContext(content: string): Promise<string> {
   if (!content.includes('@codebase')) return content
@@ -212,17 +245,19 @@ async function injectWebContext(content: string): Promise<string> {
 }
 
 const MENTIONS = [
-  { tag: '@selection', desc: 'Currently selected editor text' },
-  { tag: '@file',      desc: 'Full content of the active file (or pick any file)' },
-  { tag: '@folder',    desc: 'List files in a project folder' },
-  { tag: '@terminal',  desc: 'Last ~100 lines of terminal output' },
-  { tag: '@problems',  desc: 'Current diagnostics / lint errors' },
-  { tag: '@git',       desc: 'Staged git diff' },
-  { tag: '@codebase',  desc: 'BM25 search across the project' },
-  { tag: '@web',       desc: 'Live web search results' },
-  { tag: '@docs',      desc: 'Package documentation' },
-  { tag: '@issue',     desc: 'GitHub issue by number' },
-  { tag: '@pr',        desc: 'GitHub pull request by number' },
+  { tag: '@selection',  desc: 'Currently selected editor text' },
+  { tag: '@file',       desc: 'Full content of the active file (or pick any file)' },
+  { tag: '@folder',     desc: 'List files in a project folder' },
+  { tag: '@terminal',   desc: 'Last ~100 lines of terminal output' },
+  { tag: '@problems',   desc: 'Current diagnostics / lint errors' },
+  { tag: '@git',        desc: 'Staged git diff' },
+  { tag: '@diff',       desc: 'Full working-tree diff vs HEAD' },
+  { tag: '@codebase',   desc: 'BM25 search across the project' },
+  { tag: '@web',        desc: 'Live web search results' },
+  { tag: '@docs',       desc: 'Package documentation' },
+  { tag: '@issue',      desc: 'GitHub issue by number' },
+  { tag: '@pr',         desc: 'GitHub pull request by number' },
+  { tag: '@screenshot', desc: 'Describe a screenshot image file' },
 ]
 
 export function ChatInput() {
@@ -336,6 +371,12 @@ export function ChatInput() {
       }
       finalContent = finalContent.replace('@git', `\n\nStaged diff:\n\`\`\`diff\n${gitBlock}\n\`\`\``)
     }
+
+    // @diff — inject full working-tree diff vs HEAD
+    finalContent = await injectDiffContext(finalContent, projectPath)
+
+    // @screenshot:<path> — describe an image file via the vision model
+    finalContent = await injectScreenshotContext(finalContent)
 
     // @problems — inject current diagnostics
     if (finalContent.includes('@problems')) {

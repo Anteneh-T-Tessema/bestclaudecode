@@ -74,6 +74,7 @@ export function createWebApi(): API {
       show: () => Promise.resolve(''),
       diffFile: () => Promise.resolve(''),
       stagedDiff: () => Promise.resolve(''),
+      headDiff: () => Promise.resolve(''),
       fileAtRevision: () => Promise.resolve(''),
       commitFiles: () => Promise.resolve([]),
       stashCreate: () => Promise.resolve(notPorted('git.stashCreate', { success: false })),
@@ -120,6 +121,7 @@ export function createWebApi(): API {
       browse: () => Promise.resolve(notPorted('search.browse', { url: '', task: '', result: '', success: false })),
       assembleContext: (query, manualPaths) => socket.invoke('context:assemble', { query, manualPaths }),
       buildIndex: () => socket.invoke('search:buildIndex'),
+      screenshot: () => Promise.resolve(notPorted('search.screenshot', null)),
     },
 
     taskPlanner: {

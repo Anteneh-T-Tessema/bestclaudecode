@@ -93,6 +93,8 @@ const api = {
       ipcRenderer.invoke('git:diffFile', { cwd, relPath, staged }),
     stagedDiff: (cwd: string): Promise<string> =>
       ipcRenderer.invoke('git:stagedDiff', { cwd }),
+    headDiff: (cwd: string): Promise<string> =>
+      ipcRenderer.invoke('git:headDiff', { cwd }),
     fileAtRevision: (cwd: string, rev: string, relPath: string): Promise<string> =>
       ipcRenderer.invoke('git:fileAtRevision', { cwd, rev, relPath }),
     commitFiles: (cwd: string, hash: string): Promise<Array<{ status: string; path: string; oldPath?: string }>> =>
@@ -166,6 +168,8 @@ const api = {
     assembleContext: (query: string, manualPaths: string[]): Promise<BM25Response> =>
       ipcRenderer.invoke('context:assemble', query, manualPaths),
     buildIndex: (): Promise<{ indexed: number; backend: string }> => ipcRenderer.invoke('search:buildIndex'),
+    screenshot: (imagePath: string): Promise<{ description: string } | null> =>
+      ipcRenderer.invoke('search:screenshot', imagePath),
   },
 
   // ── Task Planner (subprocess bridge → src.task_planner) ─────────────────────

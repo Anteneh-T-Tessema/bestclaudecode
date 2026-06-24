@@ -505,6 +505,19 @@ export async function startAutonomousSession(opts: {
         })
       }
 
+      // Gap 45 — inject global + project rules into the agent system prompt.
+      // Fetched once at session start; a rules file change mid-session is ignored
+      // intentionally (consistent within a session).
+      const globalRules = (store.get('globalRules') as string | undefined) ?? ''
+      const globalRulesBlock = globalRules.trim() ? `\n\n# Global Rules\n${globalRules.trim()}` : ''
+      let projectRulesBlock = ''
+      try {
+        const { promises: fsp } = await import('fs')
+        const rules = await fsp.readFile(path.join(projectPath, '.lakoorarules'), 'utf-8').catch(() => '')
+        if (rules.trim()) projectRulesBlock = `\n\n# Project Rules (.lakoorarules)\n${rules.trim()}`
+      } catch { /* no rules file */ }
+      const agentSystemPrompt = AGENT_SYSTEM_PROMPT + globalRulesBlock + projectRulesBlock
+
       let retryContext: string | null = null
       // Cached per subtask id so a retry of the same subtask reuses the
       // already-fetched context block instead of re-querying chat_context.
@@ -563,8 +576,8 @@ export async function startAutonomousSession(opts: {
         const diffBlock = cachedDiffBlock
         const promptBlocks = [contextBlock, memoryBlock, diffBlock].filter(Boolean)
         const systemPrompt = promptBlocks.length
-          ? `${AGENT_SYSTEM_PROMPT}\n\n${promptBlocks.join('\n\n')}`
-          : AGENT_SYSTEM_PROMPT
+          ? `${agentSystemPrompt}\n\n${promptBlocks.join('\n\n')}`
+          : agentSystemPrompt
 
         const userContent = isRetry
           ? `Previous attempt failed:\n${retryContext}\n\nRetry the same subtask:\n${subtask.description}`

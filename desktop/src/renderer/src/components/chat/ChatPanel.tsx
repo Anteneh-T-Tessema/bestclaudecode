@@ -50,6 +50,7 @@ export function ChatPanel() {
   const finalizeMessage = useChatStore((s) => s.finalizeMessage)
 
   const addUsage = useUsageStore((s) => s.addUsage)
+  const resetSession = useUsageStore((s) => s.resetSession)
   const sessionInputTokens = useUsageStore((s) => s.sessionInputTokens)
   const sessionOutputTokens = useUsageStore((s) => s.sessionOutputTokens)
 
@@ -156,6 +157,9 @@ export function ChatPanel() {
       window.removeEventListener('lakoora:e2e:clearMessages', clearHandler)
     }
   }, [addUserMessage, startAssistantMessage, appendDelta, finalizeMessage, clearMessages])
+
+  // Gap 47 — reset token counter when the user switches to a different chat session.
+  useEffect(() => { resetSession() }, [activeSessionId, resetSession])
 
   // Subscribe to ai:usage events and accumulate session token counts.
   useEffect(() => {

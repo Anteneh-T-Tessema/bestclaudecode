@@ -179,6 +179,27 @@ def build_ts_import_graph(root: Path) -> dict[str, list[str]]:
     return graph
 
 
+def find_ts_callers(name: str, root: Path) -> list[dict[str, object]]:
+    """Find call sites of *name* in all TypeScript/JavaScript files under *root*.
+
+    Uses a regex that matches ``name(`` and ``name<`` at word boundaries — covers
+    the vast majority of call expressions without needing a full AST parser.
+    Returns ``[{"file": str, "line": int}, ...]``, same shape as the Python
+    AST-based results returned by ``find_callers()`` in repo_map.py.
+    """
+    pattern = re.compile(rf"\b{re.escape(name)}\s*[(<]")
+    results: list[dict[str, object]] = []
+    for f in _iter_ts_files(root):
+        try:
+            source = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for lineno, line in enumerate(source.splitlines(), start=1):
+            if pattern.search(line):
+                results.append({"file": str(f), "line": lineno})
+    return results
+
+
 def main(argv: list[str] | None = None) -> None:
     """CLI: python -m src.ts_map [path]
 

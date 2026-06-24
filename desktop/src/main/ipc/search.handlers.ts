@@ -1,8 +1,8 @@
 import { ipcMain } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
-import { repoRoot } from '../paths'
-import { runPythonJson } from '../pythonBridge'
+import { repoRoot, venvPython } from '../paths'
+import { runPythonJson, runCommand } from '../pythonBridge'
 
 export interface BM25Result {
   score: number
@@ -139,5 +139,14 @@ export function registerSearchHandlers(): void {
     const result = await runPythonJson(['-m', 'src.chat_context', '--build-index', repoRoot(), '--json'])
     if (!result.ok) return { indexed: 0, backend: '' }
     return result.stats as { indexed: number; backend: string }
+  })
+
+  // Gap 49 — describe a screenshot image via the vision model.
+  ipcMain.handle('search:screenshot', async (_event, imagePath: string): Promise<{ description: string } | null> => {
+    const python = venvPython()
+    const result = await runCommand(python, ['-m', 'src.screenshot_context', imagePath], repoRoot())
+    if (result.exitCode !== 0) return null
+    const description = result.stdout.trim()
+    return description ? { description } : null
   })
 }
