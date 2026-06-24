@@ -116,6 +116,8 @@ const api = {
       ipcRenderer.invoke('ai:complete', opts) as Promise<string | null>,
     buildContext: (opts: { query: string }) =>
       ipcRenderer.invoke('ai:buildContext', opts) as Promise<{ cached: boolean; count?: number }>,
+    exportChat: (opts: { markdown: string; defaultFilename: string }) =>
+      ipcRenderer.invoke('ai:exportChat', opts) as Promise<string | null>,
     onChunk: (streamId: string, cb: (delta: string) => void) => {
       const handler = (_: Electron.IpcRendererEvent, data: { streamId: string; delta: string }) => {
         if (data.streamId === streamId) cb(data.delta)

@@ -393,4 +393,17 @@ Completion (text only, no preamble):`
       return []
     }
   })
+
+  ipcMain.handle('ai:exportChat', async (_, opts: { markdown: string; defaultFilename: string }): Promise<string | null> => {
+    const { dialog } = await import('electron')
+    const fs = await import('fs')
+    const { canceled, filePath } = await dialog.showSaveDialog({
+      title: 'Export Chat',
+      defaultPath: opts.defaultFilename,
+      filters: [{ name: 'Markdown', extensions: ['md'] }],
+    })
+    if (canceled || !filePath) return null
+    fs.writeFileSync(filePath, opts.markdown, 'utf-8')
+    return filePath
+  })
 }

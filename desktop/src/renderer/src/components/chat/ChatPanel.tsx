@@ -1,10 +1,37 @@
-import { useRef, useEffect, useState } from 'react'
+import { useRef, useEffect, useState, useMemo } from 'react'
 import { useChatStore } from '../../store/useChatStore'
 import { ChatMessage } from './ChatMessage'
 import { ChatInput } from './ChatInput'
 import { ModelSelector } from './ModelSelector'
 import { surface, border, fg, accent } from '../../design'
-import { Trash2, FlaskConical, Loader2, RotateCcw, Plus, X, Zap } from 'lucide-react'
+import { Trash2, FlaskConical, Loader2, RotateCcw, Plus, X, Zap, Search, Download } from 'lucide-react'
+import { toast } from '../../store/useToastStore'
+
+interface HistoryMatch {
+  sessionId: string
+  sessionTitle: string
+  messageId: string
+  role: 'user' | 'assistant'
+  snippet: string
+  timestamp: number
+}
+
+function buildSnippet(content: string, query: string): string {
+  const idx = content.toLowerCase().indexOf(query.toLowerCase())
+  if (idx === -1) return content.slice(0, 100)
+  const start = Math.max(0, idx - 40)
+  const end = Math.min(content.length, idx + query.length + 40)
+  return (start > 0 ? '…' : '') + content.slice(start, end) + (end < content.length ? '…' : '')
+}
+
+function sessionToMarkdown(session: { title: string; messages: { role: string; content: string; timestamp: number }[] }): string {
+  const lines = [`# ${session.title}`, '']
+  for (const m of session.messages) {
+    const who = m.role === 'user' ? 'You' : 'Assistant'
+    lines.push(`### ${who} — ${new Date(m.timestamp).toLocaleString()}`, '', m.content, '')
+  }
+  return lines.join('\n')
+}
 
 export function ChatPanel() {
   const sessions = useChatStore((s) => s.sessions)
@@ -26,6 +53,43 @@ export function ChatPanel() {
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const [runningTests, setRunningTests] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyQuery, setHistoryQuery] = useState('')
+
+  const historyMatches = useMemo<HistoryMatch[]>(() => {
+    const q = historyQuery.trim().toLowerCase()
+    if (!q) return []
+    const matches: HistoryMatch[] = []
+    for (const sess of sessions) {
+      for (const msg of sess.messages) {
+        if (msg.content.toLowerCase().includes(q)) {
+          matches.push({
+            sessionId: sess.id,
+            sessionTitle: sess.title,
+            messageId: msg.id,
+            role: msg.role,
+            snippet: buildSnippet(msg.content, q),
+            timestamp: msg.timestamp,
+          })
+        }
+      }
+    }
+    return matches.sort((a, b) => b.timestamp - a.timestamp).slice(0, 40)
+  }, [historyQuery, sessions])
+
+  const jumpToMatch = (m: HistoryMatch) => {
+    switchSession(m.sessionId)
+    setHistoryOpen(false)
+    setHistoryQuery('')
+  }
+
+  const exportSession = async () => {
+    if (!activeSession) return
+    const markdown = sessionToMarkdown(activeSession)
+    const safeTitle = activeSession.title.replace(/[^\w\- ]/g, '').trim() || 'chat'
+    const path = await window.api.ai.exportChat({ markdown, defaultFilename: `${safeTitle}.md` })
+    if (path) toast.success(`Exported to ${path}`)
+  }
 
   const regenerate = () => {
     if (streamingId !== null) return
@@ -101,11 +165,48 @@ export function ChatPanel() {
           borderBottom: `1px solid ${border[1]}`,
           background: surface.surface,
           flexShrink: 0,
+          position: 'relative',
         }}
       >
         <span style={{ fontSize: 12, fontWeight: 700, color: fg[0], flex: 1 }}>AI CHAT</span>
 
         <ModelSelector />
+
+        <button
+          type="button"
+          onClick={() => setHistoryOpen((v) => !v)}
+          title="Search chat history"
+          style={{
+            background: historyOpen ? surface.raised : 'none',
+            border: 'none',
+            borderRadius: 4,
+            cursor: 'pointer',
+            color: historyOpen ? fg[0] : fg[3],
+            padding: 4,
+            display: 'flex',
+            alignItems: 'center',
+          }}
+        >
+          <Search size={13} />
+        </button>
+
+        <button
+          type="button"
+          onClick={exportSession}
+          disabled={messages.length === 0}
+          title="Export current session to Markdown"
+          style={{
+            background: 'none',
+            border: 'none',
+            cursor: messages.length === 0 ? 'default' : 'pointer',
+            color: messages.length === 0 ? fg[4] : fg[3],
+            padding: 4,
+            display: 'flex',
+            alignItems: 'center',
+          }}
+        >
+          <Download size={13} />
+        </button>
 
         <button
           type="button"
@@ -200,6 +301,82 @@ export function ChatPanel() {
         >
           <Trash2 size={13} />
         </button>
+
+        {/* History search overlay */}
+        {historyOpen && (
+          <div
+            style={{
+              position: 'absolute',
+              top: '100%',
+              left: 8,
+              right: 8,
+              marginTop: 4,
+              background: surface.overlay,
+              border: `1px solid ${border[0]}`,
+              borderRadius: 8,
+              boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+              zIndex: 50,
+              overflow: 'hidden',
+            }}
+          >
+            <input
+              autoFocus
+              value={historyQuery}
+              onChange={(e) => setHistoryQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Escape') setHistoryOpen(false) }}
+              placeholder="Search all chat sessions…"
+              style={{
+                width: '100%',
+                background: surface.raised,
+                border: 'none',
+                borderBottom: `1px solid ${border[1]}`,
+                padding: '8px 12px',
+                fontSize: 12,
+                color: fg[0],
+                outline: 'none',
+                boxSizing: 'border-box',
+              }}
+            />
+            <div style={{ maxHeight: 280, overflowY: 'auto' }}>
+              {historyQuery.trim() === '' ? (
+                <div style={{ padding: '10px 12px', fontSize: 11, color: fg[4] }}>
+                  Type to search across all {sessions.length} session{sessions.length !== 1 ? 's' : ''}.
+                </div>
+              ) : historyMatches.length === 0 ? (
+                <div style={{ padding: '10px 12px', fontSize: 11, color: fg[4] }}>No matches.</div>
+              ) : (
+                historyMatches.map((m) => (
+                  <button
+                    key={m.messageId}
+                    type="button"
+                    onClick={() => jumpToMatch(m)}
+                    style={{
+                      display: 'block',
+                      width: '100%',
+                      textAlign: 'left',
+                      padding: '8px 12px',
+                      background: 'none',
+                      border: 'none',
+                      borderBottom: `1px solid ${border[2]}`,
+                      cursor: 'pointer',
+                    }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = surface.raised }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'none' }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: accent.violet.fg, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>
+                        {m.sessionTitle}
+                      </span>
+                      <span style={{ fontSize: 9, color: fg[4] }}>{m.role === 'user' ? 'You' : 'Assistant'}</span>
+                      <span style={{ fontSize: 9, color: fg[4], marginLeft: 'auto' }}>{new Date(m.timestamp).toLocaleDateString()}</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: fg[2], lineHeight: 1.4 }}>{m.snippet}</div>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Session tabs */}

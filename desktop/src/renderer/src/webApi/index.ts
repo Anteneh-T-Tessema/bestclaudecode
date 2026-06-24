@@ -100,6 +100,7 @@ export function createWebApi(): API {
         if (data.streamId === streamId) cb(data.error)
       }),
       buildContext: (opts) => socket.invoke('ai:buildContext', opts),
+      exportChat: () => Promise.resolve(notPorted('ai.exportChat', null)),
     },
 
     memory: {
