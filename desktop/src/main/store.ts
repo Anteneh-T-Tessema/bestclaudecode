@@ -16,6 +16,12 @@ interface StoreSchema {
   projectPath: string
   recentProjects: string[]
   globalRules: string
+  wordWrap: boolean
+  minimap: boolean
+  tabSize: 2 | 4
+  autoSave: boolean
+  stickyScroll: boolean
+  recentFiles: string[]
   [key: string]: unknown
 }
 
@@ -33,6 +39,12 @@ const DEFAULTS: StoreSchema = {
   projectPath: '',
   recentProjects: [],
   globalRules: '',
+  wordWrap: false,
+  minimap: true,
+  tabSize: 2,
+  autoSave: true,
+  stickyScroll: true,
+  recentFiles: [],
 }
 
 function getStorePath(): string {

@@ -17,7 +17,7 @@ const MAIN_BLOCKED = [
 const MUTABLE_KEYS = new Set([
   'theme', 'fontSize', 'sidebarWidth', 'rightPanelWidth',
   'bottomPanelHeight', 'projectPath', 'recentProjects', 'ollamaUrl', 'activeModel',
-  'globalRules',
+  'globalRules', 'wordWrap', 'minimap', 'tabSize', 'autoSave', 'stickyScroll', 'recentFiles',
 ])
 
 interface EngineHealth {
