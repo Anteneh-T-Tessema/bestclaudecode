@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useMemo } from 'react'
 import { useChatStore } from '../../store/useChatStore'
+import { useUsageStore } from '../../store/useUsageStore'
 import { ChatMessage } from './ChatMessage'
 import { ChatInput } from './ChatInput'
 import { ModelSelector } from './ModelSelector'
@@ -47,6 +48,10 @@ export function ChatPanel() {
   const startAssistantMessage = useChatStore((s) => s.startAssistantMessage)
   const appendDelta = useChatStore((s) => s.appendDelta)
   const finalizeMessage = useChatStore((s) => s.finalizeMessage)
+
+  const addUsage = useUsageStore((s) => s.addUsage)
+  const sessionInputTokens = useUsageStore((s) => s.sessionInputTokens)
+  const sessionOutputTokens = useUsageStore((s) => s.sessionOutputTokens)
 
   const activeSession = sessions.find((s) => s.id === activeSessionId)
   const messages = activeSession?.messages ?? []
@@ -152,6 +157,13 @@ export function ChatPanel() {
     }
   }, [addUserMessage, startAssistantMessage, appendDelta, finalizeMessage, clearMessages])
 
+  // Subscribe to ai:usage events and accumulate session token counts.
+  useEffect(() => {
+    return window.api.ai.onUsage(({ inputTokens, outputTokens, model }) => {
+      addUsage(inputTokens, outputTokens, model)
+    })
+  }, [addUsage])
+
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {/* Header */}
@@ -169,6 +181,17 @@ export function ChatPanel() {
         }}
       >
         <span style={{ fontSize: 12, fontWeight: 700, color: fg[0], flex: 1 }}>AI CHAT</span>
+
+        {(sessionInputTokens > 0 || sessionOutputTokens > 0) && (
+          <span title={`Tokens this session: ${sessionInputTokens.toLocaleString()} in / ${sessionOutputTokens.toLocaleString()} out`} style={{
+            fontSize: 9, color: fg[4], fontFamily: 'monospace', padding: '1px 5px',
+            borderRadius: 3, background: surface.raised, border: `1px solid ${border[1]}`,
+            cursor: 'default', flexShrink: 0,
+          }}>
+            {sessionInputTokens > 999 ? `${(sessionInputTokens / 1000).toFixed(1)}k` : sessionInputTokens}↑{' '}
+            {sessionOutputTokens > 999 ? `${(sessionOutputTokens / 1000).toFixed(1)}k` : sessionOutputTokens}↓
+          </span>
+        )}
 
         <ModelSelector />
 

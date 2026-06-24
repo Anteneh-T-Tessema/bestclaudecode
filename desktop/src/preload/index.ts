@@ -140,6 +140,11 @@ const api = {
       ipcRenderer.on('ai:error', handler)
       return (): void => { ipcRenderer.removeListener('ai:error', handler) }
     },
+    onUsage: (cb: (data: { streamId: string; inputTokens: number; outputTokens: number; model: string }) => void) => {
+      const handler = (_: Electron.IpcRendererEvent, data: { streamId: string; inputTokens: number; outputTokens: number; model: string }) => cb(data)
+      ipcRenderer.on('ai:usage', handler)
+      return (): void => { ipcRenderer.removeListener('ai:usage', handler) }
+    },
   },
 
   // ── Memory (subprocess bridge → src.agent_memory) ───────────────────────────

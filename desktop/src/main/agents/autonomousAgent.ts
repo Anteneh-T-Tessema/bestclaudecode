@@ -177,6 +177,48 @@ function extractUrl(text: string): string | null {
   return m ? m[0] : null
 }
 
+// ── Working-tree diff context (Gap 43) ───────────────────────────────────────
+
+/**
+ * Returns a "## Changes so far" block showing what the agent has already written
+ * in the worktree during this session. Uses `git diff --stat HEAD` when there is
+ * at least one commit (i.e. after the first subtask commits something), falling
+ * back to `git diff --stat` for uncommitted working-tree changes. Returns empty
+ * string if the worktree has no changes yet or git is unavailable.
+ */
+async function getWorktreeDiff(worktreePath: string): Promise<string> {
+  try {
+    let stat = await runGit(worktreePath, ['diff', '--stat', 'HEAD']).catch(() => '')
+    if (!stat.trim()) {
+      stat = await runGit(worktreePath, ['diff', '--stat']).catch(() => '')
+    }
+    if (!stat.trim()) return ''
+    return `## Changes written so far in this session\n\n\`\`\`\n${stat.trim()}\n\`\`\``
+  } catch {
+    return ''
+  }
+}
+
+// ── Secrets guard (Gap 44) ────────────────────────────────────────────────────
+
+const SECRET_PATTERNS: Array<{ name: string; re: RegExp }> = [
+  { name: 'AWS access key',     re: /AKIA[0-9A-Z]{16}/ },
+  { name: 'GitHub PAT',         re: /ghp_[A-Za-z0-9]{36}/ },
+  { name: 'PEM private key',    re: /-----BEGIN (?:RSA |EC )?PRIVATE KEY-----/ },
+  { name: 'generic API secret', re: /(?:api[_-]?key|api[_-]?secret|password|access[_-]?token)\s*[:=]\s*['"][A-Za-z0-9+/]{24,}['"]/i },
+]
+
+/**
+ * Returns the name of the first secret pattern found in `content`, or null.
+ * Only called in the autonomous agent's edit path — not in the chat path.
+ */
+function detectSecret(content: string): string | null {
+  for (const { name, re } of SECRET_PATTERNS) {
+    if (re.test(content)) return name
+  }
+  return null
+}
+
 // ── AI streaming helper ───────────────────────────────────────────────────────
 
 async function streamToString(
@@ -469,6 +511,7 @@ export async function startAutonomousSession(opts: {
       let cachedContextSubtaskId = ''
       let cachedContextBlock = ''
       let cachedMemoryBlock = ''
+      let cachedDiffBlock = ''
 
       // eslint-disable-next-line no-constant-condition
       while (true) {
@@ -513,10 +556,12 @@ export async function startAutonomousSession(opts: {
           cachedContextSubtaskId = subtask.id
           cachedContextBlock = await getSubtaskContext(subtask.description, projectPath)
           cachedMemoryBlock = await getSubtaskMemory(subtask.description)
+          cachedDiffBlock = worktreePath ? await getWorktreeDiff(worktreePath) : ''
         }
         const contextBlock = cachedContextBlock
         const memoryBlock = cachedMemoryBlock
-        const promptBlocks = [contextBlock, memoryBlock].filter(Boolean)
+        const diffBlock = cachedDiffBlock
+        const promptBlocks = [contextBlock, memoryBlock, diffBlock].filter(Boolean)
         const systemPrompt = promptBlocks.length
           ? `${AGENT_SYSTEM_PROMPT}\n\n${promptBlocks.join('\n\n')}`
           : AGENT_SYSTEM_PROMPT
@@ -548,6 +593,11 @@ export async function startAutonomousSession(opts: {
         const edits = parseEdits(response)
         let editError: string | null = null
         for (const edit of edits) {
+          const secretPattern = detectSecret(edit.content)
+          if (secretPattern) {
+            editError = `Edit blocked: content of ${edit.path} matches secret pattern "${secretPattern}"`
+            break
+          }
           try { await applyEdit(edit, activePath) }
           catch (err) { editError = `Edit failed for ${edit.path}: ${err}`; break }
         }

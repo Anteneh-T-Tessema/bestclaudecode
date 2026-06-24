@@ -158,6 +158,9 @@ export function registerAiHandlers(): void {
         const { messages, model, systemPrompt } = opts
         const resolvedModel = resolveModel(model, messages[messages.length - 1]?.content ?? '')
 
+        let totalInputTokens = 0
+        let totalOutputTokens = 0
+
         if (resolvedModel.startsWith('claude')) {
           const { default: Anthropic } = await import('@anthropic-ai/sdk')
           const apiKey = store.get('anthropicApiKey') as string | undefined
@@ -214,6 +217,8 @@ export function registerAiHandlers(): void {
             if (controller.signal.aborted) break
 
             const finalMsg = await stream.finalMessage()
+            totalInputTokens += finalMsg.usage.input_tokens
+            totalOutputTokens += finalMsg.usage.output_tokens
             if (finalMsg.stop_reason !== 'tool_use') break
 
             const toolResultBlocks: Array<{ type: 'tool_result'; tool_use_id: string; content: string }> = []
@@ -262,12 +267,17 @@ export function registerAiHandlers(): void {
 
             const stream = await client.chat.completions.create({
               model: resolvedModel, messages: apiMessages, stream: true,
+              stream_options: { include_usage: true },
               ...(openaiTools.length > 0 ? { tools: openaiTools } : {}),
             })
 
             const toolCallsByIndex = new Map<number, { id: string; name: string; arguments: string }>()
             for await (const chunk of stream) {
               if (controller.signal.aborted) break
+              if (chunk.usage) {
+                totalInputTokens += chunk.usage.prompt_tokens ?? 0
+                totalOutputTokens += chunk.usage.completion_tokens ?? 0
+              }
               const delta = chunk.choices[0]?.delta?.content ?? ''
               if (delta) send('ai:chunk', { streamId, delta })
 
@@ -394,6 +404,8 @@ export function registerAiHandlers(): void {
             if (controller.signal.aborted) break
 
             const finalResponse = await result.response
+            totalInputTokens += finalResponse.usageMetadata?.promptTokenCount ?? 0
+            totalOutputTokens += finalResponse.usageMetadata?.candidatesTokenCount ?? 0
             const functionCalls = finalResponse.functionCalls() ?? []
             if (functionCalls.length === 0) break
 
@@ -437,6 +449,10 @@ export function registerAiHandlers(): void {
                 try {
                   const parsed = JSON.parse(line)
                   if (parsed.message?.content) send('ai:chunk', { streamId, delta: parsed.message.content })
+                  if (parsed.done && parsed.prompt_eval_count != null) {
+                    totalInputTokens += parsed.prompt_eval_count as number
+                    totalOutputTokens += (parsed.eval_count as number) ?? 0
+                  }
                 } catch { /* skip malformed lines */ }
               }
             }
@@ -445,6 +461,9 @@ export function registerAiHandlers(): void {
           }
         }
 
+        if (totalInputTokens > 0 || totalOutputTokens > 0) {
+          send('ai:usage', { streamId, inputTokens: totalInputTokens, outputTokens: totalOutputTokens, model: resolvedModel })
+        }
         send('ai:done', { streamId })
       } catch (err) {
         if (!controller.signal.aborted) {

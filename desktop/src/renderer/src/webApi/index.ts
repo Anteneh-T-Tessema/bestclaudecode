@@ -101,6 +101,9 @@ export function createWebApi(): API {
       }),
       buildContext: (opts) => socket.invoke('ai:buildContext', opts),
       exportChat: () => Promise.resolve(notPorted('ai.exportChat', null)),
+      onUsage: (cb) => socket.on('ai:usage', (payload) => {
+        cb(payload as { streamId: string; inputTokens: number; outputTokens: number; model: string })
+      }),
     },
 
     memory: {
