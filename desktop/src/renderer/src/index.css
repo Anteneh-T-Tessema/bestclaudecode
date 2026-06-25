@@ -40,6 +40,18 @@ body {
   cursor: pointer;
 }
 
+/* Conditional breakpoints (Gap 97) — amber diamond, distinct from unconditional red dots */
+.lakoora-breakpoint-conditional {
+  background: #f6ad55;
+  border-radius: 2px;
+  width: 11px !important;
+  height: 11px !important;
+  margin-top: 3px;
+  margin-left: 2px;
+  transform: rotate(45deg);
+  cursor: pointer;
+}
+
 /* Inline git blame text injected after each line via Monaco's after decoration */
 .lakoora-blame {
   color: #3a3f4b;

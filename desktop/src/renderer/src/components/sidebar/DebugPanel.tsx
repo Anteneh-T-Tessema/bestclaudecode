@@ -20,11 +20,7 @@ function DebugToolbar() {
       language: activeTab.language === 'python' ? 'python' : 'node',
     })
     if (!result.started) return
-    if (bps.length) {
-      await window.api.dap.setBreakpoints({ path: activeTab.filePath, lines: bps })
-    } else {
-      await window.api.dap.setBreakpoints({ path: activeTab.filePath, lines: [] })
-    }
+    await window.api.dap.setBreakpoints({ path: activeTab.filePath, breakpoints: bps })
     useDebugStore.getState().setStatus('running')
   }, [activeTab, reset])
 
@@ -155,6 +151,81 @@ function Variables() {
           )}
         </div>
       ))}
+    </div>
+  )
+}
+
+// ── Breakpoints (Gap 97 — conditional breakpoints) ───────────────────────────
+
+function BreakpointsPanel() {
+  const breakpoints = useDebugStore((s) => s.breakpoints)
+  const setBreakpointCondition = useDebugStore((s) => s.setBreakpointCondition)
+  const toggleBreakpoint = useDebugStore((s) => s.toggleBreakpoint)
+  const status = useDebugStore((s) => s.status)
+  const [editingKey, setEditingKey] = useState<string | null>(null)
+  const [draft, setDraft] = useState('')
+
+  const entries = Object.entries(breakpoints).flatMap(([file, bps]) => bps.map((bp) => ({ file, ...bp })))
+  if (entries.length === 0) return null
+
+  const commitCondition = async (file: string, line: number) => {
+    setBreakpointCondition(file, line, draft.trim())
+    setEditingKey(null)
+    // Push the updated condition to a live session immediately.
+    if (status !== 'idle') {
+      const updated = useDebugStore.getState().breakpoints[file] ?? []
+      await window.api.dap.setBreakpoints({ path: file, breakpoints: updated })
+    }
+  }
+
+  return (
+    <div style={{ borderBottom: `1px solid ${border[1]}`, flexShrink: 0, maxHeight: 140, overflowY: 'auto' }}>
+      <div style={{ padding: '4px 10px 2px', fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', color: fg[3] }}>
+        BREAKPOINTS
+      </div>
+      {entries.map(({ file, line, condition }) => {
+        const key = `${file}:${line}`
+        const isEditing = editingKey === key
+        return (
+          <div key={key} style={{ padding: '2px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 11, color: fg[1], fontFamily: 'monospace', flexShrink: 0 }}>
+              {file.split('/').pop()}:{line}
+            </span>
+            {isEditing ? (
+              <input
+                autoFocus
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onBlur={() => void commitCondition(file, line)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void commitCondition(file, line)
+                  if (e.key === 'Escape') setEditingKey(null)
+                }}
+                placeholder="condition (e.g. i == 5)"
+                style={{
+                  flex: 1, background: surface.raised, border: `1px solid ${accent.amber.fg}`,
+                  borderRadius: 3, padding: '2px 5px', fontSize: 10.5, color: fg[0], outline: 'none', fontFamily: 'monospace',
+                }}
+              />
+            ) : (
+              <span
+                onClick={() => { setEditingKey(key); setDraft(condition ?? '') }}
+                title="Click to edit condition"
+                style={{
+                  flex: 1, fontSize: 10.5, fontFamily: 'monospace', cursor: 'text',
+                  color: condition ? accent.amber.fg : fg[4],
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}
+              >
+                {condition ? `if: ${condition}` : 'no condition — click to add'}
+              </span>
+            )}
+            <IconButton size={18} onClick={() => toggleBreakpoint(file, line)} title="Remove">
+              <Trash2 style={{ width: 10, height: 10 }} />
+            </IconButton>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -300,6 +371,8 @@ export function DebugPanel() {
       />
 
       <DebugToolbar />
+
+      <BreakpointsPanel />
 
       {status === 'idle' && (
         <EmptyState

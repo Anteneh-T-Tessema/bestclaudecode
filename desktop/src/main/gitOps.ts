@@ -59,3 +59,74 @@ export async function createPr(
     return null
   }
 }
+
+export interface GithubListItem {
+  number: number
+  title: string
+  url: string
+  author: string
+  state: string
+  updatedAt: string
+  isDraft?: boolean
+  labels?: string[]
+}
+
+// Gap 100 — browse open PRs/issues without already knowing the number.
+export async function listPrs(cwd: string, state: 'open' | 'closed' | 'all' = 'open'): Promise<GithubListItem[]> {
+  try {
+    const { stdout } = await exec('gh', [
+      'pr', 'list', '--state', state, '--limit', '30',
+      '--json', 'number,title,url,author,state,updatedAt,isDraft',
+    ], { cwd })
+    const raw = JSON.parse(stdout) as Array<{ number: number; title: string; url: string; author: { login: string }; state: string; updatedAt: string; isDraft: boolean }>
+    return raw.map((r) => ({
+      number: r.number, title: r.title, url: r.url, author: r.author?.login ?? 'unknown',
+      state: r.state, updatedAt: r.updatedAt, isDraft: r.isDraft,
+    }))
+  } catch {
+    return []
+  }
+}
+
+export async function listIssues(cwd: string, state: 'open' | 'closed' | 'all' = 'open'): Promise<GithubListItem[]> {
+  try {
+    const { stdout } = await exec('gh', [
+      'issue', 'list', '--state', state, '--limit', '30',
+      '--json', 'number,title,url,author,state,updatedAt,labels',
+    ], { cwd })
+    const raw = JSON.parse(stdout) as Array<{ number: number; title: string; url: string; author: { login: string }; state: string; updatedAt: string; labels: Array<{ name: string }> }>
+    return raw.map((r) => ({
+      number: r.number, title: r.title, url: r.url, author: r.author?.login ?? 'unknown',
+      state: r.state, updatedAt: r.updatedAt, labels: r.labels?.map((l) => l.name) ?? [],
+    }))
+  } catch {
+    return []
+  }
+}
+
+// Gap 101 — review a PR from the IDE: comment, approve, or request changes.
+export async function commentOnPr(cwd: string, number: number, body: string): Promise<boolean> {
+  try {
+    await exec('gh', ['pr', 'comment', String(number), '--body', body], { cwd })
+    return true
+  } catch {
+    return false
+  }
+}
+
+export async function reviewPr(
+  cwd: string,
+  number: number,
+  action: 'approve' | 'request-changes' | 'comment',
+  body?: string,
+): Promise<boolean> {
+  try {
+    const flag = action === 'approve' ? '--approve' : action === 'request-changes' ? '--request-changes' : '--comment'
+    const args = ['pr', 'review', String(number), flag]
+    if (body) args.push('--body', body)
+    await exec('gh', args, { cwd })
+    return true
+  } catch {
+    return false
+  }
+}

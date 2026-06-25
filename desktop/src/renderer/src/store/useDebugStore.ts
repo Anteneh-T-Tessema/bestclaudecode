@@ -22,8 +22,15 @@ export interface DebugOutput {
   category?: string
 }
 
-// Per-file breakpoint lines. Key is the absolute file path.
-export type BreakpointMap = Record<string, number[]>
+// Gap 97 — a breakpoint can carry a condition expression (e.g. "i == 5"),
+// evaluated by the debug adapter; the breakpoint only fires when it's truthy.
+export interface Breakpoint {
+  line: number
+  condition?: string
+}
+
+// Per-file breakpoints. Key is the absolute file path.
+export type BreakpointMap = Record<string, Breakpoint[]>
 
 interface DebugStore {
   status: DebugStatus
@@ -42,7 +49,8 @@ interface DebugStore {
   setOutput: (entries: DebugOutput[]) => void
   appendOutput: (entry: DebugOutput) => void
   toggleBreakpoint: (filePath: string, line: number) => void
-  setBreakpoints: (filePath: string, lines: number[]) => void
+  setBreakpoints: (filePath: string, breakpoints: Breakpoint[]) => void
+  setBreakpointCondition: (filePath: string, line: number, condition: string) => void
   addWatch: (expression: string) => void
   removeWatch: (expression: string) => void
   setWatchResult: (expression: string, result: string) => void
@@ -73,14 +81,20 @@ export const useDebugStore = create<DebugStore>((set, get) => ({
 
   toggleBreakpoint: (filePath, line) => {
     const existing = get().breakpoints[filePath] ?? []
-    const next = existing.includes(line)
-      ? existing.filter((l) => l !== line)
-      : [...existing, line].sort((a, b) => a - b)
+    const next = existing.some((b) => b.line === line)
+      ? existing.filter((b) => b.line !== line)
+      : [...existing, { line }].sort((a, b) => a.line - b.line)
     set((s) => ({ breakpoints: { ...s.breakpoints, [filePath]: next } }))
   },
 
-  setBreakpoints: (filePath, lines) =>
-    set((s) => ({ breakpoints: { ...s.breakpoints, [filePath]: lines } })),
+  setBreakpoints: (filePath, breakpoints) =>
+    set((s) => ({ breakpoints: { ...s.breakpoints, [filePath]: breakpoints } })),
+
+  setBreakpointCondition: (filePath, line, condition) => {
+    const existing = get().breakpoints[filePath] ?? []
+    const next = existing.map((b) => (b.line === line ? { ...b, condition: condition || undefined } : b))
+    set((s) => ({ breakpoints: { ...s.breakpoints, [filePath]: next } }))
+  },
 
   addWatch: (expression) => {
     if (!get().watchExpressions.includes(expression)) {

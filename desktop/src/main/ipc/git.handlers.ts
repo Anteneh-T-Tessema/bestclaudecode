@@ -261,6 +261,16 @@ export function registerGitHandlers(): void {
     }
   })
 
+  // Gap 103 — compare any two branches (three-dot diff: changes introduced by
+  // `compare` since it diverged from `base`, matching GitHub's PR-compare semantics).
+  ipcMain.handle('git:diffBranches', async (_, { cwd, base, compare }: { cwd: string; base: string; compare: string }): Promise<string> => {
+    try {
+      return await git(cwd, ['diff', `${base}...${compare}`])
+    } catch {
+      return ''
+    }
+  })
+
   // ── Checkpoints (named git stashes with "lakoora:" prefix) ─────────────────
 
   ipcMain.handle('git:stashCreate', async (_, { cwd, name }: { cwd: string; name: string }) => {
@@ -284,6 +294,15 @@ export function registerGitHandlers(): void {
       })
     } catch {
       return []
+    }
+  })
+
+  // Gap 99 — preview a checkpoint's contents before restoring it.
+  ipcMain.handle('git:stashShow', async (_, { cwd, ref }: { cwd: string; ref: string }): Promise<string> => {
+    try {
+      return await git(cwd, ['stash', 'show', '-p', ref])
+    } catch {
+      return ''
     }
   })
 

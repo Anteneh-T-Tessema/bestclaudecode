@@ -1,9 +1,52 @@
 import { useState, useRef, useCallback } from 'react'
-import { Radar, FileCode } from 'lucide-react'
+import { Radar, FileCode, Replace } from 'lucide-react'
 import { useEditorStore } from '../../store/useEditorStore'
 import { useSettingsStore } from '../../store/useSettingsStore'
+import { toast } from '../../store/useToastStore'
 import { EmptyState } from '../EmptyState'
 import { PanelHeader, accent, border, fg, surface } from '../../design'
+
+interface TextMatch {
+  file: string
+  line: number
+  text: string
+  matchStart: number
+  matchEnd: number
+}
+
+function TextMatchRow({ match, projectPath, onOpen }: { match: TextMatch; projectPath: string; onOpen: (file: string, line: number | null) => void }) {
+  const [hovered, setHovered] = useState(false)
+  const relFile = projectPath && match.file.startsWith(projectPath) ? match.file.slice(projectPath.length + 1) : match.file
+  const before = match.text.slice(0, match.matchStart)
+  const hit = match.text.slice(match.matchStart, match.matchEnd)
+  const after = match.text.slice(match.matchEnd)
+
+  return (
+    <div
+      onClick={() => onOpen(match.file, match.line)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        padding: '6px 12px',
+        borderBottom: `1px solid ${border[2]}`,
+        background: hovered ? surface.overlay : 'transparent',
+        cursor: 'pointer',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <FileCode size={11} color={accent.cyan.fg} style={{ flexShrink: 0 }} />
+        <span style={{ fontSize: 11, color: fg[1], overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+          {relFile}:{match.line}
+        </span>
+      </div>
+      <div style={{ fontSize: 11, fontFamily: 'monospace', marginTop: 2, paddingLeft: 17, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+        <span style={{ color: fg[3] }}>{before}</span>
+        <span style={{ color: accent.amber.fg, background: accent.amber.subtle, borderRadius: 2 }}>{hit}</span>
+        <span style={{ color: fg[3] }}>{after}</span>
+      </div>
+    </div>
+  )
+}
 
 interface BM25Result {
   score: number
@@ -72,9 +115,9 @@ function ResultRow({ result, projectPath, onOpen }: { result: BM25Result; projec
   )
 }
 
-type SearchMode = 'bm25' | 'tfidf' | 'vector'
+type SearchMode = 'bm25' | 'tfidf' | 'vector' | 'text'
 
-const MODE_LABELS: Record<SearchMode, string> = { bm25: 'BM25', tfidf: 'TF-IDF', vector: 'Vector' }
+const MODE_LABELS: Record<SearchMode, string> = { bm25: 'BM25', tfidf: 'TF-IDF', vector: 'Vector', text: 'Text' }
 
 export function CodeSearchPanel() {
   const [query, setQuery] = useState('')
@@ -85,10 +128,35 @@ export function CodeSearchPanel() {
   const [mode, setMode] = useState<SearchMode>('bm25')
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Gap 95 — project-wide find & replace (literal/regex), distinct from the
+  // semantic BM25/TF-IDF/Vector ranking modes above.
+  const [textMatches, setTextMatches] = useState<TextMatch[]>([])
+  const [replacement, setReplacement] = useState('')
+  const [caseSensitive, setCaseSensitive] = useState(false)
+  const [useRegex, setUseRegex] = useState(false)
+  const [replacing, setReplacing] = useState(false)
+
   const projectPath = useSettingsStore((s) => s.projectPath)
   const openFile = useEditorStore((s) => s.openFile)
 
+  const runTextSearch = useCallback(async (q: string) => {
+    if (!q.trim() || !projectPath) {
+      setTextMatches([])
+      setSearched(false)
+      return
+    }
+    setSearching(true)
+    try {
+      const matches = await window.api.fs.searchInFiles(projectPath, q, caseSensitive, useRegex)
+      setTextMatches(matches as TextMatch[])
+      setSearched(true)
+    } finally {
+      setSearching(false)
+    }
+  }, [projectPath, caseSensitive, useRegex])
+
   const runSearch = useCallback(async (q: string, m: SearchMode) => {
+    if (m === 'text') { await runTextSearch(q); return }
     if (!q.trim()) {
       setResults([])
       setSearched(false)
@@ -106,7 +174,7 @@ export function CodeSearchPanel() {
     } finally {
       setSearching(false)
     }
-  }, [])
+  }, [runTextSearch])
 
   const handleChange = (val: string) => {
     setQuery(val)
@@ -117,6 +185,22 @@ export function CodeSearchPanel() {
   const switchMode = (m: SearchMode) => {
     setMode(m)
     if (query.trim()) runSearch(query, m)
+  }
+
+  const replaceAll = async () => {
+    if (!projectPath || !query.trim() || replacing) return
+    setReplacing(true)
+    try {
+      const result = await window.api.fs.replaceInFiles(projectPath, query, replacement, caseSensitive, useRegex)
+      if (result.filesChanged > 0) {
+        toast.success(`Replaced ${result.replacements} match${result.replacements !== 1 ? 'es' : ''} in ${result.filesChanged} file${result.filesChanged !== 1 ? 's' : ''}`)
+        await runTextSearch(query)
+      } else {
+        toast.error('No matches replaced')
+      }
+    } finally {
+      setReplacing(false)
+    }
   }
 
   const handleOpen = async (file: string, line: number | null) => {
@@ -143,7 +227,7 @@ export function CodeSearchPanel() {
 
       <div style={{ padding: '8px 10px', borderBottom: `1px solid ${border[1]}`, flexShrink: 0 }}>
         <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
-          {(['bm25', 'tfidf', 'vector'] as SearchMode[]).map((m) => (
+          {(['bm25', 'tfidf', 'vector', 'text'] as SearchMode[]).map((m) => (
             <button
               key={m}
               type="button"
@@ -166,7 +250,7 @@ export function CodeSearchPanel() {
           onKeyDown={(e) => {
             if (e.key === 'Enter') runSearch(query, mode)
           }}
-          placeholder={`${MODE_LABELS[mode]} search over repo symbols…`}
+          placeholder={mode === 'text' ? 'Find in files…' : `${MODE_LABELS[mode]} search over repo symbols…`}
           style={{
             width: '100%',
             boxSizing: 'border-box',
@@ -179,9 +263,51 @@ export function CodeSearchPanel() {
             padding: '6px 8px',
           }}
         />
-        {searched && (
+        {mode === 'text' && (
+          <>
+            <input
+              value={replacement}
+              onChange={(e) => setReplacement(e.target.value)}
+              placeholder="Replace with…"
+              style={{
+                width: '100%', boxSizing: 'border-box', marginTop: 6,
+                background: surface.raised, border: `1px solid ${border[0]}`,
+                borderRadius: 4, outline: 'none', fontSize: 11, color: fg[0], padding: '6px 8px',
+              }}
+            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: fg[3], cursor: 'pointer' }}>
+                <input type="checkbox" checked={caseSensitive} onChange={(e) => { setCaseSensitive(e.target.checked); if (query.trim()) runTextSearch(query) }} />
+                Case sensitive
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: fg[3], cursor: 'pointer' }}>
+                <input type="checkbox" checked={useRegex} onChange={(e) => { setUseRegex(e.target.checked); if (query.trim()) runTextSearch(query) }} />
+                Regex
+              </label>
+              <button
+                type="button"
+                onClick={replaceAll}
+                disabled={!query.trim() || textMatches.length === 0 || replacing}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto',
+                  fontSize: 10, fontWeight: 700, padding: '3px 9px', borderRadius: 4,
+                  border: `1px solid ${accent.amber.border}`, background: accent.amber.subtle, color: accent.amber.fg,
+                  cursor: query.trim() && textMatches.length > 0 && !replacing ? 'pointer' : 'not-allowed',
+                }}
+              >
+                <Replace size={10} /> {replacing ? 'Replacing…' : 'Replace All'}
+              </button>
+            </div>
+          </>
+        )}
+        {searched && mode !== 'text' && (
           <p style={{ fontSize: 9, color: fg[4], margin: '6px 0 0' }}>
             {results.length} match{results.length !== 1 ? 'es' : ''} across {docCount} indexed symbols · {MODE_LABELS[mode]}
+          </p>
+        )}
+        {searched && mode === 'text' && (
+          <p style={{ fontSize: 9, color: fg[4], margin: '6px 0 0' }}>
+            {textMatches.length} match{textMatches.length !== 1 ? 'es' : ''}
           </p>
         )}
       </div>
@@ -194,17 +320,21 @@ export function CodeSearchPanel() {
             description="Open a folder to search its repo map with BM25 ranking — the same algorithm used to build context for /implement."
           />
         )}
-        {projectPath && !searching && searched && results.length === 0 && (
+        {projectPath && !searching && searched && (mode === 'text' ? textMatches.length === 0 : results.length === 0) && (
           <div style={{ padding: 16, textAlign: 'center', color: fg[3], fontSize: 11 }}>No matches for &quot;{query}&quot;</div>
         )}
         {projectPath && !searched && (
           <div style={{ padding: 16, textAlign: 'center', color: fg[4], fontSize: 11 }}>
-            Type to rank functions and classes by relevance
+            {mode === 'text' ? 'Type to find matches across the project' : 'Type to rank functions and classes by relevance'}
           </div>
         )}
-        {results.map((r, i) => (
-          <ResultRow key={i} result={r} projectPath={projectPath} onOpen={handleOpen} />
-        ))}
+        {mode === 'text'
+          ? textMatches.map((m, i) => (
+              <TextMatchRow key={i} match={m} projectPath={projectPath} onOpen={handleOpen} />
+            ))
+          : results.map((r, i) => (
+              <ResultRow key={i} result={r} projectPath={projectPath} onOpen={handleOpen} />
+            ))}
       </div>
     </div>
   )

@@ -334,6 +334,12 @@ export function GitPanel() {
   const [merging, setMerging] = useState(false)
   const [allBranches, setAllBranches] = useState<string[]>([])
 
+  // Gap 103 — compare any two branches
+  const [compareBase, setCompareBase] = useState('')
+  const [compareHead, setCompareHead] = useState('')
+  const [compareDiff, setCompareDiff] = useState<string | null>(null)
+  const [comparing, setComparing] = useState(false)
+
   // Checkpoints (git stash)
   interface Checkpoint { ref: string; name: string; age: string }
   const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([])
@@ -342,6 +348,10 @@ export function GitPanel() {
   const [cpNameDraft, setCpNameDraft] = useState('')
   const [cpInputOpen, setCpInputOpen] = useState(false)
   const [cpRestoring, setCpRestoring] = useState<string | null>(null)
+  // Gap 99 — preview a checkpoint's diff before restoring it.
+  const [cpPreviewRef, setCpPreviewRef] = useState<string | null>(null)
+  const [cpPreviewDiff, setCpPreviewDiff] = useState('')
+  const [cpPreviewLoading, setCpPreviewLoading] = useState(false)
   const cpInputRef = useRef<HTMLInputElement>(null)
 
   const loadCheckpoints = useCallback(async () => {
@@ -373,6 +383,19 @@ export function GitPanel() {
       setCpSaving(false)
     }
   }, [projectPath, cpNameDraft, loadCheckpoints])
+
+  const previewCheckpoint = useCallback(async (ref: string) => {
+    if (cpPreviewRef === ref) { setCpPreviewRef(null); return }
+    if (!projectPath) return
+    setCpPreviewRef(ref)
+    setCpPreviewLoading(true)
+    try {
+      const diff = await window.api.git.stashShow(projectPath, ref)
+      setCpPreviewDiff(diff || '(empty diff)')
+    } finally {
+      setCpPreviewLoading(false)
+    }
+  }, [projectPath, cpPreviewRef])
 
   const restoreCheckpoint = useCallback(async (ref: string, name: string) => {
     if (!projectPath) return
@@ -561,6 +584,18 @@ export function GitPanel() {
       }
     } finally {
       setMerging(false)
+    }
+  }
+
+  // Gap 103 — compare any two branches (three-dot diff)
+  const compareBranches = async () => {
+    if (!projectPath || !compareBase || !compareHead) return
+    setComparing(true)
+    try {
+      const diff = await window.api.git.diffBranches(projectPath, compareBase, compareHead)
+      setCompareDiff(diff || '(no differences)')
+    } finally {
+      setComparing(false)
     }
   }
 
@@ -1053,61 +1088,89 @@ export function GitPanel() {
                 )}
 
                 {checkpoints.map((cp) => (
-                  <div
-                    key={cp.ref}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      padding: '4px 10px',
-                      borderTop: `1px solid ${border[2]}`,
-                    }}
-                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = surface.raised }}
-                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'none' }}
-                  >
-                    <Bookmark style={{ width: 10, height: 10, color: accent.violet.dim, flexShrink: 0 }} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 11, color: fg[1], overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {cp.name}
+                  <div key={cp.ref}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        padding: '4px 10px',
+                        borderTop: `1px solid ${border[2]}`,
+                      }}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = surface.raised }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'none' }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => void previewCheckpoint(cp.ref)}
+                        title="Preview diff"
+                        style={{ flexShrink: 0, background: 'none', border: 'none', color: fg[4], cursor: 'pointer', padding: 0, display: 'flex' }}
+                      >
+                        {cpPreviewRef === cp.ref
+                          ? <ChevronDown style={{ width: 11, height: 11 }} />
+                          : <ChevronRight style={{ width: 11, height: 11 }} />}
+                      </button>
+                      <Bookmark style={{ width: 10, height: 10, color: accent.violet.dim, flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 11, color: fg[1], overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {cp.name}
+                        </div>
+                        <div style={{ fontSize: 9, color: fg[4], marginTop: 1 }}>{cp.age} · {cp.ref}</div>
                       </div>
-                      <div style={{ fontSize: 9, color: fg[4], marginTop: 1 }}>{cp.age} · {cp.ref}</div>
+                      <button
+                        type="button"
+                        onClick={() => void restoreCheckpoint(cp.ref, cp.name)}
+                        disabled={cpRestoring === cp.ref}
+                        title="Restore (apply stash)"
+                        style={{
+                          flexShrink: 0,
+                          background: 'none',
+                          border: `1px solid ${accent.green.border}`,
+                          borderRadius: 3,
+                          color: cpRestoring === cp.ref ? fg[4] : accent.green.fg,
+                          cursor: 'pointer',
+                          padding: '2px 5px',
+                          display: 'flex',
+                          alignItems: 'center',
+                        }}
+                      >
+                        <RotateCcw style={{ width: 10, height: 10 }} className={cpRestoring === cp.ref ? 'agent-pulse' : ''} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void dropCheckpoint(cp.ref, cp.name)}
+                        title="Delete checkpoint"
+                        style={{
+                          flexShrink: 0,
+                          background: 'none',
+                          border: 'none',
+                          color: fg[4],
+                          cursor: 'pointer',
+                          padding: '2px 3px',
+                          display: 'flex',
+                          alignItems: 'center',
+                        }}
+                      >
+                        <Trash2 style={{ width: 10, height: 10 }} />
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => void restoreCheckpoint(cp.ref, cp.name)}
-                      disabled={cpRestoring === cp.ref}
-                      title="Restore (apply stash)"
-                      style={{
-                        flexShrink: 0,
-                        background: 'none',
-                        border: `1px solid ${accent.green.border}`,
-                        borderRadius: 3,
-                        color: cpRestoring === cp.ref ? fg[4] : accent.green.fg,
-                        cursor: 'pointer',
-                        padding: '2px 5px',
-                        display: 'flex',
-                        alignItems: 'center',
-                      }}
-                    >
-                      <RotateCcw style={{ width: 10, height: 10 }} className={cpRestoring === cp.ref ? 'agent-pulse' : ''} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void dropCheckpoint(cp.ref, cp.name)}
-                      title="Delete checkpoint"
-                      style={{
-                        flexShrink: 0,
-                        background: 'none',
-                        border: 'none',
-                        color: fg[4],
-                        cursor: 'pointer',
-                        padding: '2px 3px',
-                        display: 'flex',
-                        alignItems: 'center',
-                      }}
-                    >
-                      <Trash2 style={{ width: 10, height: 10 }} />
-                    </button>
+                    {cpPreviewRef === cp.ref && (
+                      <div style={{ padding: '0 10px 8px 28px' }}>
+                        {cpPreviewLoading ? (
+                          <div style={{ fontSize: 10, color: fg[4], padding: '4px 0' }}>Loading diff…</div>
+                        ) : (
+                          <pre
+                            style={{
+                              margin: 0, maxHeight: 220, overflow: 'auto', fontSize: 9.5,
+                              fontFamily: 'monospace', color: fg[2], background: surface.void,
+                              border: `1px solid ${border[1]}`, borderRadius: 4, padding: 8, whiteSpace: 'pre-wrap',
+                            }}
+                          >
+                            {cpPreviewDiff}
+                          </pre>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
               </>
@@ -1150,6 +1213,64 @@ export function GitPanel() {
                   {merging ? 'Merging…' : 'Merge'}
                 </button>
               </div>
+            </div>
+          )}
+
+          {/* Gap 103 — compare any two branches */}
+          {allBranches.length > 1 && (
+            <div style={{ flexShrink: 0, padding: '6px 10px', borderBottom: `1px solid ${border[1]}` }}>
+              <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: fg[3], marginBottom: 5 }}>
+                Compare Branches
+              </div>
+              <div style={{ display: 'flex', gap: 5 }}>
+                <select
+                  value={compareBase}
+                  onChange={(e) => setCompareBase(e.target.value)}
+                  title="Base branch"
+                  style={{
+                    flex: 1, background: surface.raised, border: `1px solid ${border[0]}`,
+                    borderRadius: 4, padding: '4px 6px', fontSize: 10.5, color: fg[0], outline: 'none',
+                  }}
+                >
+                  <option value="">Base…</option>
+                  {allBranches.map((b) => <option key={b} value={b}>{b}</option>)}
+                </select>
+                <select
+                  value={compareHead}
+                  onChange={(e) => setCompareHead(e.target.value)}
+                  title="Branch to compare against the base"
+                  style={{
+                    flex: 1, background: surface.raised, border: `1px solid ${border[0]}`,
+                    borderRadius: 4, padding: '4px 6px', fontSize: 10.5, color: fg[0], outline: 'none',
+                  }}
+                >
+                  <option value="">Compare…</option>
+                  {allBranches.map((b) => <option key={b} value={b}>{b}</option>)}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => void compareBranches()}
+                  disabled={!compareBase || !compareHead || comparing}
+                  style={{
+                    flexShrink: 0, fontSize: 10, fontWeight: 700, padding: '4px 10px', borderRadius: 4,
+                    border: `1px solid ${border[0]}`, background: surface.raised, color: fg[2],
+                    cursor: compareBase && compareHead && !comparing ? 'pointer' : 'not-allowed',
+                  }}
+                >
+                  {comparing ? '…' : 'Diff'}
+                </button>
+              </div>
+              {compareDiff !== null && (
+                <pre
+                  style={{
+                    marginTop: 6, maxHeight: 240, overflow: 'auto', fontSize: 9.5,
+                    fontFamily: 'monospace', color: fg[2], background: surface.void,
+                    border: `1px solid ${border[1]}`, borderRadius: 4, padding: 8, whiteSpace: 'pre-wrap',
+                  }}
+                >
+                  {compareDiff}
+                </pre>
+              )}
             </div>
           )}
 

@@ -51,9 +51,11 @@ class DesktopDapClient extends EventEmitter {
     ])
   }
 
-  async setBreakpoints(sourcePath: string, lines: number[]) {
+  async setBreakpoints(sourcePath: string, breakpoints: Array<{ line: number; condition?: string }>) {
     const body = await this.request('setBreakpoints', {
-      source: { path: sourcePath }, breakpoints: lines.map((l) => ({ line: l })), lines,
+      source: { path: sourcePath },
+      breakpoints: breakpoints.map((b) => (b.condition ? { line: b.line, condition: b.condition } : { line: b.line })),
+      lines: breakpoints.map((b) => b.line),
     }) as { breakpoints?: unknown[] } | null
     return body?.breakpoints ?? []
   }
@@ -186,10 +188,10 @@ export function registerDapHandlers(): void {
     }
   })
 
-  ipcMain.handle('dap:setBreakpoints', async (event, payload: { path: string; lines: number[] }) => {
+  ipcMain.handle('dap:setBreakpoints', async (event, payload: { path: string; breakpoints: Array<{ line: number; condition?: string }> }) => {
     const client = clientsByWindow.get(event.sender.id)
     if (!client?.isRunning) return { breakpoints: [] }
-    const bps = await client.setBreakpoints(payload.path, payload.lines)
+    const bps = await client.setBreakpoints(payload.path, payload.breakpoints)
     await client.configurationDone().catch(() => {})
     return { breakpoints: bps }
   })

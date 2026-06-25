@@ -52,6 +52,9 @@ export class LspClient extends EventEmitter {
           textDocument: {
             hover: { contentFormat: ['plaintext', 'markdown'] },
             definition: {},
+            references: {},
+            codeAction: { codeActionLiteralSupport: { codeActionKind: { valueSet: ['quickfix', 'refactor'] } } },
+            rename: {},
             publishDiagnostics: {},
           },
         },
@@ -148,6 +151,31 @@ export class LspClient extends EventEmitter {
   async definition(uri: string, line: number, character: number): Promise<unknown> {
     await this.start()
     return this.request('textDocument/definition', { textDocument: { uri }, position: { line, character } })
+  }
+
+  async references(uri: string, line: number, character: number): Promise<unknown> {
+    await this.start()
+    return this.request('textDocument/references', {
+      textDocument: { uri }, position: { line, character },
+      context: { includeDeclaration: true },
+    })
+  }
+
+  async codeAction(uri: string, range: unknown, diagnostics: unknown[]): Promise<unknown> {
+    await this.start()
+    return this.request('textDocument/codeAction', {
+      textDocument: { uri }, range, context: { diagnostics },
+    })
+  }
+
+  async executeCommand(command: string, args: unknown[]): Promise<unknown> {
+    await this.start()
+    return this.request('workspace/executeCommand', { command, arguments: args })
+  }
+
+  async rename(uri: string, line: number, character: number, newName: string): Promise<unknown> {
+    await this.start()
+    return this.request('textDocument/rename', { textDocument: { uri }, position: { line, character }, newName })
   }
 
   stop(): void {

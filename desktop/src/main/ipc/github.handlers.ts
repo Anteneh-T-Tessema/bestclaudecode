@@ -1,7 +1,9 @@
 import { ipcMain } from 'electron'
 import { runPythonJson } from '../pythonBridge'
 import { repoRoot } from '../paths'
-import { createPr } from '../gitOps'
+import { createPr, listPrs, listIssues, commentOnPr, reviewPr, type GithubListItem } from '../gitOps'
+
+export type { GithubListItem }
 
 export interface GithubComment {
   author: string
@@ -37,5 +39,26 @@ export function registerGithubHandlers(): void {
   ): Promise<{ url: string } | null> => {
     const url = await createPr(repoRoot(), { title, body, base, head })
     return url ? { url } : null
+  })
+
+  // Gap 100 — browse open PRs/issues without already knowing the number.
+  ipcMain.handle('github:listPrs', async (_event, state?: 'open' | 'closed' | 'all'): Promise<GithubListItem[]> => {
+    return listPrs(repoRoot(), state ?? 'open')
+  })
+
+  ipcMain.handle('github:listIssues', async (_event, state?: 'open' | 'closed' | 'all'): Promise<GithubListItem[]> => {
+    return listIssues(repoRoot(), state ?? 'open')
+  })
+
+  // Gap 101 — review comments/approve/request-changes on a PR from the IDE.
+  ipcMain.handle('github:commentOnPr', async (_event, { number, body }: { number: number; body: string }): Promise<boolean> => {
+    return commentOnPr(repoRoot(), number, body)
+  })
+
+  ipcMain.handle('github:reviewPr', async (
+    _event,
+    { number, action, body }: { number: number; action: 'approve' | 'request-changes' | 'comment'; body?: string },
+  ): Promise<boolean> => {
+    return reviewPr(repoRoot(), number, action, body)
   })
 }

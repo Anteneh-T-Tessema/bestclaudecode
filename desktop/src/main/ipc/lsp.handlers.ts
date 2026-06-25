@@ -20,6 +20,18 @@ function registerForLang(lang: LangKey): void {
   ipcMain.handle(`lsp:${lang}:definition`, (_event, uri: string, line: number, character: number) =>
     client.definition(uri, line, character)
   )
+  ipcMain.handle(`lsp:${lang}:references`, (_event, uri: string, line: number, character: number) =>
+    client.references(uri, line, character)
+  )
+  ipcMain.handle(`lsp:${lang}:codeAction`, (_event, uri: string, range: unknown, diagnostics: unknown[]) =>
+    client.codeAction(uri, range, diagnostics)
+  )
+  ipcMain.handle(`lsp:${lang}:executeCommand`, (_event, command: string, args: unknown[]) =>
+    client.executeCommand(command, args)
+  )
+  ipcMain.handle(`lsp:${lang}:rename`, (_event, uri: string, line: number, character: number, newName: string) =>
+    client.rename(uri, line, character, newName)
+  )
 
   client.on('diagnostics', (params: unknown) => {
     for (const win of BrowserWindow.getAllWindows()) {

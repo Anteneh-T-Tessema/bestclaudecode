@@ -1,6 +1,6 @@
 import { X } from 'lucide-react'
 import { surface, border, fg, accent } from '../design'
-import { Terminal } from '../components/terminal/Terminal'
+import { TerminalTabs } from '../components/terminal/TerminalTabs'
 import { ProblemsPanel } from '../components/ProblemsPanel'
 import { useAppStore } from '../store/useAppStore'
 import { useProblemsStore } from '../store/useProblemsStore'
@@ -97,8 +97,15 @@ export function BottomPanel({ onClose }: BottomPanelProps) {
         </button>
       </div>
 
-      <div style={{ flex: 1, overflow: 'hidden' }}>
-        {activeTab === 'terminal' ? <Terminal /> : <ProblemsPanel />}
+      <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+        {/* Kept mounted (just hidden) when Problems is active so background
+            terminal processes don't get killed by switching tabs. */}
+        <div style={{ position: 'absolute', inset: 0, display: activeTab === 'terminal' ? 'block' : 'none' }}>
+          <TerminalTabs />
+        </div>
+        <div style={{ position: 'absolute', inset: 0, display: activeTab === 'problems' ? 'block' : 'none', overflow: 'auto' }}>
+          <ProblemsPanel />
+        </div>
       </div>
     </div>
   )

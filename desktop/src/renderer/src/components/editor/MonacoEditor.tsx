@@ -31,6 +31,57 @@ interface LspDiagnostic {
   source?: string
 }
 
+interface LspTextEdit {
+  range: { start: { line: number; character: number }; end: { line: number; character: number } }
+  newText: string
+}
+
+interface LspWorkspaceEdit {
+  changes?: Record<string, LspTextEdit[]>
+  documentChanges?: Array<{ textDocument: { uri: string }; edits: LspTextEdit[] }>
+}
+
+interface LspCommand {
+  title: string
+  command: string
+  arguments?: unknown[]
+}
+
+interface LspCodeAction {
+  title: string
+  kind?: string
+  isPreferred?: boolean
+  edit?: LspWorkspaceEdit
+  command?: LspCommand
+}
+
+// Gap 102/104 — converts an LSP WorkspaceEdit (used by both code actions and
+// rename) into Monaco's WorkspaceEdit shape so the editor can apply it across
+// every affected open file in one operation.
+function lspWorkspaceEditToMonaco(edit: LspWorkspaceEdit, monaco: Monaco): MonacoNS.languages.WorkspaceEdit {
+  const perFile: Array<{ uri: string; edits: LspTextEdit[] }> = edit.documentChanges
+    ? edit.documentChanges.map((dc) => ({ uri: dc.textDocument.uri, edits: dc.edits }))
+    : Object.entries(edit.changes ?? {}).map(([uri, edits]) => ({ uri, edits }))
+
+  return {
+    edits: perFile.flatMap(({ uri, edits }) =>
+      edits.map((e) => ({
+        resource: monaco.Uri.parse(uri),
+        textEdit: {
+          range: {
+            startLineNumber: e.range.start.line + 1,
+            startColumn: e.range.start.character + 1,
+            endLineNumber: e.range.end.line + 1,
+            endColumn: e.range.end.character + 1,
+          },
+          text: e.newText,
+        },
+        versionId: undefined,
+      }))
+    ),
+  }
+}
+
 function hoverContentsToMarkdown(contents: LspHoverResult['contents']): string {
   if (!contents) return ''
   if (typeof contents === 'string') return contents
@@ -96,6 +147,10 @@ function relativeTime(unixSeconds: number): string {
 interface LspClientApi {
   hover: (uri: string, line: number, character: number) => Promise<unknown>
   definition: (uri: string, line: number, character: number) => Promise<unknown>
+  references: (uri: string, line: number, character: number) => Promise<unknown>
+  codeAction: (uri: string, range: unknown, diagnostics: unknown[]) => Promise<unknown>
+  executeCommand: (command: string, args: unknown[]) => Promise<unknown>
+  rename: (uri: string, line: number, character: number, newName: string) => Promise<unknown>
   didOpen: (uri: string, text: string) => Promise<void>
   didChange: (uri: string, text: string) => Promise<void>
   onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => () => void
@@ -187,12 +242,35 @@ function registerInlineCompletionProvider(monaco: Monaco): void {
   )
 }
 
+// Gap 102 — one shared Monaco command that dispatches an LSP server-side
+// command (workspace/executeCommand) for code actions that don't carry an
+// inline edit. Registered once; `getApi` is passed through `arguments`
+// rather than re-resolved, since it stays in the same JS realm (no IPC
+// serialization boundary at this layer — only inside getApi() itself).
+let lspExecuteCommandRegistered = false
+const LSP_EXECUTE_COMMAND_ID = 'lakoora.executeLspCommand'
+function registerLspExecuteCommand(monaco: Monaco): void {
+  if (lspExecuteCommandRegistered) return
+  lspExecuteCommandRegistered = true
+  monaco.editor.registerCommand(
+    LSP_EXECUTE_COMMAND_ID,
+    (_accessor: unknown, getApi: () => LspClientApi, command: string, args: unknown[]) => {
+      void getApi().executeCommand(command, args)
+    }
+  )
+}
+
+function isBareLspCommand(item: LspCodeAction | LspCommand): item is LspCommand {
+  return typeof (item as LspCommand).command === 'string'
+}
+
 function registerLspProviders(monaco: Monaco, lspEntry: ReturnType<typeof resolveLsp>): void {
   if (!lspEntry) return
   // Register once per canonical Monaco language ID (the first in the list).
   const key = lspEntry.monacoLangs[0]
   if (lspProvidersRegistered.has(key)) return
   lspProvidersRegistered.add(key)
+  registerLspExecuteCommand(monaco)
 
   for (const lang of lspEntry.monacoLangs) {
     // Close over a per-loop reference to lspEntry.api so the provider always
@@ -229,6 +307,85 @@ function registerLspProviders(monaco: Monaco, lspEntry: ReturnType<typeof resolv
             endColumn: loc.range.end.character + 1,
           },
         }))
+      },
+    })
+
+    // Gap 98 — "Find All References" (Shift+F12 / right-click), using Monaco's
+    // built-in peek view so no custom results panel is needed.
+    monaco.languages.registerReferenceProvider(lang, {
+      async provideReferences(model, position) {
+        const result = (await getApi().references(
+          fileToUri(model.uri.path),
+          position.lineNumber - 1,
+          position.column - 1,
+        )) as LspLocation[] | null
+        if (!result) return []
+        return result.map((loc) => ({
+          uri: monaco.Uri.parse(loc.uri),
+          range: {
+            startLineNumber: loc.range.start.line + 1,
+            startColumn: loc.range.start.character + 1,
+            endLineNumber: loc.range.end.line + 1,
+            endColumn: loc.range.end.character + 1,
+          },
+        }))
+      },
+    })
+
+    // Gap 102 — "Quick Fix" lightbulb (Cmd+.), backed by textDocument/codeAction.
+    monaco.languages.registerCodeActionProvider(lang, {
+      async provideCodeActions(model, range, context) {
+        const diagnostics = context.markers.map((m) => ({
+          range: {
+            start: { line: m.startLineNumber - 1, character: m.startColumn - 1 },
+            end: { line: m.endLineNumber - 1, character: m.endColumn - 1 },
+          },
+          message: m.message,
+          severity: m.severity === monaco.MarkerSeverity.Error ? 1 : m.severity === monaco.MarkerSeverity.Warning ? 2 : 3,
+          source: m.source,
+        }))
+        const result = (await getApi().codeAction(
+          fileToUri(model.uri.path),
+          {
+            start: { line: range.startLineNumber - 1, character: range.startColumn - 1 },
+            end: { line: range.endLineNumber - 1, character: range.endColumn - 1 },
+          },
+          diagnostics,
+        )) as Array<LspCodeAction | LspCommand> | null
+        if (!result?.length) return { actions: [], dispose() {} }
+
+        const actions: MonacoNS.languages.CodeAction[] = result.map((item) => {
+          if (isBareLspCommand(item)) {
+            return {
+              title: item.title,
+              command: { id: LSP_EXECUTE_COMMAND_ID, title: item.title, arguments: [getApi, item.command, item.arguments ?? []] },
+            }
+          }
+          return {
+            title: item.title,
+            kind: item.kind,
+            isPreferred: item.isPreferred,
+            edit: item.edit ? lspWorkspaceEditToMonaco(item.edit, monaco) : undefined,
+            command: !item.edit && item.command
+              ? { id: LSP_EXECUTE_COMMAND_ID, title: item.command.title, arguments: [getApi, item.command.command, item.command.arguments ?? []] }
+              : undefined,
+          }
+        })
+        return { actions, dispose() {} }
+      },
+    })
+
+    // Gap 104 — "Rename Symbol" (F2), backed by textDocument/rename.
+    monaco.languages.registerRenameProvider(lang, {
+      async provideRenameEdits(model, position, newName) {
+        const result = (await getApi().rename(
+          fileToUri(model.uri.path),
+          position.lineNumber - 1,
+          position.column - 1,
+          newName,
+        )) as LspWorkspaceEdit | null
+        if (!result) return { edits: [] }
+        return lspWorkspaceEditToMonaco(result, monaco)
       },
     })
   }
@@ -517,11 +674,13 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
     const monaco = monacoRef.current
     if (!col || !monaco) return
     col.set(
-      fileBreakpoints.map((line) => ({
-        range: { startLineNumber: line, startColumn: 1, endLineNumber: line, endColumn: 1 },
+      fileBreakpoints.map((bp) => ({
+        range: { startLineNumber: bp.line, startColumn: 1, endLineNumber: bp.line, endColumn: 1 },
         options: {
-          glyphMarginClassName: 'lakoora-breakpoint',
-          glyphMarginHoverMessage: { value: `Breakpoint at line ${line}` },
+          glyphMarginClassName: bp.condition ? 'lakoora-breakpoint-conditional' : 'lakoora-breakpoint',
+          glyphMarginHoverMessage: {
+            value: bp.condition ? `Breakpoint at line ${bp.line} — if: \`${bp.condition}\`` : `Breakpoint at line ${bp.line}`,
+          },
         },
       }))
     )

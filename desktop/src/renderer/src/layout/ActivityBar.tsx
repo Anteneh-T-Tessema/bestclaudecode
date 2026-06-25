@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Files, GitBranch, Search, MessageSquare, ShieldCheck, Settings, Brain, Radar, ListTodo, BookOpen, Bot, Bug, ListTree, StickyNote, DollarSign, Map } from 'lucide-react'
+import { Files, GitBranch, Search, MessageSquare, ShieldCheck, Settings, Brain, Radar, ListTodo, BookOpen, Bot, Bug, ListTree, StickyNote, DollarSign, Map, Github } from 'lucide-react'
 import { useAppStore, type ActivityId } from '../store/useAppStore'
 import { IconButton, Tooltip, accent, surface, border, type AccentName } from '../design'
 
@@ -26,6 +26,7 @@ const ACTIVITIES: ActivityDef[] = [
   { id: 'notepads', icon: StickyNote, label: 'Notepads', accentName: 'amber' },
   { id: 'usage', icon: DollarSign, label: 'Usage Dashboard', accentName: 'green' },
   { id: 'map', icon: Map, label: 'Codebase Map', accentName: 'cyan' },
+  { id: 'github', icon: Github, label: 'GitHub', accentName: 'violet' },
 ]
 
 const BOTTOM: ActivityDef = { id: 'settings', icon: Settings, label: 'Settings' }

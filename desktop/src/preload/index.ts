@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { ParsedDecision, DecisionStats, DecisionLogOpts } from '../main/ipc/decisions.handlers'
 import type { MemoryEntry } from '../main/ipc/memory.handlers'
 import type { BM25Response, DocsResult, BrowseResult } from '../main/ipc/search.handlers'
-import type { GithubItem } from '../main/ipc/github.handlers'
+import type { GithubItem, GithubListItem } from '../main/ipc/github.handlers'
 import type { BlameEntry } from '../main/ipc/git.handlers'
 import type { ShadowInfo } from '../main/ipc/sandbox.handlers'
 import type { PlanSummary, TaskPlanDetail } from '../main/ipc/taskplanner.handlers'
@@ -40,9 +40,9 @@ const api = {
     openFile: (filters?: Electron.FileFilter[]) => ipcRenderer.invoke('fs:openFile', filters) as Promise<string | null>,
     watchDir: (p: string) => ipcRenderer.invoke('fs:watchDir', p),
     unwatchDir: (p: string) => ipcRenderer.invoke('fs:unwatchDir', p),
-    searchInFiles: (dirPath: string, query: string, caseSensitive = false, regex = false) =>
+    searchInFiles: (dirPath: string, query: string, caseSensitive = false, regex = false): Promise<Array<{ file: string; line: number; text: string; matchStart: number; matchEnd: number }>> =>
       ipcRenderer.invoke('fs:searchInFiles', { dirPath, query, caseSensitive, regex }),
-    replaceInFiles: (dirPath: string, query: string, replacement: string, caseSensitive = false, regex = false) =>
+    replaceInFiles: (dirPath: string, query: string, replacement: string, caseSensitive = false, regex = false): Promise<{ filesChanged: number; replacements: number }> =>
       ipcRenderer.invoke('fs:replaceInFiles', { dirPath, query, replacement, caseSensitive, regex }),
     onFileChange: (cb: (e: { eventType: string; filename: string; dirPath: string }) => void) => {
       const handler = (_: Electron.IpcRendererEvent, data: { eventType: string; filename: string; dirPath: string }) => cb(data)
@@ -104,6 +104,9 @@ const api = {
       ipcRenderer.invoke('git:stagedDiff', { cwd }),
     headDiff: (cwd: string): Promise<string> =>
       ipcRenderer.invoke('git:headDiff', { cwd }),
+    // Gap 103 — compare any two branches
+    diffBranches: (cwd: string, base: string, compare: string): Promise<string> =>
+      ipcRenderer.invoke('git:diffBranches', { cwd, base, compare }),
     fileAtRevision: (cwd: string, rev: string, relPath: string): Promise<string> =>
       ipcRenderer.invoke('git:fileAtRevision', { cwd, rev, relPath }),
     commitFiles: (cwd: string, hash: string): Promise<Array<{ status: string; path: string; oldPath?: string }>> =>
@@ -112,6 +115,8 @@ const api = {
       ipcRenderer.invoke('git:stashCreate', { cwd, name }),
     stashList: (cwd: string): Promise<Array<{ ref: string; name: string; age: string }>> =>
       ipcRenderer.invoke('git:stashList', cwd),
+    // Gap 99 — preview a checkpoint's diff before restoring it
+    stashShow: (cwd: string, ref: string): Promise<string> => ipcRenderer.invoke('git:stashShow', { cwd, ref }),
     stashApply: (cwd: string, ref: string): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke('git:stashApply', { cwd, ref }),
     stashDrop: (cwd: string, ref: string): Promise<{ success: boolean; error?: string }> =>
@@ -220,6 +225,14 @@ const api = {
         ipcRenderer.invoke('lsp:python:hover', uri, line, character),
       definition: (uri: string, line: number, character: number) =>
         ipcRenderer.invoke('lsp:python:definition', uri, line, character),
+      references: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:python:references', uri, line, character),
+      codeAction: (uri: string, range: unknown, diagnostics: unknown[]) =>
+        ipcRenderer.invoke('lsp:python:codeAction', uri, range, diagnostics),
+      executeCommand: (command: string, args: unknown[]) =>
+        ipcRenderer.invoke('lsp:python:executeCommand', command, args),
+      rename: (uri: string, line: number, character: number, newName: string) =>
+        ipcRenderer.invoke('lsp:python:rename', uri, line, character, newName),
       onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => {
         const handler = (_: Electron.IpcRendererEvent, params: { uri: string; diagnostics: unknown[] }) => cb(params)
         ipcRenderer.on('lsp:python:diagnostics', handler)
@@ -233,6 +246,14 @@ const api = {
         ipcRenderer.invoke('lsp:ts:hover', uri, line, character),
       definition: (uri: string, line: number, character: number) =>
         ipcRenderer.invoke('lsp:ts:definition', uri, line, character),
+      references: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:ts:references', uri, line, character),
+      codeAction: (uri: string, range: unknown, diagnostics: unknown[]) =>
+        ipcRenderer.invoke('lsp:ts:codeAction', uri, range, diagnostics),
+      executeCommand: (command: string, args: unknown[]) =>
+        ipcRenderer.invoke('lsp:ts:executeCommand', command, args),
+      rename: (uri: string, line: number, character: number, newName: string) =>
+        ipcRenderer.invoke('lsp:ts:rename', uri, line, character, newName),
       onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => {
         const handler = (_: Electron.IpcRendererEvent, params: { uri: string; diagnostics: unknown[] }) => cb(params)
         ipcRenderer.on('lsp:ts:diagnostics', handler)
@@ -244,6 +265,14 @@ const api = {
       didChange: (uri: string, text: string) => ipcRenderer.invoke('lsp:go:didChange', uri, text),
       hover: (uri: string, line: number, character: number) => ipcRenderer.invoke('lsp:go:hover', uri, line, character),
       definition: (uri: string, line: number, character: number) => ipcRenderer.invoke('lsp:go:definition', uri, line, character),
+      references: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:go:references', uri, line, character),
+      codeAction: (uri: string, range: unknown, diagnostics: unknown[]) =>
+        ipcRenderer.invoke('lsp:go:codeAction', uri, range, diagnostics),
+      executeCommand: (command: string, args: unknown[]) =>
+        ipcRenderer.invoke('lsp:go:executeCommand', command, args),
+      rename: (uri: string, line: number, character: number, newName: string) =>
+        ipcRenderer.invoke('lsp:go:rename', uri, line, character, newName),
       onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => {
         const handler = (_: Electron.IpcRendererEvent, params: { uri: string; diagnostics: unknown[] }) => cb(params)
         ipcRenderer.on('lsp:go:diagnostics', handler)
@@ -255,6 +284,14 @@ const api = {
       didChange: (uri: string, text: string) => ipcRenderer.invoke('lsp:rust:didChange', uri, text),
       hover: (uri: string, line: number, character: number) => ipcRenderer.invoke('lsp:rust:hover', uri, line, character),
       definition: (uri: string, line: number, character: number) => ipcRenderer.invoke('lsp:rust:definition', uri, line, character),
+      references: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:rust:references', uri, line, character),
+      codeAction: (uri: string, range: unknown, diagnostics: unknown[]) =>
+        ipcRenderer.invoke('lsp:rust:codeAction', uri, range, diagnostics),
+      executeCommand: (command: string, args: unknown[]) =>
+        ipcRenderer.invoke('lsp:rust:executeCommand', command, args),
+      rename: (uri: string, line: number, character: number, newName: string) =>
+        ipcRenderer.invoke('lsp:rust:rename', uri, line, character, newName),
       onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => {
         const handler = (_: Electron.IpcRendererEvent, params: { uri: string; diagnostics: unknown[] }) => cb(params)
         ipcRenderer.on('lsp:rust:diagnostics', handler)
@@ -266,6 +303,14 @@ const api = {
       didChange: (uri: string, text: string) => ipcRenderer.invoke('lsp:java:didChange', uri, text),
       hover: (uri: string, line: number, character: number) => ipcRenderer.invoke('lsp:java:hover', uri, line, character),
       definition: (uri: string, line: number, character: number) => ipcRenderer.invoke('lsp:java:definition', uri, line, character),
+      references: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:java:references', uri, line, character),
+      codeAction: (uri: string, range: unknown, diagnostics: unknown[]) =>
+        ipcRenderer.invoke('lsp:java:codeAction', uri, range, diagnostics),
+      executeCommand: (command: string, args: unknown[]) =>
+        ipcRenderer.invoke('lsp:java:executeCommand', command, args),
+      rename: (uri: string, line: number, character: number, newName: string) =>
+        ipcRenderer.invoke('lsp:java:rename', uri, line, character, newName),
       onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => {
         const handler = (_: Electron.IpcRendererEvent, params: { uri: string; diagnostics: unknown[] }) => cb(params)
         ipcRenderer.on('lsp:java:diagnostics', handler)
@@ -277,6 +322,14 @@ const api = {
       didChange: (uri: string, text: string) => ipcRenderer.invoke('lsp:c:didChange', uri, text),
       hover: (uri: string, line: number, character: number) => ipcRenderer.invoke('lsp:c:hover', uri, line, character),
       definition: (uri: string, line: number, character: number) => ipcRenderer.invoke('lsp:c:definition', uri, line, character),
+      references: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:c:references', uri, line, character),
+      codeAction: (uri: string, range: unknown, diagnostics: unknown[]) =>
+        ipcRenderer.invoke('lsp:c:codeAction', uri, range, diagnostics),
+      executeCommand: (command: string, args: unknown[]) =>
+        ipcRenderer.invoke('lsp:c:executeCommand', command, args),
+      rename: (uri: string, line: number, character: number, newName: string) =>
+        ipcRenderer.invoke('lsp:c:rename', uri, line, character, newName),
       onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => {
         const handler = (_: Electron.IpcRendererEvent, params: { uri: string; diagnostics: unknown[] }) => cb(params)
         ipcRenderer.on('lsp:c:diagnostics', handler)
@@ -291,6 +344,13 @@ const api = {
     fetchPr: (number: number): Promise<GithubItem | null> => ipcRenderer.invoke('github:fetchPr', number),
     createPr: (opts: { title: string; body: string; base: string; head: string }): Promise<{ url: string } | null> =>
       ipcRenderer.invoke('github:createPr', opts),
+    // Gap 100 — browse open PRs/issues without already knowing the number
+    listPrs: (state?: 'open' | 'closed' | 'all'): Promise<GithubListItem[]> => ipcRenderer.invoke('github:listPrs', state),
+    listIssues: (state?: 'open' | 'closed' | 'all'): Promise<GithubListItem[]> => ipcRenderer.invoke('github:listIssues', state),
+    // Gap 101 — review a PR from the IDE
+    commentOnPr: (number: number, body: string): Promise<boolean> => ipcRenderer.invoke('github:commentOnPr', { number, body }),
+    reviewPr: (number: number, action: 'approve' | 'request-changes' | 'comment', body?: string): Promise<boolean> =>
+      ipcRenderer.invoke('github:reviewPr', { number, action, body }),
   },
 
   // ── Agent (shadow workspace + autonomous orchestrator) ────────────────────────
@@ -386,7 +446,7 @@ const api = {
   dap: {
     launch: (opts: { program: string; language?: string; args?: string[]; stopOnEntry?: boolean }) =>
       ipcRenderer.invoke('dap:launch', opts) as Promise<{ started: boolean; error?: string }>,
-    setBreakpoints: (opts: { path: string; lines: number[] }) =>
+    setBreakpoints: (opts: { path: string; breakpoints: Array<{ line: number; condition?: string }> }) =>
       ipcRenderer.invoke('dap:setBreakpoints', opts) as Promise<{ breakpoints: Array<{ verified: boolean; line: number }> }>,
     continue: (opts?: { threadId?: number }) => ipcRenderer.invoke('dap:continue', opts),
     next: (opts?: { threadId?: number }) => ipcRenderer.invoke('dap:next', opts),
