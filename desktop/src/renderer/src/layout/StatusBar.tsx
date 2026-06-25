@@ -1,4 +1,5 @@
 import { useEditorStore } from '../store/useEditorStore'
+import { useEditorActionsStore } from '../store/useEditorActionsStore'
 import { useChatStore, MODELS } from '../store/useChatStore'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { useProblemsStore } from '../store/useProblemsStore'
@@ -35,6 +36,8 @@ export function StatusBar() {
   const fontSize = useSettingsStore((s) => s.fontSize)
   const theme = useSettingsStore((s) => s.theme)
   const setEditorSetting = useSettingsStore((s) => s.set)
+  const livePreviewOpen = useEditorActionsStore((s) => s.livePreviewOpen)
+  const toggleLivePreview = useEditorActionsStore((s) => s.toggleLivePreview)
   const [branch, setBranch] = useState<string | null>(null)
   const [blameMap, setBlameMap] = useState<Map<number, BlameEntry>>(new Map())
   const blamePath = useRef<string | null>(null)
@@ -222,6 +225,14 @@ export function StatusBar() {
           style={{ ...itemStyle, cursor: 'pointer', background: 'none', border: 'none', borderLeft: `1px solid ${border[2]}`, color: inlayHints ? accent.cyan.fg : fg[1] }}
         >
           Hints
+        </button>
+        <button
+          type="button"
+          onClick={() => toggleLivePreview()}
+          title="Toggle Live Preview panel (embeds a running dev server)"
+          style={{ ...itemStyle, cursor: 'pointer', background: 'none', border: 'none', borderLeft: `1px solid ${border[2]}`, color: livePreviewOpen ? accent.cyan.fg : fg[1] }}
+        >
+          Preview
         </button>
         <button
           type="button"

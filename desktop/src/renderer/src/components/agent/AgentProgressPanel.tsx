@@ -25,6 +25,9 @@ interface AgentProgress {
   prUrl?: string
   deployUrl?: string
   branch?: string
+  /** Gap 142 — set on 'retrying'; retryCount is 0-indexed (completed failures so far). */
+  retryCount?: number
+  maxRetries?: number
 }
 
 type EventEntry = AgentProgress & { ts: number }
@@ -50,7 +53,7 @@ function SubtaskIcon({ status }: { status: string }) {
   return <CircleDot size={10} color={fg[4]} />
 }
 
-function statusLabel(status: AgentProgress['status']): string {
+function statusLabel(status: AgentProgress['status'], retryCount?: number, maxRetries?: number): string {
   switch (status) {
     case 'preparing': return 'Preparing…'
     case 'finalizing': return 'Finalizing…'
@@ -63,7 +66,11 @@ function statusLabel(status: AgentProgress['status']): string {
     case 'finished': return 'Finished'
     case 'blocked': return 'Blocked'
     case 'error': return 'Error'
-    case 'retrying': return 'Retrying…'
+    // Gap 142 — retryCount is 0-indexed (completed failures so far), so the
+    // attempt ordinal shown to the user is retryCount + 1.
+    case 'retrying': return retryCount != null && maxRetries != null
+      ? `Retrying… (attempt ${retryCount + 1}/${maxRetries})`
+      : 'Retrying…'
     case 'done': return 'Done'
     default: return 'Running'
   }
@@ -83,7 +90,12 @@ function EventRow({ e }: { e: EventEntry }) {
       <StatusIcon status={e.status} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 10, color: fg[2], display: 'flex', justifyContent: 'space-between' }}>
-          <span style={{ fontWeight: 600 }}>{e.status}</span>
+          <span style={{ fontWeight: 600 }}>
+            {e.status}
+            {e.status === 'retrying' && e.retryCount != null && e.maxRetries != null
+              ? ` (attempt ${e.retryCount + 1}/${e.maxRetries})`
+              : ''}
+          </span>
           <span style={{ color: fg[4] }}>{new Date(e.ts).toLocaleTimeString()}</span>
         </div>
         {e.subtaskDescription && (
@@ -576,7 +588,7 @@ export function AgentProgressPanel() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
             <StatusIcon status={latest.status} />
             <span style={{ fontSize: 11, fontWeight: 600, color: fg[0] }}>
-              {statusLabel(latest.status)}
+              {statusLabel(latest.status, latest.retryCount, latest.maxRetries)}
             </span>
             {latest.branch && (
               <span style={{ fontSize: 9, color: fg[4], fontFamily: 'monospace' }}>{latest.branch}</span>

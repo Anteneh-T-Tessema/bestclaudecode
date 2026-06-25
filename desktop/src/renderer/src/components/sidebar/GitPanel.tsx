@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { DiffEditor } from '@monaco-editor/react'
-import { GitBranch, RefreshCw, Plus, GitCommit, Clock, CheckCircle, Minus, AlertCircle, X, ArrowUp, ArrowDown, ChevronRight, FileText, Check, Sparkles, Bookmark, RotateCcw, Trash2, ChevronDown, GitPullRequest } from 'lucide-react'
+import { GitBranch, RefreshCw, Plus, GitCommit, Clock, CheckCircle, Minus, AlertCircle, X, ArrowUp, ArrowDown, ChevronRight, FileText, Check, Sparkles, Bookmark, RotateCcw, Trash2, ChevronDown, GitPullRequest, Rocket } from 'lucide-react'
 import { useSettingsStore } from '../../store/useSettingsStore'
 import { useAppStore } from '../../store/useAppStore'
 import { useChatStore } from '../../store/useChatStore'
@@ -352,6 +352,11 @@ export function GitPanel() {
   const [prGenerating, setPrGenerating] = useState(false)
   const [prCreating, setPrCreating] = useState(false)
 
+  // Gap 140 — manual one-click deploy
+  const [deployCmd, setDeployCmd] = useState<string | null>(null)
+  const [deploying, setDeploying] = useState(false)
+  const [deployResult, setDeployResult] = useState<{ deployUrl?: string; error?: string } | null>(null)
+
   // Gap 103 — compare any two branches
   const [compareBase, setCompareBase] = useState('')
   const [compareHead, setCompareHead] = useState('')
@@ -693,6 +698,27 @@ export function GitPanel() {
       }
     } finally {
       setPrCreating(false)
+    }
+  }
+
+  // Gap 140 — detect whether this project has a deploy target at all, so the
+  // button can stay hidden rather than always-visible-but-failing.
+  useEffect(() => {
+    if (!projectPath) { setDeployCmd(null); return }
+    window.api.deploy.detect().then(setDeployCmd).catch(() => setDeployCmd(null))
+  }, [projectPath])
+
+  const runManualDeploy = async () => {
+    if (deploying) return
+    setDeploying(true)
+    setDeployResult(null)
+    try {
+      const result = await window.api.deploy.run()
+      setDeployResult(result)
+      if (result.success) toast.success('Deployed')
+      else toast.error(result.error ?? 'Deploy failed')
+    } finally {
+      setDeploying(false)
     }
   }
 
@@ -1566,6 +1592,35 @@ export function GitPanel() {
                     </button>
                   </div>
                 </div>
+              )}
+            </div>
+          )}
+
+          {/* Gap 140 — manual one-click deploy, hidden entirely if no deploy target was detected */}
+          {deployCmd && (
+            <div style={{ flexShrink: 0, borderBottom: `1px solid ${border[1]}`, padding: '6px 10px' }}>
+              <button
+                type="button"
+                onClick={() => void runManualDeploy()}
+                disabled={deploying}
+                title={`Detected: ${deployCmd}`}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6, width: '100%', boxSizing: 'border-box',
+                  fontSize: 10, fontWeight: 700, padding: '5px 9px', borderRadius: 4,
+                  border: `1px solid ${accent.cyan.border}`, background: accent.cyan.subtle, color: accent.cyan.fg,
+                  cursor: deploying ? 'not-allowed' : 'pointer',
+                }}
+              >
+                <Rocket size={11} />
+                {deploying ? 'Deploying…' : `Deploy (${deployCmd})`}
+              </button>
+              {deployResult?.deployUrl && (
+                <div style={{ fontSize: 10, color: accent.cyan.fg, marginTop: 5 }}>
+                  Deployed: <a href={deployResult.deployUrl} style={{ color: accent.cyan.fg }}>{deployResult.deployUrl}</a>
+                </div>
+              )}
+              {deployResult?.error && (
+                <div style={{ fontSize: 10, color: accent.red.fg, marginTop: 5 }}>{deployResult.error}</div>
               )}
             </div>
           )}

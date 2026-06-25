@@ -16,6 +16,7 @@ import { SettingsPanel } from '../components/settings/SettingsPanel'
 import { UsageDashboardPanel } from '../components/sidebar/UsageDashboardPanel'
 import { CodebaseMapPanel } from '../components/sidebar/CodebaseMapPanel'
 import { GitHubPanel } from '../components/sidebar/GitHubPanel'
+import { EnvVarsPanel } from '../components/sidebar/EnvVarsPanel'
 import { ErrorBoundary } from '../components/ErrorBoundary'
 
 const LABELS: Record<string, string> = {
@@ -35,6 +36,7 @@ const LABELS: Record<string, string> = {
   usage: 'USAGE DASHBOARD',
   map: 'CODEBASE MAP',
   github: 'GITHUB',
+  env: 'ENVIRONMENT',
   settings: 'SETTINGS',
 }
 
@@ -80,6 +82,8 @@ export function Sidebar() {
         return <CodebaseMapPanel />
       case 'github':
         return <GitHubPanel />
+      case 'env':
+        return <EnvVarsPanel />
       case 'settings':
         return <SettingsPanel />
       default:

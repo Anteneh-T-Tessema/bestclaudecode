@@ -19,6 +19,9 @@ export function createWindow(): BrowserWindow {
       // Intentional parity with legacyai-ide's existing tradeoff (sandbox: true is the
       // modern Electron-recommended default) — not an oversight, just inherited scope.
       sandbox: false,
+      // Gap 139 — enables <webview> for the Live Preview panel, embedding the
+      // user's own dev server URL in its own isolated process.
+      webviewTag: true,
     },
   })
 

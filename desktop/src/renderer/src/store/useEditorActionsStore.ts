@@ -7,6 +7,7 @@ interface EditorActionsStore {
   diffViewerOpen: boolean
   diffViewerPath: string | null
   mdPreviewOpen: boolean
+  livePreviewOpen: boolean
 
   openInlineEdit: (tabId: string, startLine: number, endLine: number, selectedText: string) => void
   closeInlineEdit: () => void
@@ -16,6 +17,8 @@ interface EditorActionsStore {
   closeDiffViewer: () => void
   toggleMdPreview: () => void
   setMdPreviewOpen: (v: boolean) => void
+  toggleLivePreview: () => void
+  setLivePreviewOpen: (v: boolean) => void
 }
 
 export const useEditorActionsStore = create<EditorActionsStore>((set) => ({
@@ -25,6 +28,7 @@ export const useEditorActionsStore = create<EditorActionsStore>((set) => ({
   diffViewerOpen: false,
   diffViewerPath: null,
   mdPreviewOpen: false,
+  livePreviewOpen: false,
 
   openInlineEdit: (tabId, startLine, endLine, selectedText) =>
     set({ inlineEditOpen: true, inlineEditTarget: { tabId, startLine, endLine, selectedText } }),
@@ -38,4 +42,7 @@ export const useEditorActionsStore = create<EditorActionsStore>((set) => ({
 
   toggleMdPreview: () => set((s) => ({ mdPreviewOpen: !s.mdPreviewOpen })),
   setMdPreviewOpen: (v) => set({ mdPreviewOpen: v }),
+
+  toggleLivePreview: () => set((s) => ({ livePreviewOpen: !s.livePreviewOpen })),
+  setLivePreviewOpen: (v) => set({ livePreviewOpen: v }),
 }))

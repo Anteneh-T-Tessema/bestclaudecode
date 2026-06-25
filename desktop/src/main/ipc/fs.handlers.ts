@@ -53,7 +53,7 @@ export function registerFsHandlers(): void {
     'fs:readFile', 'fs:writeFile', 'fs:readDir',
     'fs:createDir', 'fs:deleteEntry', 'fs:rename', 'fs:exists',
     'fs:openDialog', 'fs:openFile', 'fs:watchDir', 'fs:unwatchDir',
-    'fs:searchInFiles', 'fs:replaceInFiles', 'fs:findFiles',
+    'fs:searchInFiles', 'fs:replaceInFiles', 'fs:findFiles', 'fs:isGitignored',
   ]
   for (const ch of channels) ipcMain.removeHandler(ch)
 
@@ -75,6 +75,14 @@ export function registerFsHandlers(): void {
     await fs.mkdir(path.dirname(filePath), { recursive: true })
     await fs.writeFile(filePath, content, 'utf-8')
     return { success: true }
+  })
+
+  // Gap 141 — used by EnvVarsPanel to warn (non-blocking) when .env isn't
+  // covered by .gitignore. Reuses the same ignore-rule loader the file
+  // explorer uses, just against one explicit relative path.
+  ipcMain.handle('fs:isGitignored', async (_, relPath: string): Promise<boolean> => {
+    const root = projectRoot()
+    return isIgnored(relPath, loadIgnoreRules(root))
   })
 
   ipcMain.handle('fs:readDir', async (_, dirPath: string) => {

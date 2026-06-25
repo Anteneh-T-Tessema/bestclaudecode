@@ -6,6 +6,7 @@ import { EditorTabs } from '../components/editor/EditorTabs'
 import { MonacoEditor } from '../components/editor/MonacoEditor'
 import { ImagePreview } from '../components/editor/ImagePreview'
 import { MarkdownPreview } from '../components/editor/MarkdownPreview'
+import { LivePreview } from '../components/editor/LivePreview'
 import { InlineAIEdit } from '../components/editor/InlineAIEdit'
 import { GoToLine } from '../components/editor/GoToLine'
 import { DiffViewer } from '../components/editor/DiffViewer'
@@ -28,7 +29,7 @@ export function CenterPane() {
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const splitTab = tabs.find((t) => t.id === splitTabId)
   const activeFilePath = activeTab?.filePath ?? ''
-  const { inlineEditOpen, goToLineOpen, diffViewerOpen, diffViewerPath, mdPreviewOpen } =
+  const { inlineEditOpen, goToLineOpen, diffViewerOpen, diffViewerPath, mdPreviewOpen, livePreviewOpen } =
     useEditorActionsStore()
 
   type EditorMode = 'image' | 'md-split' | 'editor'
@@ -42,7 +43,7 @@ export function CenterPane() {
       style={{
         height: '100%',
         display: 'flex',
-        flexDirection: 'column',
+        flexDirection: 'row',
         background: surface.base,
         overflow: 'hidden',
         position: 'relative',
@@ -72,6 +73,10 @@ export function CenterPane() {
         </button>
       )}
 
+      {/* Gap 139 — wrapped in its own column so the Live Preview pane (a
+          sibling below) stays reachable even with zero tabs open / on the
+          welcome screen, instead of being nested inside the editor area. */}
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {activeView === 'welcome' && !hasOpenTabs ? (
         <WelcomeScreen />
       ) : (
@@ -193,6 +198,17 @@ export function CenterPane() {
                 </div>
               </>
             )}
+          </div>
+        </>
+      )}
+      </div>
+
+      {/* Gap 139 — Live Preview pane, independent of splitOpen/editor state */}
+      {livePreviewOpen && (
+        <>
+          <div style={{ width: 1, background: border[1], flexShrink: 0 }} />
+          <div style={{ width: 480, flexShrink: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <LivePreview />
           </div>
         </>
       )}

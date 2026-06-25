@@ -45,6 +45,7 @@ export function createWebApi(): API {
       replaceInFiles: (p, q, r, cs, rx) => socket.invoke('fs:replaceInFiles', { dirPath: p, query: q, replacement: r, caseSensitive: cs ?? false, regex: rx ?? false }),
       onFileChange: () => () => {},
       findFiles: () => Promise.resolve(notPorted('fs.findFiles', [] as string[])),
+      isGitignored: () => Promise.resolve(notPorted('fs.isGitignored', false)),
     },
 
     terminal: {
@@ -358,6 +359,11 @@ export function createWebApi(): API {
       exportReportHtml: () => Promise.resolve(notPorted('agent.exportReportHtml', null)),
       exportReportPdf: () => Promise.resolve(notPorted('agent.exportReportPdf', null)),
       onProgress: () => () => {},
+    },
+
+    deploy: {
+      detect: () => Promise.resolve(notPorted('deploy.detect', null)),
+      run: () => Promise.resolve(notPorted('deploy.run', { success: false, error: 'not supported in web mode' })),
     },
 
     policy: {

@@ -50,6 +50,7 @@ const api = {
       return (): void => { ipcRenderer.removeListener('fs:change', handler) }
     },
     findFiles: (root: string): Promise<string[]> => ipcRenderer.invoke('fs:findFiles', root),
+    isGitignored: (relPath: string): Promise<boolean> => ipcRenderer.invoke('fs:isGitignored', relPath),
   },
 
   // ── Terminal ───────────────────────────────────────────────────────────────
@@ -558,6 +559,13 @@ const api = {
     },
   },
 
+  // ── Deploy (Gap 140 — manual one-click deploy, reuses agent:progress) ──────
+  deploy: {
+    detect: (): Promise<string | null> => ipcRenderer.invoke('deploy:detect'),
+    run: (): Promise<{ success: boolean; deployUrl?: string; error?: string }> =>
+      ipcRenderer.invoke('deploy:run'),
+  },
+
   // ── Policy (Gap 67 — dry-run governance rules against a sample value) ──────
   policy: {
     test: (opts: PolicyTestOpts): Promise<PolicyViolation | null> =>
@@ -664,5 +672,8 @@ const api = {
 }
 
 contextBridge.exposeInMainWorld('api', api)
+// Gap 139 — lets renderer code (e.g. LivePreview.tsx) pick <webview> vs <iframe>
+// without depending on window.api internals for an unrelated detection signal.
+contextBridge.exposeInMainWorld('isElectron', true)
 
 export type API = typeof api

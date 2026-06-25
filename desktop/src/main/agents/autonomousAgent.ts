@@ -27,6 +27,7 @@ import { resolveModel } from '../modelRouter'
 import { createWorktree, commitAll, push, createPr, removeWorktree, runGit } from '../gitOps'
 import { appendEvent, readEvents } from '../agentEventLog'
 import { loadPolicy, checkCommand, checkPath, checkApproval } from '../policyEngine'
+import { detectDeployCommand, runDeploy } from '../deploy'
 import * as path from 'path'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -50,6 +51,10 @@ export interface AgentProgress {
   deployUrl?: string
   /** Branch the agent is working on, set once isolation is set up. */
   branch?: string
+  /** Gap 142 — number of failed attempts so far on the current subtask (0-indexed). Set on 'retrying'. */
+  retryCount?: number
+  /** Gap 142 — retry budget for the current subtask. Set alongside retryCount. */
+  maxRetries?: number
 }
 
 interface Subtask {
@@ -142,7 +147,7 @@ export function resolveApproval(sessionId: string, approved: boolean, approver: 
 
 // ── Progress broadcast ────────────────────────────────────────────────────────
 
-function broadcast(progress: AgentProgress): void {
+export function broadcast(progress: AgentProgress): void {
   appendEvent(progress.sessionId, progress as unknown as Record<string, unknown>)
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send('agent:progress', progress)
@@ -197,13 +202,6 @@ function parseTestSummary(output: string): string | null {
   const cargoMatch = output.match(/(test result:[^\n]+)/m)
   if (cargoMatch) return cargoMatch[1].trim()
   return null
-}
-
-// ── Deploy URL extractor ──────────────────────────────────────────────────────
-
-function extractUrl(text: string): string | null {
-  const m = text.match(/https?:\/\/[^\s]+/)
-  return m ? m[0] : null
 }
 
 // ── Working-tree diff context (Gap 43) ───────────────────────────────────────
@@ -373,34 +371,14 @@ async function attemptDeploy(opts: {
   worktreePath: string
 }): Promise<void> {
   const { sessionId, planFile, doneCount, totalCount, branch, prUrl, worktreePath } = opts
-  const { promises: fs } = await import('fs')
 
-  let deployCmd: string | null = null
-
-  try {
-    const raw = await fs.readFile(path.join(worktreePath, 'package.json'), 'utf-8')
-    const pkg = JSON.parse(raw) as { scripts?: Record<string, string> }
-    if (pkg.scripts?.deploy) deployCmd = 'npm run deploy'
-  } catch { /* no package.json or no deploy script */ }
-
-  if (!deployCmd) {
-    for (const candidate of ['vercel.json', '.vercel']) {
-      try {
-        await fs.access(path.join(worktreePath, candidate))
-        deployCmd = 'vercel'
-        break
-      } catch { /* not found */ }
-    }
-  }
-
+  const deployCmd = await detectDeployCommand(worktreePath)
   if (!deployCmd) return
 
   broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: `Running ${deployCmd}…`, status: 'deploying', doneCount, totalCount, branch, prUrl })
 
   try {
-    const result = await runCommand('/bin/sh', ['-c', deployCmd], worktreePath)
-    const combined = result.stdout + '\n' + result.stderr
-    const deployUrl = extractUrl(combined) ?? undefined
+    const { deployUrl } = await runDeploy(worktreePath, deployCmd)
     broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: '', status: 'deployed', doneCount, totalCount, branch, prUrl, deployUrl })
   } catch { /* deploy failed — not fatal, session already succeeded */ }
 }
@@ -662,6 +640,11 @@ export async function startAutonomousSession(opts: {
       const policy = loadPolicy(projectPath)
 
       let retryContext: string | null = null
+      // Gap 142 — bounded retry budget per subtask. retryCount tracks completed
+      // failed attempts (0-indexed); isRetry distinguishes "any attempt past the
+      // first" for prompt/status purposes and is unaffected by the count itself.
+      let retryCount = 0
+      const MAX_RETRIES = 3
       // Cached per subtask id so a retry of the same subtask reuses the
       // already-fetched context block instead of re-querying chat_context.
       let cachedContextSubtaskId = ''
@@ -703,6 +686,7 @@ export async function startAutonomousSession(opts: {
           status: isRetry ? 'retrying' : 'running',
           doneCount, totalCount,
           branch: agentBranch || undefined,
+          ...(isRetry ? { retryCount, maxRetries: MAX_RETRIES } : {}),
         })
 
         // Fetched once per subtask attempt cycle, not per retry — it goes in
@@ -765,11 +749,12 @@ export async function startAutonomousSession(opts: {
         }
 
         if (editError) {
-          if (isRetry) {
+          if (retryCount >= MAX_RETRIES) {
             broadcast({ sessionId, planFile, subtaskId: subtask.id, subtaskDescription: subtask.description, status: 'blocked', error: editError, doneCount, totalCount })
             break
           }
           retryContext = editError
+          retryCount++
           continue
         }
 
@@ -837,11 +822,12 @@ export async function startAutonomousSession(opts: {
         }
 
         if (runError) {
-          if (isRetry) {
+          if (retryCount >= MAX_RETRIES) {
             broadcast({ sessionId, planFile, subtaskId: subtask.id, subtaskDescription: subtask.description, status: 'blocked', error: runError, doneCount, totalCount })
             break
           }
           retryContext = runError
+          retryCount++
           continue
         }
 
@@ -857,17 +843,19 @@ export async function startAutonomousSession(opts: {
         }
 
         if (browseError) {
-          if (isRetry) {
+          if (retryCount >= MAX_RETRIES) {
             broadcast({ sessionId, planFile, subtaskId: subtask.id, subtaskDescription: subtask.description, status: 'blocked', error: browseError, doneCount, totalCount })
             break
           }
           retryContext = browseError
+          retryCount++
           continue
         }
 
         // Subtask succeeded
         await markDone(planFile, subtask.id)
         retryContext = null
+        retryCount = 0
         broadcast({
           sessionId, planFile,
           subtaskId: subtask.id,

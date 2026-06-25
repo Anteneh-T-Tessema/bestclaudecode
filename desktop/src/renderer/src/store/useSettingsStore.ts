@@ -17,6 +17,8 @@ interface SettingsStore {
   formatOnSave: boolean
   inlayHints: boolean
   stickyScroll: boolean
+  /** Gap 139 — last-used URL for the Live Preview panel, remembered across sessions. */
+  livePreviewUrl: string
   recentFiles: string[]
   projectPath: string
   recentProjects: string[]
@@ -47,6 +49,7 @@ const DEFAULTS = {
   formatOnSave: false,
   inlayHints: false,
   stickyScroll: true,
+  livePreviewUrl: '',
   recentFiles: [] as string[],
   projectPath: '',
   recentProjects: [] as string[],
