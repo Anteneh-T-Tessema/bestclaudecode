@@ -8,6 +8,7 @@ import { useAppStore } from '../../store/useAppStore'
 import { toast } from '../../store/useToastStore'
 import { surface, border, fg, accent } from '../../design'
 import { ModelSelector } from './ModelSelector'
+import { MessageModelPicker } from './MessageModelPicker'
 import { extractSymbols } from '../sidebar/OutlinePanel'
 
 const BASE_SYSTEM_PROMPT = `You are an expert AI coding agent for the Lakoora IDE. Help the user understand, write, debug, and improve their code. Be concise and accurate.
@@ -365,6 +366,7 @@ const MENTIONS = [
 export function ChatInput() {
   const [text, setText] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [messageModelOverride, setMessageModelOverride] = useState<string | null>(null)
 
   // Pasted/dropped image attachments (base64 data URLs)
   const [pendingImages, setPendingImages] = useState<string[]>([])
@@ -624,11 +626,12 @@ export function ChatInput() {
     const globalRulesBlock = globalRules.trim() ? `\n\n# Global Rules\n${globalRules.trim()}` : ''
     const projectRules = await loadProjectRules(projectPath)
     const systemPrompt = BASE_SYSTEM_PROMPT + globalRulesBlock + projectRules
+    const effectiveModel = messageModelOverride ?? activeModel
 
     try {
       const streamId = await window.api.ai.streamChat({
         messages: [...messages, { role: 'user', content: finalContent, images }],
-        model: activeModel,
+        model: effectiveModel,
         systemPrompt,
       })
 
@@ -652,8 +655,10 @@ export function ChatInput() {
     } catch (err) {
       finalizeMessage(assistantId)
       toast.error(`Chat error: ${(err as Error).message}`)
+    } finally {
+      setMessageModelOverride(null)
     }
-  }, [text, isStreaming, activeModel, addUserMessage, startAssistantMessage, appendDelta, finalizeMessage, setStreaming, getActiveTab, projectPath])
+  }, [text, isStreaming, activeModel, messageModelOverride, addUserMessage, startAssistantMessage, appendDelta, finalizeMessage, setStreaming, getActiveTab, projectPath])
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -1200,6 +1205,7 @@ export function ChatInput() {
             e.target.value = ''
           }}
         />
+        <MessageModelPicker value={messageModelOverride} onChange={setMessageModelOverride} />
         {isStreaming ? (
           <button
             onClick={abort}
