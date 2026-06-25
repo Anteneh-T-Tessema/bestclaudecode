@@ -173,6 +173,12 @@ interface LspClientApi {
   completion: (uri: string, line: number, character: number) => Promise<unknown>
   inlayHint: (uri: string, startLine: number, endLine: number) => Promise<unknown>
   foldingRange: (uri: string) => Promise<unknown>
+  documentHighlight: (uri: string, line: number, character: number) => Promise<unknown>
+  prepareRename: (uri: string, line: number, character: number) => Promise<unknown>
+  codeLens: (uri: string) => Promise<unknown>
+  codeLensResolve: (item: unknown) => Promise<unknown>
+  workspaceSymbol: (query: string) => Promise<unknown>
+  semanticTokens: (uri: string) => Promise<unknown>
   didOpen: (uri: string, text: string) => Promise<void>
   didChange: (uri: string, text: string) => Promise<void>
   onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => () => void
@@ -211,6 +217,20 @@ interface LspFoldingRange {
   startLine: number
   endLine: number
   kind?: string
+}
+
+interface LspDocumentHighlight {
+  range: { start: { line: number; character: number }; end: { line: number; character: number } }
+  kind?: number
+}
+
+interface LspCodeLens {
+  range: { start: { line: number; character: number }; end: { line: number; character: number } }
+  command?: LspCommand
+}
+
+interface LspSemanticTokens {
+  data: number[]
 }
 
 // Map from Monaco language ID → { LSP api accessor, diagnostic source label }.
@@ -432,8 +452,26 @@ function registerLspProviders(monaco: Monaco, lspEntry: ReturnType<typeof resolv
       },
     })
 
-    // Gap 104 — "Rename Symbol" (F2), backed by textDocument/rename.
+    // Gap 104/117 — "Rename Symbol" (F2): prepareRename validates before showing
+    // the input, provideRenameEdits applies the actual workspace-wide rename.
     monaco.languages.registerRenameProvider(lang, {
+      async resolveRenameLocation(model, position) {
+        const result = (await getApi().prepareRename(
+          fileToUri(model.uri.path),
+          position.lineNumber - 1,
+          position.column - 1,
+        )) as { range?: { start: { line: number; character: number }; end: { line: number; character: number } }; placeholder?: string } | null
+        if (!result?.range) return { range: { startLineNumber: position.lineNumber, startColumn: position.column, endLineNumber: position.lineNumber, endColumn: position.column }, text: '' }
+        return {
+          range: {
+            startLineNumber: result.range.start.line + 1,
+            startColumn: result.range.start.character + 1,
+            endLineNumber: result.range.end.line + 1,
+            endColumn: result.range.end.character + 1,
+          },
+          text: result.placeholder ?? '',
+        }
+      },
       async provideRenameEdits(model, position, newName) {
         const result = (await getApi().rename(
           fileToUri(model.uri.path),
@@ -615,6 +653,83 @@ function registerLspProviders(monaco: Monaco, lspEntry: ReturnType<typeof resolv
           },
         }))
       },
+    })
+
+    // Gap 116 — Document highlights: highlight all occurrences of the symbol under cursor
+    monaco.languages.registerDocumentHighlightProvider(lang, {
+      async provideDocumentHighlights(model, position) {
+        const result = (await getApi().documentHighlight(
+          fileToUri(model.uri.path),
+          position.lineNumber - 1,
+          position.column - 1,
+        )) as LspDocumentHighlight[] | null
+        if (!result?.length) return []
+        return result.map((h) => ({
+          range: {
+            startLineNumber: h.range.start.line + 1,
+            startColumn: h.range.start.character + 1,
+            endLineNumber: h.range.end.line + 1,
+            endColumn: h.range.end.character + 1,
+          },
+          kind: h.kind === 2
+            ? monaco.languages.DocumentHighlightKind.Read
+            : h.kind === 3
+            ? monaco.languages.DocumentHighlightKind.Write
+            : monaco.languages.DocumentHighlightKind.Text,
+        }))
+      },
+    })
+
+    // Gap 118 — Code lens: "N references" / "Run test" annotations above methods
+    monaco.languages.registerCodeLensProvider(lang, {
+      async provideCodeLenses(model) {
+        const result = (await getApi().codeLens(
+          fileToUri(model.uri.path),
+        )) as LspCodeLens[] | null
+        if (!result?.length) return { lenses: [], dispose() {} }
+        return {
+          lenses: result.map((lens) => ({
+            range: {
+              startLineNumber: lens.range.start.line + 1,
+              startColumn: lens.range.start.character + 1,
+              endLineNumber: lens.range.end.line + 1,
+              endColumn: lens.range.end.character + 1,
+            },
+            command: lens.command
+              ? { id: LSP_EXECUTE_COMMAND_ID, title: lens.command.title, arguments: [getApi, lens.command.command, lens.command.arguments ?? []] }
+              : undefined,
+          })),
+          dispose() {},
+        }
+      },
+      async resolveCodeLens(_model, codeLens) {
+        return codeLens
+      },
+    })
+
+    // Gap 120 — Semantic tokens: richer syntax highlighting from the language server
+    const TOKEN_TYPES = [
+      'namespace','type','class','enum','interface','struct','typeParameter',
+      'parameter','variable','property','enumMember','event','function',
+      'method','macro','keyword','modifier','comment','string','number',
+      'regexp','operator','decorator',
+    ]
+    const TOKEN_MODIFIERS = [
+      'declaration','definition','readonly','static','deprecated',
+      'abstract','async','modification','documentation','defaultLibrary',
+    ]
+    monaco.languages.registerDocumentSemanticTokensProvider(lang, {
+      getLegend() {
+        return { tokenTypes: TOKEN_TYPES, tokenModifiers: TOKEN_MODIFIERS }
+      },
+      async provideDocumentSemanticTokens(model) {
+        const result = (await getApi().semanticTokens(
+          fileToUri(model.uri.path),
+        )) as LspSemanticTokens | null
+        if (!result?.data?.length) return { data: new Uint32Array(0) }
+        return { data: new Uint32Array(result.data) }
+      },
+      releaseDocumentSemanticTokens() {},
     })
   }
 }

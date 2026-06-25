@@ -12,6 +12,24 @@ interface BM25Result {
   lineNumber?: number
 }
 
+interface LspSymbol {
+  name: string
+  kind: number
+  location: { uri: string; range: { start: { line: number; character: number } } }
+  containerName?: string
+}
+
+function lspApiForLanguage(lang: string | undefined) {
+  if (!lang) return null
+  if (lang === 'python') return window.api.lsp.python
+  if (lang === 'typescript' || lang === 'javascript' || lang === 'typescriptreact' || lang === 'javascriptreact') return window.api.lsp.ts
+  if (lang === 'go') return window.api.lsp.go
+  if (lang === 'rust') return window.api.lsp.rust
+  if (lang === 'java') return window.api.lsp.java
+  if (lang === 'c' || lang === 'cpp') return window.api.lsp.c
+  return null
+}
+
 // Gap 106 — "Go to Symbol in Workspace" (⌘T): a floating quick-picker over the
 // same BM25 symbol index CodeSearchPanel uses, so jumping to a function or
 // class doesn't require first switching to the sidebar.
@@ -20,6 +38,10 @@ export function SymbolSearch() {
   const setOpen = useAppStore((s) => s.setSymbolSearchOpen)
   const projectPath = useSettingsStore((s) => s.projectPath)
   const openFile = useEditorStore((s) => s.openFile)
+  const activeLanguage = useEditorStore((s) => {
+    const tab = s.tabs.find((t) => t.id === s.activeTabId)
+    return tab?.language
+  })
 
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<BM25Result[]>([])
@@ -45,14 +67,28 @@ export function SymbolSearch() {
     setLoading(true)
     debounceRef.current = setTimeout(async () => {
       try {
-        const res = await window.api.search.bm25(query)
-        setResults(res.results ?? [])
+        const lspApi = lspApiForLanguage(activeLanguage)
+        const [bm25Res, lspRaw] = await Promise.all([
+          window.api.search.bm25(query),
+          lspApi ? lspApi.workspaceSymbol(query).catch(() => null) : Promise.resolve(null),
+        ])
+        const bm25Results: BM25Result[] = bm25Res.results ?? []
+        const seen = new Set(bm25Results.map((r) => `${r.file}:${r.lineNumber ?? ''}` ))
+        const lspResults: BM25Result[] = ((lspRaw as LspSymbol[] | null) ?? [])
+          .map((sym) => {
+            const filePath = sym.location.uri.replace(/^file:\/\//, '')
+            const lineNumber = sym.location.range.start.line + 1
+            const label = sym.containerName ? `${sym.name} — ${sym.containerName}` : sym.name
+            return { score: 0, file: filePath, line: label, lineNumber }
+          })
+          .filter((r) => !seen.has(`${r.file}:${r.lineNumber}`))
+        setResults([...bm25Results, ...lspResults])
       } finally {
         setLoading(false)
       }
     }, 200)
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
-  }, [query])
+  }, [query, activeLanguage])
 
   useEffect(() => {
     const item = listRef.current?.querySelector(`[data-idx="${selectedIndex}"]`) as HTMLElement | null
@@ -257,7 +293,7 @@ export function SymbolSearch() {
             </div>
           ))}
           <span style={{ flex: 1 }} />
-          <span style={{ fontSize: 10, color: fg[4] }}>BM25 over indexed symbols</span>
+          <span style={{ fontSize: 10, color: fg[4] }}>BM25 + LSP workspace symbols</span>
         </div>
       </div>
     </div>

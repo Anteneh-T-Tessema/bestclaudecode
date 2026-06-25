@@ -56,14 +56,31 @@ export class LspClient extends EventEmitter {
             implementation: {},
             references: {},
             codeAction: { codeActionLiteralSupport: { codeActionKind: { valueSet: ['quickfix', 'refactor'] } } },
-            rename: {},
+            rename: { prepareSupport: true },
             formatting: {},
             publishDiagnostics: {},
             signatureHelp: { signatureInformation: { parameterInformation: { labelOffsetSupport: true } } },
             completion: { completionItem: { snippetSupport: true } },
             inlayHint: {},
             foldingRange: {},
+            documentHighlight: {},
+            codeLens: { dynamicRegistration: false },
+            semanticTokens: {
+              requests: { full: true },
+              tokenTypes: [
+                'namespace','type','class','enum','interface','struct','typeParameter',
+                'parameter','variable','property','enumMember','event','function',
+                'method','macro','keyword','modifier','comment','string','number',
+                'regexp','operator','decorator',
+              ],
+              tokenModifiers: [
+                'declaration','definition','readonly','static','deprecated',
+                'abstract','async','modification','documentation','defaultLibrary',
+              ],
+              formats: ['relative'],
+            },
           },
+          workspace: { symbol: {} },
         },
         initializationOptions: this.config.initializationOptions,
       })
@@ -239,6 +256,45 @@ export class LspClient extends EventEmitter {
     return this.request('textDocument/implementation', {
       textDocument: { uri }, position: { line, character },
     })
+  }
+
+  // Gap 116 — Document highlights: mark all occurrences of the symbol under cursor
+  async documentHighlight(uri: string, line: number, character: number): Promise<unknown> {
+    await this.start()
+    return this.request('textDocument/documentHighlight', {
+      textDocument: { uri }, position: { line, character },
+    })
+  }
+
+  // Gap 117 — Prepare rename: validate rename target before showing the input box
+  async prepareRename(uri: string, line: number, character: number): Promise<unknown> {
+    await this.start()
+    return this.request('textDocument/prepareRename', {
+      textDocument: { uri }, position: { line, character },
+    })
+  }
+
+  // Gap 118 — Code lens: inline "N references" / "Run test" annotations
+  async codeLens(uri: string): Promise<unknown> {
+    await this.start()
+    return this.request('textDocument/codeLens', { textDocument: { uri } })
+  }
+
+  async codeLensResolve(item: unknown): Promise<unknown> {
+    await this.start()
+    return this.request('codeLens/resolve', item)
+  }
+
+  // Gap 119 — Workspace symbols: cross-file symbol search
+  async workspaceSymbol(query: string): Promise<unknown> {
+    await this.start()
+    return this.request('workspace/symbol', { query })
+  }
+
+  // Gap 120 — Semantic tokens: richer syntax highlighting from the language server
+  async semanticTokens(uri: string): Promise<unknown> {
+    await this.start()
+    return this.request('textDocument/semanticTokens/full', { textDocument: { uri } })
   }
 
   stop(): void {

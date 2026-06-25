@@ -246,6 +246,14 @@ const api = {
         ipcRenderer.invoke('lsp:python:typeDefinition', uri, line, character),
       implementation: (uri: string, line: number, character: number) =>
         ipcRenderer.invoke('lsp:python:implementation', uri, line, character),
+      documentHighlight: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:python:documentHighlight', uri, line, character),
+      prepareRename: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:python:prepareRename', uri, line, character),
+      codeLens: (uri: string) => ipcRenderer.invoke('lsp:python:codeLens', uri),
+      codeLensResolve: (item: unknown) => ipcRenderer.invoke('lsp:python:codeLensResolve', item),
+      workspaceSymbol: (query: string) => ipcRenderer.invoke('lsp:python:workspaceSymbol', query),
+      semanticTokens: (uri: string) => ipcRenderer.invoke('lsp:python:semanticTokens', uri),
       onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => {
         const handler = (_: Electron.IpcRendererEvent, params: { uri: string; diagnostics: unknown[] }) => cb(params)
         ipcRenderer.on('lsp:python:diagnostics', handler)
@@ -280,6 +288,14 @@ const api = {
         ipcRenderer.invoke('lsp:ts:typeDefinition', uri, line, character),
       implementation: (uri: string, line: number, character: number) =>
         ipcRenderer.invoke('lsp:ts:implementation', uri, line, character),
+      documentHighlight: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:ts:documentHighlight', uri, line, character),
+      prepareRename: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:ts:prepareRename', uri, line, character),
+      codeLens: (uri: string) => ipcRenderer.invoke('lsp:ts:codeLens', uri),
+      codeLensResolve: (item: unknown) => ipcRenderer.invoke('lsp:ts:codeLensResolve', item),
+      workspaceSymbol: (query: string) => ipcRenderer.invoke('lsp:ts:workspaceSymbol', query),
+      semanticTokens: (uri: string) => ipcRenderer.invoke('lsp:ts:semanticTokens', uri),
       onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => {
         const handler = (_: Electron.IpcRendererEvent, params: { uri: string; diagnostics: unknown[] }) => cb(params)
         ipcRenderer.on('lsp:ts:diagnostics', handler)
@@ -312,6 +328,14 @@ const api = {
         ipcRenderer.invoke('lsp:go:typeDefinition', uri, line, character),
       implementation: (uri: string, line: number, character: number) =>
         ipcRenderer.invoke('lsp:go:implementation', uri, line, character),
+      documentHighlight: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:go:documentHighlight', uri, line, character),
+      prepareRename: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:go:prepareRename', uri, line, character),
+      codeLens: (uri: string) => ipcRenderer.invoke('lsp:go:codeLens', uri),
+      codeLensResolve: (item: unknown) => ipcRenderer.invoke('lsp:go:codeLensResolve', item),
+      workspaceSymbol: (query: string) => ipcRenderer.invoke('lsp:go:workspaceSymbol', query),
+      semanticTokens: (uri: string) => ipcRenderer.invoke('lsp:go:semanticTokens', uri),
       onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => {
         const handler = (_: Electron.IpcRendererEvent, params: { uri: string; diagnostics: unknown[] }) => cb(params)
         ipcRenderer.on('lsp:go:diagnostics', handler)
@@ -344,6 +368,14 @@ const api = {
         ipcRenderer.invoke('lsp:rust:typeDefinition', uri, line, character),
       implementation: (uri: string, line: number, character: number) =>
         ipcRenderer.invoke('lsp:rust:implementation', uri, line, character),
+      documentHighlight: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:rust:documentHighlight', uri, line, character),
+      prepareRename: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:rust:prepareRename', uri, line, character),
+      codeLens: (uri: string) => ipcRenderer.invoke('lsp:rust:codeLens', uri),
+      codeLensResolve: (item: unknown) => ipcRenderer.invoke('lsp:rust:codeLensResolve', item),
+      workspaceSymbol: (query: string) => ipcRenderer.invoke('lsp:rust:workspaceSymbol', query),
+      semanticTokens: (uri: string) => ipcRenderer.invoke('lsp:rust:semanticTokens', uri),
       onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => {
         const handler = (_: Electron.IpcRendererEvent, params: { uri: string; diagnostics: unknown[] }) => cb(params)
         ipcRenderer.on('lsp:rust:diagnostics', handler)
@@ -376,6 +408,14 @@ const api = {
         ipcRenderer.invoke('lsp:java:typeDefinition', uri, line, character),
       implementation: (uri: string, line: number, character: number) =>
         ipcRenderer.invoke('lsp:java:implementation', uri, line, character),
+      documentHighlight: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:java:documentHighlight', uri, line, character),
+      prepareRename: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:java:prepareRename', uri, line, character),
+      codeLens: (uri: string) => ipcRenderer.invoke('lsp:java:codeLens', uri),
+      codeLensResolve: (item: unknown) => ipcRenderer.invoke('lsp:java:codeLensResolve', item),
+      workspaceSymbol: (query: string) => ipcRenderer.invoke('lsp:java:workspaceSymbol', query),
+      semanticTokens: (uri: string) => ipcRenderer.invoke('lsp:java:semanticTokens', uri),
       onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => {
         const handler = (_: Electron.IpcRendererEvent, params: { uri: string; diagnostics: unknown[] }) => cb(params)
         ipcRenderer.on('lsp:java:diagnostics', handler)
@@ -408,6 +448,14 @@ const api = {
         ipcRenderer.invoke('lsp:c:typeDefinition', uri, line, character),
       implementation: (uri: string, line: number, character: number) =>
         ipcRenderer.invoke('lsp:c:implementation', uri, line, character),
+      documentHighlight: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:c:documentHighlight', uri, line, character),
+      prepareRename: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:c:prepareRename', uri, line, character),
+      codeLens: (uri: string) => ipcRenderer.invoke('lsp:c:codeLens', uri),
+      codeLensResolve: (item: unknown) => ipcRenderer.invoke('lsp:c:codeLensResolve', item),
+      workspaceSymbol: (query: string) => ipcRenderer.invoke('lsp:c:workspaceSymbol', query),
+      semanticTokens: (uri: string) => ipcRenderer.invoke('lsp:c:semanticTokens', uri),
       onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => {
         const handler = (_: Electron.IpcRendererEvent, params: { uri: string; diagnostics: unknown[] }) => cb(params)
         ipcRenderer.on('lsp:c:diagnostics', handler)
