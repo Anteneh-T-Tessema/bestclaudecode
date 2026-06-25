@@ -703,6 +703,18 @@ export function ChatInput() {
     return () => window.removeEventListener('lakoora:chat:regenerate', handler)
   }, [send])
 
+  // Click-to-edit: pre-fills the input from an InspectResultCard click.
+  // Deliberately does NOT auto-send — user reviews before hitting Enter.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { content } = (e as CustomEvent<{ content: string }>).detail
+      setText(content)
+      textareaRef.current?.focus()
+    }
+    window.addEventListener('lakoora:chat:prefill', handler)
+    return () => window.removeEventListener('lakoora:chat:prefill', handler)
+  }, [])
+
   const abort = () => {
     if (activeStreamId) {
       window.api.ai.abortStream(activeStreamId)

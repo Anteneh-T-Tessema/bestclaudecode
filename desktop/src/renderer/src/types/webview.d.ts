@@ -5,9 +5,19 @@
 // just the subset LivePreview.tsx calls, used via a cast on the element ref
 // rather than as the ref's declared type (which stays HTMLWebViewElement to
 // satisfy the JSX `ref` prop).
+export interface ConsoleMessageEvent extends Event {
+  message: string
+  level: number
+  line: number
+  sourceId: string
+}
+
 export interface WebviewElement {
   reload(): void
   loadURL(url: string): Promise<void>
+  executeJavaScript(code: string, userGesture?: boolean): Promise<unknown>
   addEventListener(type: 'did-start-loading' | 'did-stop-loading' | 'did-fail-load', listener: (event: Event) => void): void
+  addEventListener(type: 'console-message', listener: (event: ConsoleMessageEvent) => void): void
   removeEventListener(type: 'did-start-loading' | 'did-stop-loading' | 'did-fail-load', listener: (event: Event) => void): void
+  removeEventListener(type: 'console-message', listener: (event: ConsoleMessageEvent) => void): void
 }

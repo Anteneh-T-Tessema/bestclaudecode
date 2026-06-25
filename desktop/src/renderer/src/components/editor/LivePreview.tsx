@@ -1,8 +1,9 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { RotateCw, Globe, AlertCircle } from 'lucide-react'
+import { RotateCw, Globe, AlertCircle, MousePointerClick } from 'lucide-react'
 import { surface, border, fg, accent } from '../../design'
 import { useSettingsStore } from '../../store/useSettingsStore'
-import type { WebviewElement } from '../../types/webview'
+import type { WebviewElement, ConsoleMessageEvent } from '../../types/webview'
+import { InspectResultCard } from './InspectResultCard'
 
 // HTMLWebViewElement (declared by @types/react) is an empty marker interface —
 // cast through it to access the actual Electron webview methods/events.
@@ -11,6 +12,63 @@ function asWebviewElement(el: HTMLWebViewElement | null): WebviewElement | null 
 }
 
 const DEFAULT_URL = 'http://localhost:3000'
+
+const CLICK_PREFIX = '__LAKOORA_CLICK__'
+
+// Injected into the webview when inspect mode is on. Uses console.log as the
+// guest→host channel (Electron webview console-message event).
+const INSPECTOR_SCRIPT = `
+(function() {
+  if (window.__lakooraInspect) {
+    window.__lakooraInspect.targets.forEach(function(el) {
+      el.removeEventListener('mouseenter', window.__lakooraInspect.onEnter);
+      el.removeEventListener('mouseleave', window.__lakooraInspect.onLeave);
+      el.removeEventListener('click', window.__lakooraInspect.onClick, true);
+    });
+  }
+  var lastHovered = null;
+  var allEls = Array.from(document.querySelectorAll('*'));
+  function onEnter(e) { e.target.style.outline = '2px solid #7c3aed'; lastHovered = e.target; }
+  function onLeave(e) { e.target.style.outline = ''; }
+  function onClick(e) {
+    e.preventDefault(); e.stopPropagation();
+    var el = e.target;
+    var info = {
+      tagName: el.tagName.toLowerCase(),
+      className: (el.className || ''),
+      id: el.id || '',
+      textContent: (el.textContent || '').trim().slice(0, 200)
+    };
+    console.log('${CLICK_PREFIX}' + JSON.stringify(info));
+  }
+  allEls.forEach(function(el) {
+    el.addEventListener('mouseenter', onEnter);
+    el.addEventListener('mouseleave', onLeave);
+    el.addEventListener('click', onClick, true);
+  });
+  window.__lakooraInspect = { targets: allEls, onEnter: onEnter, onLeave: onLeave, onClick: onClick };
+})();
+`
+
+const CLEANUP_SCRIPT = `
+(function() {
+  if (!window.__lakooraInspect) return;
+  window.__lakooraInspect.targets.forEach(function(el) {
+    el.style.outline = '';
+    el.removeEventListener('mouseenter', window.__lakooraInspect.onEnter);
+    el.removeEventListener('mouseleave', window.__lakooraInspect.onLeave);
+    el.removeEventListener('click', window.__lakooraInspect.onClick, true);
+  });
+  window.__lakooraInspect = null;
+})();
+`
+
+interface InspectedElement {
+  tagName: string
+  className: string
+  id: string
+  textContent: string
+}
 
 // Gap 139 — embeds the user's own running dev server next to the editor,
 // Lovable/Emergent-style. Uses Electron's <webview> tag (isolated process,
@@ -29,6 +87,8 @@ export function LivePreview() {
   const [activeUrl, setActiveUrl] = useState(storedUrl || DEFAULT_URL)
   const [loading, setLoading] = useState(false)
   const [failed, setFailed] = useState(false)
+  const [inspectMode, setInspectMode] = useState(false)
+  const [inspectedElement, setInspectedElement] = useState<InspectedElement | null>(null)
   const webviewRef = useRef<HTMLWebViewElement | null>(null)
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
   const isElectron = typeof window !== 'undefined' && window.isElectron === true
@@ -61,6 +121,22 @@ export function LivePreview() {
     else if (iframeRef.current) iframeRef.current.src = activeUrl
   }, [isElectron, activeUrl])
 
+  // Mount-once: register the console-message listener for click results.
+  useEffect(() => {
+    const webview = asWebviewElement(webviewRef.current)
+    if (!isElectron || !webview) return
+    const onConsole = (e: ConsoleMessageEvent) => {
+      if (!e.message.startsWith(CLICK_PREFIX)) return
+      try {
+        const info = JSON.parse(e.message.slice(CLICK_PREFIX.length)) as InspectedElement
+        setInspectedElement(info)
+        setInspectMode(false)
+      } catch { /* ignore malformed message */ }
+    }
+    webview.addEventListener('console-message', onConsole)
+    return () => webview.removeEventListener('console-message', onConsole)
+  }, [isElectron])
+
   useEffect(() => {
     const webview = asWebviewElement(webviewRef.current)
     if (!isElectron || !webview) return
@@ -76,6 +152,17 @@ export function LivePreview() {
       webview.removeEventListener('did-fail-load', onFail)
     }
   }, [isElectron])
+
+  // Inject/remove inspector script when inspectMode changes.
+  useEffect(() => {
+    const webview = asWebviewElement(webviewRef.current)
+    if (!isElectron || !webview) return
+    if (inspectMode) {
+      webview.executeJavaScript(INSPECTOR_SCRIPT, true).catch(() => {})
+    } else {
+      webview.executeJavaScript(CLEANUP_SCRIPT, true).catch(() => {})
+    }
+  }, [inspectMode, isElectron])
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -95,6 +182,22 @@ export function LivePreview() {
             padding: '3px 7px', fontSize: 11, color: fg[0], outline: 'none', fontFamily: 'monospace',
           }}
         />
+        {isElectron && (
+          <button
+            type="button"
+            onClick={() => { setInspectMode((m) => !m); setInspectedElement(null) }}
+            title={inspectMode ? 'Exit inspect mode' : 'Inspect element (click to edit)'}
+            style={{
+              background: inspectMode ? accent.violet.subtle : 'none',
+              border: `1px solid ${inspectMode ? accent.violet.border : 'transparent'}`,
+              borderRadius: 4, cursor: 'pointer',
+              color: inspectMode ? accent.violet.fg : fg[3],
+              display: 'flex', padding: 3,
+            }}
+          >
+            <MousePointerClick size={13} />
+          </button>
+        )}
         <button
           type="button"
           onClick={refresh}
@@ -104,6 +207,13 @@ export function LivePreview() {
           <RotateCw size={13} />
         </button>
       </div>
+
+      {inspectedElement && (
+        <InspectResultCard
+          element={inspectedElement}
+          onDismiss={() => setInspectedElement(null)}
+        />
+      )}
 
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden', background: '#fff' }}>
         {isElectron ? (
