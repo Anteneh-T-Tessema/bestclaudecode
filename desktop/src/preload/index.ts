@@ -142,6 +142,8 @@ const api = {
     listOllamaModels: () => ipcRenderer.invoke('ai:listOllamaModels') as Promise<string[]>,
     complete: (opts: { prefix: string; suffix: string; language: string; model: string }) =>
       ipcRenderer.invoke('ai:complete', opts) as Promise<string | null>,
+    predictNextEdit: (opts: { filePath: string; fullContent: string; cursorLine: number; cursorColumn: number; acceptedText: string; model: string }) =>
+      ipcRenderer.invoke('ai:predictNextEdit', opts) as Promise<{ line: number; column: number; insertText: string } | null>,
     buildContext: (opts: { query: string }) =>
       ipcRenderer.invoke('ai:buildContext', opts) as Promise<{ cached: boolean; count?: number }>,
     exportChat: (opts: { markdown: string; defaultFilename: string }) =>

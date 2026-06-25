@@ -568,6 +568,39 @@ Completion (text only, no preamble):`
     }
   })
 
+  ipcMain.handle('ai:predictNextEdit', async (_event, opts: {
+    filePath: string; fullContent: string; cursorLine: number; cursorColumn: number; acceptedText: string; model: string
+  }): Promise<{ line: number; column: number; insertText: string } | null> => {
+    const { filePath, fullContent, cursorLine, cursorColumn, acceptedText, model } = opts
+    const prompt = `The user just accepted the completion "${acceptedText}" at line ${cursorLine}, column ${cursorColumn} of ${filePath}.
+
+Given the full file content below, predict the NEXT edit location and text (e.g. a matching closing tag, a paired variable, the next argument in a call).
+
+Respond ONLY with valid JSON: {"line": <number>, "column": <number>, "insertText": "<text>"} or {} if no obvious next edit.
+
+File content:
+${fullContent.slice(0, 8000)}`
+
+    try {
+      if (model.startsWith('claude')) {
+        const { default: Anthropic } = await import('@anthropic-ai/sdk')
+        const apiKey = getSecret('anthropicApiKey')
+        if (!apiKey) return null
+        const client = new Anthropic({ apiKey })
+        const msg = await client.messages.create({
+          model, max_tokens: 80, temperature: 0,
+          messages: [{ role: 'user', content: prompt }],
+        })
+        const block = msg.content[0]
+        if (block?.type !== 'text') return null
+        const parsed = JSON.parse(block.text.trim()) as Record<string, unknown>
+        if (typeof parsed.line !== 'number' || typeof parsed.column !== 'number' || typeof parsed.insertText !== 'string') return null
+        return { line: parsed.line, column: parsed.column, insertText: parsed.insertText }
+      }
+    } catch { /* fall through */ }
+    return null
+  })
+
   // Runs hybrid search and caches snippets per-window for the 30s TTL.
   // Called when a file opens; completion reads from cache without subprocess overhead.
   ipcMain.handle('ai:buildContext', async (event, opts: { query: string }) => {

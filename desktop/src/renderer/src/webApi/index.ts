@@ -97,6 +97,7 @@ export function createWebApi(): API {
       abortStream: (id) => socket.invoke('ai:abortStream', id),
       listOllamaModels: () => socket.invoke('ai:listOllamaModels'),
       complete: (opts) => socket.invoke('ai:complete', opts),
+      predictNextEdit: () => Promise.resolve(null),
       onChunk: (streamId, cb) => socket.on('ai:chunk', (payload) => {
         const data = payload as { streamId: string; delta: string }
         if (data.streamId === streamId) cb(data.delta)

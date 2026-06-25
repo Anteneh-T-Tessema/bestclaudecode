@@ -145,6 +145,7 @@ function injectDiffStyles() {
     '.lakoora-diff-added    { margin-left: 2px; width: 3px !important; background: rgba(35,134,54,0.6); }',
     '.lakoora-diff-modified { margin-left: 2px; width: 3px !important; background: rgba(194,145,0,0.85); }',
     '.lakoora-diff-deleted  { margin-left: 2px; width: 3px !important; background: rgba(248,81,73,0.85); }',
+    '.lakoora-next-edit-ghost { opacity: 0.45; font-style: italic; color: hsl(258 68% 70%); }',
   ].join('\n')
   document.head.appendChild(el)
 }
@@ -334,6 +335,21 @@ function registerInlineCompletionProvider(monaco: Monaco): void {
           }
         } catch {
           return { items: [] }
+        }
+      },
+      // Gap 126: called when Monaco is about to show this completion to the user.
+      // We stash enough info to detect acceptance via onDidChangeModelContent.
+      handleItemDidShow(_completions, item) {
+        const it = item.insertText
+        const text = typeof it === 'string' ? it : (it as { snippet?: string }).snippet ?? ''
+        if (!text) return
+        const range = item.range && 'startLineNumber' in item.range ? item.range : null
+        if (!range) return
+        const editor = monaco.editor.getEditors()[0]
+        if (!editor) return
+        const setter = (editor as unknown as Record<string, unknown>).__lakooraSetLastShown
+        if (typeof setter === 'function') {
+          setter({ insertText: text, lineNumber: range.startLineNumber, column: range.startColumn })
         }
       },
       freeInlineCompletions() {},
@@ -951,6 +967,7 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
   const gitDecorationsRef = useRef<MonacoNS.editor.IEditorDecorationsCollection | null>(null)
   const breakpointDecorationsRef = useRef<MonacoNS.editor.IEditorDecorationsCollection | null>(null)
   const diffDecorationsRef = useRef<MonacoNS.editor.IEditorDecorationsCollection | null>(null)
+  const nextEditDecorationRef = useRef<MonacoNS.editor.IEditorDecorationsCollection | null>(null)
   const lspChangeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const activeLsp = tab?.language ? resolveLsp(tab.language) : null
   const theme = useSettingsStore((s) => s.theme)
@@ -971,6 +988,7 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
       gitDecorationsRef.current = editor.createDecorationsCollection([])
       breakpointDecorationsRef.current = editor.createDecorationsCollection([])
       diffDecorationsRef.current = editor.createDecorationsCollection([])
+      nextEditDecorationRef.current = editor.createDecorationsCollection([])
 
       // Breakpoint gutter — click in the glyph margin to toggle a breakpoint.
       // Monaco fires onMouseDown with type GUTTER_GLYPH_MARGIN for this zone.
@@ -1065,6 +1083,90 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyG, () => {
         openGoToLine()
       })
+
+      // Gap 126 — next-edit prediction (Tab-Tab). Uses onDidChangeModelContent
+      // heuristic: when the content change matches the last shown inline completion,
+      // fire a prediction call and render the result as a ghost decoration.
+      type LastShown = { insertText: string; lineNumber: number; column: number } | null
+      let lastShownCompletion: LastShown = null
+      let nextEditPrediction: { line: number; column: number; insertText: string } | null = null
+      const nextEditContextKey = editor.createContextKey<boolean>('lakooraNextEditActive', false)
+
+      // Intercept the inline completion provider to capture handleItemDidShow.
+      // We need to re-register after the initial provider to add the hook.
+      const nextEditModel = editor.getModel()
+      if (nextEditModel) {
+        editor.onDidChangeModelContent((e) => {
+          if (!lastShownCompletion) return
+          const change = e.changes[0]
+          if (!change) return
+          if (change.text === lastShownCompletion.insertText &&
+              change.range.startLineNumber === lastShownCompletion.lineNumber) {
+            const currentModel = editor.getModel()
+            if (!currentModel) return
+            const filePath = tab?.filePath ?? ''
+            const fullContent = currentModel.getValue()
+            const cursorPos = editor.getPosition()
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const { useChatStore: CS } = require('../../store/useChatStore') as typeof import('../../store/useChatStore')
+            const activeModel: string = (CS.getState() as { activeModel: string }).activeModel ?? 'claude-sonnet-4-6'
+            void window.api.ai.predictNextEdit({
+              filePath, fullContent,
+              cursorLine: cursorPos?.lineNumber ?? lastShownCompletion.lineNumber,
+              cursorColumn: cursorPos?.column ?? lastShownCompletion.column,
+              acceptedText: lastShownCompletion.insertText,
+              model: activeModel,
+            }).then((prediction) => {
+              if (!prediction || !nextEditDecorationRef.current) return
+              nextEditPrediction = prediction
+              nextEditDecorationRef.current.set([{
+                range: new monaco.Range(prediction.line, prediction.column, prediction.line, prediction.column),
+                options: {
+                  after: {
+                    content: prediction.insertText,
+                    inlineClassName: 'lakoora-next-edit-ghost',
+                  },
+                },
+              }])
+              nextEditContextKey.set(true)
+            }).catch(() => {})
+            lastShownCompletion = null
+          }
+        })
+
+        // Dismiss on cursor move
+        editor.onDidChangeCursorPosition(() => {
+          if (nextEditPrediction && nextEditDecorationRef.current) {
+            nextEditDecorationRef.current.clear()
+            nextEditPrediction = null
+            nextEditContextKey.set(false)
+          }
+        })
+
+        // Tab keybinding — only fires when lakooraNextEditActive is true
+        editor.addCommand(
+          monaco.KeyCode.Tab,
+          () => {
+            if (!nextEditPrediction) return
+            const pos = new monaco.Position(nextEditPrediction.line, nextEditPrediction.column)
+            editor.setPosition(pos)
+            editor.executeEdits('lakoora-next-edit', [{
+              range: new monaco.Range(pos.lineNumber, pos.column, pos.lineNumber, pos.column),
+              text: nextEditPrediction.insertText,
+            }])
+            nextEditDecorationRef.current?.clear()
+            nextEditPrediction = null
+            nextEditContextKey.set(false)
+          },
+          'lakooraNextEditActive',
+        )
+      }
+
+      // Expose lastShownCompletion setter so the inline completion provider
+      // (module-level, can't close over per-mount state) can update it via
+      // a side-channel stored on the editor instance.
+      ;(editor as unknown as Record<string, unknown>).__lakooraSetLastShown =
+        (item: LastShown) => { lastShownCompletion = item }
     },
     [tabId, tab, activeLsp, updateContent, markSaved, setCursor, setEditorSelection, openInlineEdit, openGoToLine, setProblems]
   )
