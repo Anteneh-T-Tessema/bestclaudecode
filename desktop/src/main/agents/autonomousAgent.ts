@@ -41,6 +41,7 @@ export interface AgentProgress {
     | 'running' | 'done' | 'retrying' | 'blocked' | 'finished' | 'error'
     | 'preparing' | 'finalizing' | 'pr-opened' | 'push-failed-kept-locally'
     | 'deploying' | 'deployed' | 'pending-approval' | 'approval-rejected'
+    | 'edit-applied' | 'run-executed' | 'browse-executed'
   output?: string
   error?: string
   doneCount: number
@@ -55,6 +56,12 @@ export interface AgentProgress {
   retryCount?: number
   /** Gap 142 — retry budget for the current subtask. Set alongside retryCount. */
   maxRetries?: number
+  /** Gap 138 — path edited, set on 'edit-applied'. */
+  editPath?: string
+  /** Gap 138 — command executed, set on 'run-executed'. */
+  runCommand?: string
+  /** Gap 138 — URL browsed, set on 'browse-executed'. */
+  browseUrl?: string
 }
 
 interface Subtask {
@@ -442,6 +449,21 @@ async function writeVerificationReport(opts: {
         return `- ${e.subtaskDescription}`
       }).join('\n'))
   lines.push('')
+  lines.push('## Actions taken')
+  lines.push('')
+  const editsApplied = events.filter((e) => e.status === 'edit-applied')
+  const runsExecuted = events.filter((e) => e.status === 'run-executed')
+  const browsesExecuted = events.filter((e) => e.status === 'browse-executed')
+  if (editsApplied.length === 0 && runsExecuted.length === 0 && browsesExecuted.length === 0) {
+    lines.push('No actions recorded.')
+  } else {
+    for (const e of editsApplied) lines.push(`- [${e.subtaskId}] Edited \`${e.editPath}\``)
+    for (const e of runsExecuted) lines.push(`- [${e.subtaskId}] Ran: \`${e.runCommand}\``)
+    for (const e of browsesExecuted) lines.push(`- [${e.subtaskId}] Browsed: ${e.browseUrl}`)
+    lines.push('')
+    lines.push('_File-level diffs available via "View diff" in Agent panel — this list shows paths only._')
+  }
+  lines.push('')
   lines.push('## Pull Request')
   lines.push('')
   lines.push(prUrl ?? 'No PR opened.')
@@ -745,7 +767,10 @@ export async function startAutonomousSession(opts: {
             editError = `Edit blocked by policy: ${edit.path} matches blocked path pattern "${pathViolation.pattern}"`
             break
           }
-          try { await applyEdit(edit, activePath) }
+          try {
+            await applyEdit(edit, activePath)
+            broadcast({ sessionId, planFile, subtaskId: subtask.id, subtaskDescription: subtask.description, status: 'edit-applied', editPath: edit.path, doneCount, totalCount })
+          }
           catch (err) { editError = `Edit failed for ${edit.path}: ${err}`; break }
         }
 
@@ -816,6 +841,7 @@ export async function startAutonomousSession(opts: {
               runError = `Command failed (exit ${result.exitCode}): ${run.command}\n${failDetail}`
               break
             }
+            broadcast({ sessionId, planFile, subtaskId: subtask.id, subtaskDescription: subtask.description, status: 'run-executed', runCommand: run.command, doneCount, totalCount })
           } catch (err) {
             runError = `Command error: ${err}`
             break
@@ -841,6 +867,7 @@ export async function startAutonomousSession(opts: {
             browseError = `Browse failed for ${browse.url}: ${result}`
             break
           }
+          broadcast({ sessionId, planFile, subtaskId: subtask.id, subtaskDescription: subtask.description, status: 'browse-executed', browseUrl: browse.url, doneCount, totalCount })
         }
 
         if (browseError) {
