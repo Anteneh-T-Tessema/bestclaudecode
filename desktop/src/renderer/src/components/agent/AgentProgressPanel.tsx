@@ -116,7 +116,8 @@ function EventRow({ e }: { e: EventEntry }) {
 
 export function AgentProgressPanel() {
   const [events, setEvents] = useState<EventEntry[]>([])
-  const [isRunning, setIsRunning] = useState(false)
+  const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(new Set())
+  const isRunning = runningSessionIds.size > 0
   const [goal, setGoal] = useState('')
   const [launching, setLaunching] = useState(false)
   const activeModel = useChatStore((s) => s.activeModel)
@@ -186,6 +187,13 @@ export function AgentProgressPanel() {
     else toast.error('PDF export failed — try HTML export first')
   }, [selectedSession])
 
+  const exportComplianceJson = useCallback(async () => {
+    if (!selectedSession) return
+    const jsonPath = await window.api.agent.getComplianceJson(selectedSession)
+    if (jsonPath) toast.success(`JSON report written to ${jsonPath}`)
+    else toast.error('No events found for this session')
+  }, [selectedSession])
+
   // Gap 59 — subtask dependency graph for whichever event stream is active.
   const activeEvents = mode === 'live' ? events : historyEvents
   const planFile = activeEvents.length > 0 ? activeEvents[activeEvents.length - 1].planFile : ''
@@ -214,11 +222,13 @@ export function AgentProgressPanel() {
       setEvents((prev) => [...prev.slice(-99), { ...p, ts: Date.now() }])
       const activeStatuses: AgentProgress['status'][] = ['running', 'retrying', 'preparing', 'finalizing', 'deploying', 'pending-approval']
       const terminalStatuses: AgentProgress['status'][] = ['finished', 'blocked', 'error', 'pr-opened', 'push-failed-kept-locally', 'deployed', 'approval-rejected']
-      if (activeStatuses.includes(p.status)) setIsRunning(true)
+      if (activeStatuses.includes(p.status)) {
+        setRunningSessionIds((prev) => new Set([...prev, p.sessionId]))
+      }
       if (p.status === 'pending-approval') toast.error(`Approval needed: ${p.error ?? ''}`)
       if (terminalStatuses.includes(p.status)) {
-        setIsRunning(false)
-        if (p.status === 'finished' || p.status === 'deployed') toast.success('Background agent finished all subtasks')
+        setRunningSessionIds((prev) => { const s = new Set(prev); s.delete(p.sessionId); return s })
+        if (p.status === 'finished' || p.status === 'deployed') toast.success(`Agent session finished`)
         if (p.status === 'pr-opened') toast.success(`PR opened: ${p.prUrl ?? ''}`)
         if (p.status === 'push-failed-kept-locally') toast.error('Push failed — branch kept locally')
         if (p.status === 'error') toast.error(`Agent error: ${p.error ?? 'unknown'}`)
@@ -226,16 +236,17 @@ export function AgentProgressPanel() {
       }
     })
 
-    window.api.agent.getActiveSession().then((id) => setIsRunning(!!id))
+    window.api.agent.getActiveSessions().then((ids) => setRunningSessionIds(new Set(ids)))
 
     return off
   }, [])
 
   const stop = useCallback(async () => {
-    await window.api.agent.stopAutonomous()
-    setIsRunning(false)
-    toast.success('Agent stopped')
-  }, [])
+    const ids = [...runningSessionIds]
+    await Promise.all(ids.map((id) => window.api.agent.stopAutonomous(id)))
+    setRunningSessionIds(new Set())
+    toast.success(ids.length > 1 ? `Stopped ${ids.length} agent sessions` : 'Agent stopped')
+  }, [runningSessionIds])
 
   const clear = useCallback(() => setEvents([]), [])
 
@@ -331,9 +342,9 @@ export function AgentProgressPanel() {
       const plans = await window.api.taskPlanner.list()
       const summary = plans.find((p) => p.slug === detail.slug)
       if (!summary?.path) { toast.error('Could not locate plan file'); return }
-      await window.api.agent.startAutonomous({ planFile: summary.path, model: activeModel })
+      const sessionId = await window.api.agent.startAutonomous({ planFile: summary.path, model: activeModel })
       setGoal('')
-      setIsRunning(true)
+      if (sessionId) setRunningSessionIds((prev) => new Set([...prev, sessionId]))
       toast.success('Background agent started')
     } catch (err) {
       toast.error(`Launch failed: ${(err as Error).message}`)
@@ -513,6 +524,18 @@ export function AgentProgressPanel() {
                   }}
                 >
                   <Rocket size={10} /> Export PDF
+                </button>
+                <button
+                  type="button"
+                  onClick={exportComplianceJson}
+                  title="Export machine-readable compliance JSON report"
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 4,
+                    fontSize: 10, fontWeight: 700, padding: '4px 8px', borderRadius: 5,
+                    background: 'transparent', border: `1px solid ${border[1]}`, color: fg[3], cursor: 'pointer',
+                  }}
+                >
+                  <Rocket size={10} /> Export JSON
                 </button>
                 {verifyResult && (
                   <span style={{

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type ActivityId = 'files' | 'git' | 'chat' | 'search' | 'memory' | 'codesearch' | 'tasks' | 'audit' | 'archdoc' | 'agent' | 'debug' | 'outline' | 'notepads' | 'usage' | 'map' | 'github' | 'env' | 'settings'
+export type ActivityId = 'files' | 'git' | 'chat' | 'search' | 'memory' | 'codesearch' | 'tasks' | 'audit' | 'archdoc' | 'agent' | 'swarm' | 'debug' | 'outline' | 'notepads' | 'usage' | 'map' | 'github' | 'env' | 'wizard' | 'monitor' | 'ideation' | 'settings'
 export type ActiveView = 'welcome' | 'editor'
 export type BottomPanelTab = 'terminal' | 'problems'
 

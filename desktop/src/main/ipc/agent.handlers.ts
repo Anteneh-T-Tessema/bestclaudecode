@@ -1,12 +1,15 @@
 import { ipcMain } from 'electron'
 import * as os from 'os'
 import {
-  startAutonomousSession, stopAutonomousSession, getActiveSession,
+  startAutonomousSession, stopAutonomousSession, getActiveSessions,
   replaySession, resolveApproval, getSessionDiff, exportReportHtml, exportReportPdf,
   runTestFixLoop,
 } from '../agents/autonomousAgent'
+import { mergeBranch } from '../gitOps'
+import { store } from '../store'
+import { repoRoot } from '../paths'
 import {
-  readEvents, listSessions, verifyEventLog, computeComplianceSummary,
+  readEvents, listSessions, verifyEventLog, computeComplianceSummary, writeComplianceJson,
   type SessionSummary, type VerifyResult, type ComplianceSummary,
 } from '../agentEventLog'
 
@@ -23,12 +26,12 @@ export function registerAgentHandlers(): void {
     },
   )
 
-  ipcMain.handle('agent:stopAutonomous', (): void => {
-    stopAutonomousSession()
+  ipcMain.handle('agent:stopAutonomous', (_event, sessionId: string): boolean => {
+    return stopAutonomousSession(sessionId)
   })
 
-  ipcMain.handle('agent:getActiveSession', (): string | null => {
-    return getActiveSession()
+  ipcMain.handle('agent:getActiveSessions', (): string[] => {
+    return getActiveSessions()
   })
 
   ipcMain.handle('agent:runTestFixLoop', async (_event, opts: { command: string; model: string }): Promise<string | null> => {
@@ -84,4 +87,16 @@ export function registerAgentHandlers(): void {
   ipcMain.handle('agent:exportReportPdf', async (_event, sessionId: string): Promise<string | null> => {
     return await exportReportPdf(sessionId)
   })
+
+  ipcMain.handle('agent:getComplianceJson', (_event, sessionId: string): string | null => {
+    return writeComplianceJson(sessionId)
+  })
+
+  ipcMain.handle(
+    'agent:mergeSession',
+    async (_event, branch: string): Promise<{ success: boolean; conflicts: string[]; error?: string }> => {
+      const projectPath = (store.get('projectPath') as string | undefined) ?? repoRoot()
+      return mergeBranch(projectPath, branch)
+    },
+  )
 }

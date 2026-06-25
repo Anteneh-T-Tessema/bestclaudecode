@@ -15,13 +15,15 @@ describe('loadPolicy', () => {
     fs.rmSync(projectPath, { recursive: true, force: true })
   })
 
+  const EMPTY_EXTRA = { require_type_check: false, max_edit_lines: undefined, approval_timeout_minutes: undefined, auto_review_paths: [] }
+
   it('returns an empty no-op policy when no policy file exists', () => {
-    expect(loadPolicy(projectPath)).toEqual({ block_commands: [], block_paths: [], require_approval_for: [], max_retries: 3 })
+    expect(loadPolicy(projectPath)).toEqual({ block_commands: [], block_paths: [], require_approval_for: [], max_retries: 3, ...EMPTY_EXTRA })
   })
 
   it('returns an empty no-op policy when the file is invalid JSON', () => {
     fs.writeFileSync(path.join(projectPath, '.lakoorapolicies.json'), '{ not valid json')
-    expect(loadPolicy(projectPath)).toEqual({ block_commands: [], block_paths: [], require_approval_for: [], max_retries: 3 })
+    expect(loadPolicy(projectPath)).toEqual({ block_commands: [], block_paths: [], require_approval_for: [], max_retries: 3, ...EMPTY_EXTRA })
   })
 
   it('parses a well-formed policy file', () => {
@@ -34,6 +36,7 @@ describe('loadPolicy', () => {
       block_paths: ['.env', '*.pem'],
       require_approval_for: ['deploy'],
       max_retries: 5,
+      ...EMPTY_EXTRA,
     })
   })
 
@@ -42,7 +45,7 @@ describe('loadPolicy', () => {
       path.join(projectPath, '.lakoorapolicies.json'),
       JSON.stringify({ block_commands: ['ok', 42, null], block_paths: 'not-an-array' }),
     )
-    expect(loadPolicy(projectPath)).toEqual({ block_commands: ['ok'], block_paths: [], require_approval_for: [], max_retries: 3 })
+    expect(loadPolicy(projectPath)).toEqual({ block_commands: ['ok'], block_paths: [], require_approval_for: [], max_retries: 3, ...EMPTY_EXTRA })
   })
 
   it('falls back to the default when max_retries is invalid', () => {

@@ -26,7 +26,11 @@ import { queryAgentMemory } from '../agentMemory'
 import { resolveModel } from '../modelRouter'
 import { createWorktree, commitAll, push, createPr, removeWorktree, runGit } from '../gitOps'
 import { appendEvent, readEvents } from '../agentEventLog'
-import { loadPolicy, checkCommand, checkPath, checkApproval } from '../policyEngine'
+import { setHandoff } from '../agentHandoffStore'
+import { publish } from '../sessionRelay'
+import { sendNotification } from '../ipc/notifications.handlers'
+import { loadPolicy, checkCommand, checkPath, checkApproval, globToRegex } from '../policyEngine'
+import { validateGeneratedTs } from '../codeValidator'
 import { detectDeployCommand, runDeploy } from '../deploy'
 import * as path from 'path'
 
@@ -42,6 +46,7 @@ export interface AgentProgress {
     | 'preparing' | 'finalizing' | 'pr-opened' | 'push-failed-kept-locally'
     | 'deploying' | 'deployed' | 'pending-approval' | 'approval-rejected'
     | 'edit-applied' | 'run-executed' | 'browse-executed'
+    | 'stealing' | 'spawned-child'
   output?: string
   error?: string
   doneCount: number
@@ -62,6 +67,12 @@ export interface AgentProgress {
   runCommand?: string
   /** Gap 138 — URL browsed, set on 'browse-executed'. */
   browseUrl?: string
+  /** Swarm — role of the agent handling this subtask (frontend/backend/security/test/docs). */
+  role?: string
+  /** Governance — role of the approver (from .lakooraapprovers.json). */
+  approverRole?: string
+  /** Swarm — set on a child session's earliest events if it was spawned by another session. */
+  parentSessionId?: string
 }
 
 interface Subtask {
@@ -69,6 +80,7 @@ interface Subtask {
   description: string
   depends_on: string[]
   done: boolean
+  role?: string
 }
 
 interface TaskPlanDetail {
@@ -96,6 +108,8 @@ interface BrowseBlock {
 const EDIT_RE = /<<<EDIT ([^\n>]+)>>>\n([\s\S]*?)\n<<<END_EDIT>>>/g
 const RUN_RE = /<<<RUN>>>\n([\s\S]*?)\n<<<END_RUN>>>/g
 const BROWSE_RE = /<<<BROWSE ([^\n>]+)>>>\n([\s\S]*?)\n<<<END_BROWSE>>>/g
+const HANDOFF_RE = /<<<HANDOFF key="([^"]+)">>>\n([\s\S]*?)\n<<<END_HANDOFF>>>/g
+const SPAWN_RE = /<<<SPAWN goal="([^"]+)">>>\n([\s\S]*?)\n<<<END_SPAWN>>>/g
 
 function parseEdits(text: string): EditBlock[] {
   return [...text.matchAll(EDIT_RE)].map((m) => ({ path: m[1].trim(), content: m[2] }))
@@ -107,6 +121,10 @@ function parseRuns(text: string): RunBlock[] {
 
 function parseBrowses(text: string): BrowseBlock[] {
   return [...text.matchAll(BROWSE_RE)].map((m) => ({ url: m[1].trim(), task: m[2].trim() }))
+}
+
+function parseSpawns(text: string): Array<{ goal: string; context: string }> {
+  return [...text.matchAll(SPAWN_RE)].map((m) => ({ goal: m[1].trim(), context: m[2].trim() }))
 }
 
 // ── Safety blocklist (same as MAIN_BLOCKED in settings.handlers.ts) ──────────
@@ -124,7 +142,47 @@ function isBlocked(cmd: string): boolean {
 
 // ── Active session registry ───────────────────────────────────────────────────
 
-let activeSession: { sessionId: string; abort: () => void } | null = null
+const MAX_CONCURRENT_SESSIONS = 3
+const activeSessions = new Map<string, {
+  sessionId: string
+  abort: () => void
+  planFile: string
+  /** Worktree (or live projectPath fallback) this session's edits land in — set once isolation is set up, used by work-stealing to apply stolen edits to the *owning* session's tree. */
+  worktreePath: string
+  branch: string
+}>()
+
+// ── Swarm: cross-session subtask claims + per-plan-file write lock ───────────
+// Work-stealing lets an idle session execute a pending subtask that belongs to
+// another active session's plan. Both the owning session's own loop and any
+// helper stealing from it pick subtasks from the same persisted plan file, so
+// a shared claim set prevents the two from ever picking the same subtask id,
+// and a per-plan-file lock serializes their `--done` writes (the Python CLI
+// does a read-modify-write over the whole plan.json — without the lock, two
+// concurrent markDone calls for *different* subtask ids in the *same* plan
+// could race and silently drop one of them).
+
+const claimedSubtasks = new Set<string>() // `${planFile}::${subtaskId}`
+
+function tryClaimSubtask(planFile: string, subtaskId: string): boolean {
+  const key = `${planFile}::${subtaskId}`
+  if (claimedSubtasks.has(key)) return false
+  claimedSubtasks.add(key)
+  return true
+}
+
+function releaseSubtaskClaim(planFile: string, subtaskId: string): void {
+  claimedSubtasks.delete(`${planFile}::${subtaskId}`)
+}
+
+const planFileLocks = new Map<string, Promise<unknown>>()
+
+function withPlanLock<T>(planFile: string, fn: () => Promise<T>): Promise<T> {
+  const prior = planFileLocks.get(planFile) ?? Promise.resolve()
+  const next = prior.then(fn, fn)
+  planFileLocks.set(planFile, next.catch(() => undefined))
+  return next
+}
 
 // ── Governance approval gate (Gap 57) ─────────────────────────────────────────
 // Only one agent session runs at a time, so a single module-level slot (rather
@@ -138,10 +196,30 @@ interface ApprovalResult {
 
 let pendingApproval: { sessionId: string; resolve: (result: ApprovalResult) => void } | null = null
 
-function requestApproval(sessionId: string): Promise<ApprovalResult> {
+function requestApproval(sessionId: string, timeoutMs?: number): Promise<ApprovalResult> {
   return new Promise<ApprovalResult>((resolve) => {
     pendingApproval = { sessionId, resolve }
+    if (timeoutMs && timeoutMs > 0) {
+      setTimeout(() => {
+        if (pendingApproval?.sessionId === sessionId) {
+          pendingApproval.resolve({ approved: false, approver: 'timeout' })
+          pendingApproval = null
+        }
+      }, timeoutMs)
+    }
   })
+}
+
+/** Looks up a username in .lakooraapprovers.json at projectPath. Returns the role string or null. */
+async function lookupApproverRole(projectPath: string, username: string): Promise<string | null> {
+  try {
+    const { promises: fsp } = await import('fs')
+    const raw = await fsp.readFile(path.join(projectPath, '.lakooraapprovers.json'), 'utf-8')
+    const map = JSON.parse(raw) as Record<string, string>
+    return map[username] ?? null
+  } catch {
+    return null
+  }
 }
 
 /** Called from the IPC handler when the user clicks Approve/Reject. Returns false if there's no matching pending request. */
@@ -159,6 +237,7 @@ export function broadcast(progress: AgentProgress): void {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send('agent:progress', progress)
   }
+  publish(progress.sessionId, progress as unknown as Record<string, unknown>)
 }
 
 // ── Per-subtask repo context (Gap 28) ────────────────────────────────────────
@@ -255,7 +334,7 @@ function detectSecret(content: string): string | null {
 
 // ── AI streaming helper ───────────────────────────────────────────────────────
 
-async function streamToString(
+export async function streamToString(
   messages: Array<{ role: string; content: string }>,
   model: string,
   signal: AbortSignal,
@@ -570,6 +649,7 @@ async function finalizeSession(opts: {
 
   await writeVerificationReport({ sessionId, projectPath, plan, branch, doneCount, totalCount, prUrl })
 
+  sendNotification(`[Lakoora] Agent session ${sessionId.slice(0, 8)} finished — ${doneCount}/${totalCount} subtasks${prUrl ? `. PR: ${prUrl}` : ''}`)
   broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: '', status: 'finished', doneCount, totalCount, branch, prUrl })
 }
 
@@ -593,25 +673,238 @@ To look something up or perform an action on a live webpage use:
 description of what to do or extract on that page
 <<<END_BROWSE>>>
 
+To delegate an independent, self-contained piece of work to a brand-new autonomous
+agent session (its own plan, worktree, and branch) rather than doing it yourself, use:
+<<<SPAWN goal="short goal for the child agent">>>
+optional extra context for the child agent
+<<<END_SPAWN>>>
+Only spawn when the work is genuinely separable from your current subtask — most
+subtasks should just be implemented directly.
+
 Only one command per RUN block, one URL per BROWSE block. After your implementation, briefly summarise what you did.`
+
+// ── Swarm: role auto-classifier + role-specific system prompt preambles ──────
+
+function classifySubtaskRole(description: string): string {
+  const d = description.toLowerCase()
+  if (/test|spec|jest|vitest|pytest|coverage|assert/.test(d)) return 'test'
+  if (/security|vuln|injection|xss|auth|rbac|permission|cve/.test(d)) return 'security'
+  if (/readme|doc|comment|jsdoc|docstring|changelog/.test(d)) return 'docs'
+  if (/component|react|css|tailwind|ui|layout|style|frontend|a11y/.test(d)) return 'frontend'
+  if (/api|route|endpoint|database|schema|migration|backend|server/.test(d)) return 'backend'
+  return ''
+}
+
+const ROLE_PREAMBLES: Record<string, string> = {
+  frontend: 'You are specialised as a FRONTEND agent. Focus on React components, CSS-in-JS, accessibility, and responsive layout. Prefer small single-responsibility components. Do not change backend API contracts.',
+  backend: 'You are specialised as a BACKEND agent. Focus on API design, database schemas, error handling, and performance. Do not touch frontend components unless explicitly required.',
+  security: 'You are specialised as a SECURITY REVIEWER agent. Your role is READ-ONLY code review — do NOT produce <<<EDIT>>> blocks. Scan the codebase for injection vulnerabilities, authentication flaws, secret exposure, and insecure defaults. Report every finding as a <<<REVIEW>>> block containing a JSON array: [{\"finding\": \"description\", \"severity\": \"low|medium|high|critical\", \"line\": 0}].',
+  test: 'You are specialised as a TEST agent. Write comprehensive tests for the described functionality. Run them with <<<RUN>>> blocks to verify they pass before considering the subtask done.',
+  docs: 'You are specialised as a DOCUMENTATION agent. Update README files, docstrings, and API documentation to match the current implementation. Do not change logic or application code.',
+}
+
+// ── Swarm: dynamic task rebalancing (work stealing) ───────────────────────────
+// When a session runs out of its own pending subtasks, it looks for unclaimed
+// pending work in *other* active sessions' plans and executes one subtask of
+// theirs directly in their worktree, rather than sitting idle while siblings
+// still have a backlog. Anything that would need the owning session's retry
+// budget or governance approval is abandoned (claim released, no markDone) —
+// stealing only ever picks off the "easy" work; risky subtasks are left for
+// the owning session's own full pipeline.
+
+async function claimStealableSubtask(
+  ownSessionId: string,
+  ownPlanFile: string,
+): Promise<{
+  owningSessionId: string
+  planFile: string
+  targetPath: string
+  branch: string
+  subtask: Subtask
+  doneCount: number
+  totalCount: number
+} | null> {
+  for (const [otherSessionId, session] of activeSessions) {
+    // Skip ourselves, sessions on our own plan, and sessions still mid-setup
+    // (worktreePath is only populated once isolation finishes — see startAutonomousSession).
+    if (otherSessionId === ownSessionId || session.planFile === ownPlanFile || !session.worktreePath) continue
+    const plan = await loadPlan(session.planFile)
+    if (!plan) continue
+    const doneCount = plan.subtasks.filter((s) => s.done).length
+    const totalCount = plan.subtasks.length
+    for (const subtask of plan.subtasks) {
+      if (subtask.done) continue
+      const depsUnmet = subtask.depends_on.some((depId) => !plan.subtasks.find((s) => s.id === depId)?.done)
+      if (depsUnmet) continue
+      if (!tryClaimSubtask(session.planFile, subtask.id)) continue
+      return { owningSessionId: otherSessionId, planFile: session.planFile, targetPath: session.worktreePath, branch: session.branch, subtask, doneCount, totalCount }
+    }
+  }
+  return null
+}
+
+async function runStolenSubtask(opts: {
+  helperSessionId: string
+  helperPlanFile: string
+  helperBranch: string
+  helperDoneCount: number
+  helperTotalCount: number
+  owningSessionId: string
+  owningBranch: string
+  targetPlanFile: string
+  targetPath: string
+  subtask: Subtask
+  doneCount: number
+  totalCount: number
+  policy: ReturnType<typeof loadPolicy>
+  model: string
+  signal: AbortSignal
+}): Promise<void> {
+  const {
+    helperSessionId, helperPlanFile, helperBranch, helperDoneCount, helperTotalCount,
+    owningSessionId, owningBranch, targetPlanFile, targetPath, subtask, doneCount, totalCount, policy, model, signal,
+  } = opts
+
+  try {
+    broadcast({
+      sessionId: helperSessionId, planFile: helperPlanFile, subtaskId: subtask.id,
+      subtaskDescription: `Helping session ${owningSessionId.slice(0, 8)}: ${subtask.description}`,
+      status: 'stealing', doneCount: helperDoneCount, totalCount: helperTotalCount, branch: helperBranch || undefined,
+    })
+
+    const effectiveRole = subtask.role || classifySubtaskRole(subtask.description)
+    const rolePreamble = effectiveRole ? (ROLE_PREAMBLES[effectiveRole] ?? '') : ''
+    const systemPrompt = rolePreamble
+      ? `${AGENT_SYSTEM_PROMPT}\n\n# Agent Role: ${effectiveRole}\n${rolePreamble}`
+      : AGENT_SYSTEM_PROMPT
+
+    let response: string
+    try {
+      response = await streamToString(
+        [{ role: 'system', content: systemPrompt }, { role: 'user', content: subtask.description }],
+        resolveModel(model, subtask.description),
+        signal,
+      )
+    } catch {
+      return
+    }
+    if (signal.aborted) return
+
+    broadcast({
+      sessionId: owningSessionId, planFile: targetPlanFile, subtaskId: subtask.id,
+      subtaskDescription: subtask.description, status: 'running', doneCount, totalCount,
+      branch: owningBranch || undefined, role: effectiveRole || undefined,
+    })
+
+    for (const edit of parseEdits(response)) {
+      if (detectSecret(edit.content)) return
+      if (checkPath(policy, edit.path)) return
+      if (policy.max_edit_lines && edit.content.split('\n').length > policy.max_edit_lines) return
+      if (policy.require_type_check && (edit.path.endsWith('.ts') || edit.path.endsWith('.tsx'))) {
+        const absPath = edit.path.startsWith('/') ? edit.path : path.join(targetPath, edit.path)
+        if (await validateGeneratedTs(edit.content, absPath)) return
+      }
+      try {
+        await applyEdit(edit, targetPath)
+        broadcast({ sessionId: owningSessionId, planFile: targetPlanFile, subtaskId: subtask.id, subtaskDescription: subtask.description, status: 'edit-applied', editPath: edit.path, doneCount, totalCount })
+      } catch {
+        return
+      }
+    }
+
+    for (const run of parseRuns(response)) {
+      // Anything blocked, policy-flagged, or needing approval is left for the
+      // owning session's own pipeline — work-stealing never requests approval.
+      if (isBlocked(run.command) || checkCommand(policy, run.command) || checkApproval(policy, run.command)) return
+      try {
+        const result = await runCommand('/bin/sh', ['-c', run.command], targetPath)
+        if (result.exitCode !== 0) return
+        broadcast({ sessionId: owningSessionId, planFile: targetPlanFile, subtaskId: subtask.id, subtaskDescription: subtask.description, status: 'run-executed', runCommand: run.command, doneCount, totalCount })
+      } catch {
+        return
+      }
+    }
+
+    for (const browse of parseBrowses(response)) {
+      const { success } = await executeBrowse(browse)
+      if (!success) return
+      broadcast({ sessionId: owningSessionId, planFile: targetPlanFile, subtaskId: subtask.id, subtaskDescription: subtask.description, status: 'browse-executed', browseUrl: browse.url, doneCount, totalCount })
+    }
+
+    for (const [, key, value] of response.matchAll(HANDOFF_RE)) setHandoff(key, value.trim())
+
+    await withPlanLock(targetPlanFile, () => markDone(targetPlanFile, subtask.id))
+    broadcast({
+      sessionId: owningSessionId, planFile: targetPlanFile, subtaskId: subtask.id,
+      subtaskDescription: `${subtask.description} (completed via work-stealing by session ${helperSessionId.slice(0, 8)})`,
+      status: 'done', output: response.slice(0, 500), doneCount: doneCount + 1, totalCount, branch: owningBranch || undefined,
+    })
+  } finally {
+    releaseSubtaskClaim(targetPlanFile, subtask.id)
+  }
+}
+
+// ── Swarm: agent-to-agent spawning ────────────────────────────────────────────
+// A subtask's AI response may delegate an independent sub-goal to a brand-new
+// autonomous session via a <<<SPAWN goal="...">>> block. The child gets its own
+// plan file, worktree, and branch — fully independent of the parent — and the
+// parent (or the user, via @handoff:spawn:<sessionId>) can look up the child's
+// session id once it's been kicked off.
+
+async function spawnChildSession(
+  parentSessionId: string,
+  parentPlanFile: string,
+  spawn: { goal: string; context: string },
+  model: string,
+  doneCount: number,
+  totalCount: number,
+): Promise<void> {
+  const goal = spawn.context ? `${spawn.goal}\n\nContext from parent agent:\n${spawn.context}` : spawn.goal
+  const result = await runPythonJson(['-m', 'src.task_planner', '--new', goal, '--save'])
+  if (!result.ok) {
+    setHandoff(`spawn-failed:${parentSessionId}`, `${spawn.goal} — failed to create plan: ${result.error}`)
+    return
+  }
+  const planDetail = result.stats as TaskPlanDetail
+  const childPlanFile = `plans/${planDetail.slug}.json`
+
+  try {
+    const childSessionId = await startAutonomousSession({ planFile: childPlanFile, model, parentSessionId })
+    setHandoff(`spawn:${parentSessionId}`, childSessionId)
+    broadcast({
+      sessionId: parentSessionId, planFile: parentPlanFile, subtaskId: '',
+      subtaskDescription: `Spawned child session ${childSessionId.slice(0, 8)} for: ${spawn.goal}`,
+      status: 'spawned-child', doneCount, totalCount,
+    })
+  } catch (err) {
+    setHandoff(`spawn-failed:${parentSessionId}`, `${spawn.goal} (plan: ${childPlanFile}) — ${err}`)
+  }
+}
 
 export async function startAutonomousSession(opts: {
   planFile: string
   model: string
+  /** Swarm — set when this session was spawned by another via a <<<SPAWN>>> block. */
+  parentSessionId?: string
 }): Promise<string> {
-  if (activeSession) throw new Error('Agent already running — stop it first')
+  if (activeSessions.size >= MAX_CONCURRENT_SESSIONS)
+    throw new Error(`Max ${MAX_CONCURRENT_SESSIONS} concurrent sessions — stop one first`)
 
   const sessionId = randomUUID()
   const controller = new AbortController()
-  activeSession = { sessionId, abort: () => controller.abort() }
+  activeSessions.set(sessionId, { sessionId, abort: () => controller.abort(), planFile: opts.planFile, worktreePath: '', branch: '' })
 
-  const { planFile, model } = opts
+  const { planFile, model, parentSessionId } = opts
   const projectPath = (store.get('projectPath') as string | undefined) ?? repoRoot()
 
   void (async () => {
     let worktreePath: string | null = null
     let activePath = projectPath
     let agentBranch = ''
+    // Tracks the subtask id this session is currently claimed on, across
+    // retries of the same subtask — released in the outer `finally` below on
+    // any exit path (abort, error, blocked, approval-rejected, or completion).
+    let currentSubtaskId = ''
 
     try {
       // Initial plan load to get the goal for the branch name
@@ -630,6 +923,7 @@ export async function startAutonomousSession(opts: {
       broadcast({
         sessionId, planFile, subtaskId: '', subtaskDescription: `Setting up worktree on branch ${agentBranch}`,
         status: 'preparing', doneCount: 0, totalCount: initialPlan.subtasks.length, branch: agentBranch,
+        parentSessionId,
       })
 
       try {
@@ -661,6 +955,10 @@ export async function startAutonomousSession(opts: {
       // top of the hardcoded destructive-command blocklist (isBlocked above).
       const policy = loadPolicy(projectPath)
 
+      // Record the resolved worktree/branch so other sessions can find this one
+      // when work-stealing — must happen after isolation is set up above.
+      activeSessions.set(sessionId, { sessionId, abort: () => controller.abort(), planFile, worktreePath: activePath, branch: agentBranch })
+
       let retryContext: string | null = null
       // Gap 142 — bounded retry budget per subtask. retryCount tracks completed
       // failed attempts (0-indexed); isRetry distinguishes "any attempt past the
@@ -690,6 +988,20 @@ export async function startAutonomousSession(opts: {
         const totalCount = plan.subtasks.length
 
         if (pending.length === 0) {
+          // Gap: dynamic rebalancing — before finalizing, see if a sibling
+          // session still has unclaimed pending work this idle session can help with.
+          const stolen = await claimStealableSubtask(sessionId, planFile)
+          if (stolen) {
+            await runStolenSubtask({
+              helperSessionId: sessionId, helperPlanFile: planFile, helperBranch: agentBranch,
+              helperDoneCount: doneCount, helperTotalCount: totalCount,
+              owningSessionId: stolen.owningSessionId, owningBranch: stolen.branch,
+              targetPlanFile: stolen.planFile, targetPath: stolen.targetPath, subtask: stolen.subtask,
+              doneCount: stolen.doneCount, totalCount: stolen.totalCount,
+              policy, model, signal: controller.signal,
+            })
+            continue
+          }
           if (worktreePath) {
             await finalizeSession({ sessionId, planFile, plan, projectPath, worktreePath, branch: agentBranch, doneCount })
           } else {
@@ -699,7 +1011,15 @@ export async function startAutonomousSession(opts: {
           break
         }
 
-        const subtask = pending[0]
+        // Skip subtasks a work-stealing helper has already claimed elsewhere —
+        // re-claiming our own in-flight subtask across a retry is a no-op.
+        const subtask = pending.find((s) => s.id === currentSubtaskId) ?? pending.find((s) => tryClaimSubtask(planFile, s.id))
+        if (!subtask) {
+          await new Promise((resolve) => setTimeout(resolve, 1500))
+          continue
+        }
+        currentSubtaskId = subtask.id
+        const effectiveRole = subtask.role || classifySubtaskRole(subtask.description)
         const isRetry = retryContext !== null
 
         broadcast({
@@ -709,6 +1029,7 @@ export async function startAutonomousSession(opts: {
           status: isRetry ? 'retrying' : 'running',
           doneCount, totalCount,
           branch: agentBranch || undefined,
+          role: effectiveRole || undefined,
           ...(isRetry ? { retryCount, maxRetries: MAX_RETRIES } : {}),
         })
 
@@ -725,10 +1046,14 @@ export async function startAutonomousSession(opts: {
         const contextBlock = cachedContextBlock
         const memoryBlock = cachedMemoryBlock
         const diffBlock = cachedDiffBlock
+        const rolePreamble = effectiveRole ? (ROLE_PREAMBLES[effectiveRole] ?? '') : ''
+        const roleSystemPrompt = rolePreamble
+          ? `${agentSystemPrompt}\n\n# Agent Role: ${effectiveRole}\n${rolePreamble}`
+          : agentSystemPrompt
         const promptBlocks = [contextBlock, memoryBlock, diffBlock].filter(Boolean)
         const systemPrompt = promptBlocks.length
-          ? `${agentSystemPrompt}\n\n${promptBlocks.join('\n\n')}`
-          : agentSystemPrompt
+          ? `${roleSystemPrompt}\n\n${promptBlocks.join('\n\n')}`
+          : roleSystemPrompt
 
         const userContent = isRetry
           ? `Previous attempt failed:\n${retryContext}\n\nRetry the same subtask:\n${subtask.description}`
@@ -767,6 +1092,33 @@ export async function startAutonomousSession(opts: {
             editError = `Edit blocked by policy: ${edit.path} matches blocked path pattern "${pathViolation.pattern}"`
             break
           }
+          if (policy.max_edit_lines) {
+            const lineCount = edit.content.split('\n').length
+            if (lineCount > policy.max_edit_lines) {
+              editError = `Edit blocked: ${edit.path} is ${lineCount} lines (policy max_edit_lines: ${policy.max_edit_lines})`
+              break
+            }
+          }
+          if (policy.require_type_check && (edit.path.endsWith('.ts') || edit.path.endsWith('.tsx'))) {
+            const absPath = edit.path.startsWith('/') ? edit.path : path.join(activePath, edit.path)
+            const tsError = await validateGeneratedTs(edit.content, absPath)
+            if (tsError) {
+              editError = `TypeScript validation failed for ${edit.path}:\n${tsError}`
+              break
+            }
+          }
+          if (policy.auto_review_paths?.length) {
+            const needsReview = policy.auto_review_paths.some((glob) => globToRegex(glob).test(edit.path))
+            if (needsReview) {
+              try {
+                const reviewResponse = await streamToString([
+                  { role: 'system', content: 'You are a security code reviewer. Respond ONLY with a JSON object inside <<<REVIEW>>>\\n{...}\\n<<<END_REVIEW>>> delimiters. The JSON must have: "findings" (array of {severity,file,line?,message}) and "summary" (string). If no issues found, return an empty findings array.' },
+                  { role: 'user', content: `Review this edit to ${edit.path} for security issues:\n\n${edit.content.slice(0, 4000)}` },
+                ], model, controller.signal)
+                broadcast({ sessionId, planFile, subtaskId: subtask.id, subtaskDescription: subtask.description, status: 'running', output: `Security review for ${edit.path}:\n${reviewResponse.slice(0, 500)}`, doneCount, totalCount })
+              } catch { /* review failure does not block the edit */ }
+            }
+          }
           try {
             await applyEdit(edit, activePath)
             broadcast({ sessionId, planFile, subtaskId: subtask.id, subtaskDescription: subtask.description, status: 'edit-applied', editPath: edit.path, doneCount, totalCount })
@@ -804,6 +1156,7 @@ export async function startAutonomousSession(opts: {
               status: 'pending-approval', error: `Approval required: ${run.command} matches "${approvalNeeded.pattern}"`,
               doneCount, totalCount,
             })
+            sendNotification(`[Lakoora] Agent session ${sessionId.slice(0, 8)} requires approval for: \`${run.command}\``)
             // Gap 78 — OS-level desktop notification so the user knows approval is needed
             // even when the IDE is in the background.
             const { Notification } = await import('electron')
@@ -813,18 +1166,24 @@ export async function startAutonomousSession(opts: {
                 body: `Agent paused: "${run.command}" requires your approval.`,
               }).show()
             }
-            const { approved, approver } = await requestApproval(sessionId)
+            const { approved, approver } = await requestApproval(
+              sessionId,
+              policy.approval_timeout_minutes ? policy.approval_timeout_minutes * 60_000 : undefined,
+            )
+            const approverRole = await lookupApproverRole(projectPath, approver)
             if (!approved) {
               broadcast({
                 sessionId, planFile, subtaskId: subtask.id, subtaskDescription: subtask.description,
                 status: 'approval-rejected', error: `Rejected by ${approver}: ${run.command}`, doneCount, totalCount,
+                approverRole: approverRole ?? undefined,
               })
+              sendNotification(`[Lakoora] Agent session ${sessionId.slice(0, 8)} approval rejected by ${approver}${approverRole ? ` (${approverRole})` : ''}`)
               return // human rejection halts the session cleanly — no retry, worktree left intact for review
             }
             broadcast({
               sessionId, planFile, subtaskId: subtask.id,
-              subtaskDescription: `${subtask.description} (approved by ${approver})`,
-              status: 'running', doneCount, totalCount,
+              subtaskDescription: `${subtask.description} (approved by ${approver}${approverRole ? ` / ${approverRole}` : ''})`,
+              status: 'running', doneCount, totalCount, approverRole: approverRole ?? undefined,
             })
           }
           try {
@@ -880,8 +1239,19 @@ export async function startAutonomousSession(opts: {
           continue
         }
 
+        // Extract handoff values from the response and store them for cross-agent access
+        for (const [, key, value] of response.matchAll(HANDOFF_RE)) {
+          setHandoff(key, value.trim())
+        }
+
+        // Delegate independent sub-goals to brand-new child sessions (fire-and-forget).
+        for (const spawn of parseSpawns(response)) {
+          void spawnChildSession(sessionId, planFile, spawn, model, doneCount, totalCount)
+        }
+
         // Subtask succeeded
-        await markDone(planFile, subtask.id)
+        await withPlanLock(planFile, () => markDone(planFile, subtask.id))
+        currentSubtaskId = ''
         retryContext = null
         retryCount = 0
         broadcast({
@@ -896,20 +1266,24 @@ export async function startAutonomousSession(opts: {
         })
       }
     } finally {
-      if (activeSession?.sessionId === sessionId) activeSession = null
+      if (currentSubtaskId) releaseSubtaskClaim(planFile, currentSubtaskId)
+      activeSessions.delete(sessionId)
     }
   })()
 
   return sessionId
 }
 
-export function stopAutonomousSession(): void {
-  activeSession?.abort()
-  activeSession = null
+export function stopAutonomousSession(sessionId: string): boolean {
+  const session = activeSessions.get(sessionId)
+  if (!session) return false
+  session.abort()
+  activeSessions.delete(sessionId)
+  return true
 }
 
-export function getActiveSession(): string | null {
-  return activeSession?.sessionId ?? null
+export function getActiveSessions(): string[] {
+  return [...activeSessions.keys()]
 }
 
 // ── On-demand test-fix loop (Gap 135 extension) ───────────────────────────────
@@ -991,12 +1365,12 @@ const REPLAY_MAX_STEP_MS = 2000
  * two on the same channel.
  */
 export async function replaySession(sessionId: string, speedup = DEFAULT_REPLAY_SPEEDUP): Promise<boolean> {
-  if (activeSession) return false
+  if (activeSessions.size > 0) return false
   const events = readEvents(sessionId)
   if (events.length === 0) return false
 
   for (let i = 0; i < events.length; i++) {
-    if (activeSession) break // a real session started mid-replay — bail out
+    if (activeSessions.size > 0) break // a real session started mid-replay — bail out
     broadcastOnly(events[i] as unknown as AgentProgress)
     if (i < events.length - 1) {
       const curTs = events[i].ts as number

@@ -225,6 +225,59 @@ export function PolicySection() {
         />
       </div>
 
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 10, color: fg[3], marginBottom: 4, fontWeight: 600 }}>
+          Max lines per edit block (0 = no limit)
+        </div>
+        <input
+          type="number"
+          min={0}
+          value={config.max_edit_lines ?? 0}
+          title="Block edits exceeding this line count"
+          placeholder="0"
+          onChange={(e) => {
+            const n = parseInt(e.target.value, 10)
+            setConfig((c) => ({ ...c, max_edit_lines: n > 0 ? n : undefined }))
+          }}
+          style={{
+            width: 80, background: surface.raised, border: `1px solid ${border[0]}`,
+            borderRadius: 4, padding: '5px 8px', fontSize: 10.5, color: fg[0], outline: 'none',
+          }}
+        />
+      </div>
+
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 10, color: fg[3], marginBottom: 4, fontWeight: 600 }}>
+          Approval timeout (minutes, 0 = no timeout)
+        </div>
+        <input
+          type="number"
+          min={0}
+          value={config.approval_timeout_minutes ?? 0}
+          title="Auto-reject approval requests after this many minutes"
+          placeholder="0"
+          onChange={(e) => {
+            const n = parseInt(e.target.value, 10)
+            setConfig((c) => ({ ...c, approval_timeout_minutes: n > 0 ? n : undefined }))
+          }}
+          style={{
+            width: 80, background: surface.raised, border: `1px solid ${border[0]}`,
+            borderRadius: 4, padding: '5px 8px', fontSize: 10.5, color: fg[0], outline: 'none',
+          }}
+        />
+      </div>
+
+      <div style={{ marginBottom: 10 }}>
+        <label style={{ fontSize: 10, color: fg[3], display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
+          <input
+            type="checkbox"
+            checked={config.require_type_check ?? false}
+            onChange={(e) => setConfig((c) => ({ ...c, require_type_check: e.target.checked }))}
+          />
+          Validate TypeScript edits before applying (tsc --noEmit)
+        </label>
+      </div>
+
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginBottom: 8 }}>
         <button
           type="button"

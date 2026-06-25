@@ -21,6 +21,14 @@ export interface PolicyConfig {
    * retry, not give up immediately.
    */
   max_retries: number
+  /** Run tsc --noEmit on generated .ts/.tsx files before writing them to disk. */
+  require_type_check?: boolean
+  /** Block any single EDIT block whose line count exceeds this limit. */
+  max_edit_lines?: number
+  /** Auto-reject a pending-approval request after this many minutes. */
+  approval_timeout_minutes?: number
+  /** Paths (globs) that trigger an inline security review on edit. */
+  auto_review_paths?: string[]
 }
 
 const DEFAULT_MAX_RETRIES = 3
@@ -30,6 +38,10 @@ const EMPTY_POLICY: PolicyConfig = {
   block_paths: [],
   require_approval_for: [],
   max_retries: DEFAULT_MAX_RETRIES,
+  require_type_check: false,
+  max_edit_lines: undefined,
+  approval_timeout_minutes: undefined,
+  auto_review_paths: [],
 }
 
 function asStringArray(value: unknown): string[] {
@@ -48,6 +60,14 @@ export function loadPolicy(projectPath: string): PolicyConfig {
       max_retries: typeof parsed.max_retries === 'number' && parsed.max_retries > 0
         ? Math.floor(parsed.max_retries)
         : DEFAULT_MAX_RETRIES,
+      require_type_check: parsed.require_type_check === true,
+      max_edit_lines: typeof parsed.max_edit_lines === 'number' && parsed.max_edit_lines > 0
+        ? Math.floor(parsed.max_edit_lines)
+        : undefined,
+      approval_timeout_minutes: typeof parsed.approval_timeout_minutes === 'number' && parsed.approval_timeout_minutes > 0
+        ? parsed.approval_timeout_minutes
+        : undefined,
+      auto_review_paths: asStringArray(parsed.auto_review_paths),
     }
   } catch {
     return EMPTY_POLICY
@@ -61,7 +81,7 @@ export interface PolicyViolation {
 }
 
 /** Converts a simple glob (`*` wildcard only) into a regex matching the whole path or its tail after a `/`. */
-function globToRegex(glob: string): RegExp {
+export function globToRegex(glob: string): RegExp {
   const escaped = glob
     .split('*')
     .map((part) => part.replace(/[.+^${}()|[\]\\]/g, '\\$&'))

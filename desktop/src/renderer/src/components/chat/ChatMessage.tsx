@@ -12,6 +12,7 @@ import {
   stripRunBlocks,
   parseBrowseBlocks,
   stripBrowseBlocks,
+  parseOpenEditBlock,
 } from '../../lib/editBlocks'
 import { EditProposalCard } from './EditProposalCard'
 import { MultiFileEditCard } from './MultiFileEditCard'
@@ -35,7 +36,59 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
   const tabs = useEditorStore((s) => s.tabs)
   const projectPath = useSettingsStore((s) => s.projectPath)
   const prevStreaming = useRef(isStreaming)
+  const originalContentRef = useRef<string | null>(null)
+  const rafRef = useRef<number | null>(null)
+  const liveTabIdRef = useRef<string | null>(null)
   const isUser = message.role === 'user'
+
+  // Streaming live preview: update open editor tab in-memory while AI streams an EDIT block.
+  // Restores original content on abort (stream ends without closing END_EDIT).
+  useEffect(() => {
+    if (isUser) return
+
+    if (isStreaming) {
+      const open = parseOpenEditBlock(message.content)
+      if (!open) return
+
+      const absPath = open.path.startsWith('/')
+        ? open.path
+        : `${projectPath}/${open.path}`
+
+      const tab = useEditorStore.getState().tabs.find((t) => t.filePath === absPath)
+      if (!tab) return
+
+      // Capture original content on first chunk so abort can restore it
+      if (liveTabIdRef.current !== tab.id) {
+        originalContentRef.current = tab.content ?? null
+        liveTabIdRef.current = tab.id
+      }
+
+      // Coalesce via rAF — one update per frame regardless of chunk rate
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
+      const partial = open.partialContent
+      const tabId = tab.id
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = null
+        updateContent(tabId, partial)
+      })
+    } else {
+      // Stream ended — check whether the block was closed properly
+      if (liveTabIdRef.current !== null) {
+        const hasClosedBlock = message.content.includes('<<<END_EDIT>>>')
+        if (!hasClosedBlock && originalContentRef.current !== null) {
+          // Aborted mid-stream — restore original
+          updateContent(liveTabIdRef.current, originalContentRef.current)
+        }
+        // Reset live-preview state
+        if (rafRef.current !== null) {
+          cancelAnimationFrame(rafRef.current)
+          rafRef.current = null
+        }
+        originalContentRef.current = null
+        liveTabIdRef.current = null
+      }
+    }
+  }, [message.content, isStreaming]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Composer auto-apply: when streaming finishes + composerMode is on, write all edit blocks
   useEffect(() => {

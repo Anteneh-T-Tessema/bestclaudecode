@@ -60,6 +60,16 @@ export function createWebApi(): API {
       logRun: () => Promise.resolve(notPorted('terminal.logRun', undefined)),
     },
 
+    monitor: {
+      start: () => Promise.resolve(notPorted('monitor.start', { error: 'not available in web mode' })),
+      stop: () => Promise.resolve(notPorted('monitor.stop', undefined)),
+      listAlerts: () => Promise.resolve(notPorted('monitor.listAlerts', [])),
+      clearAlerts: () => Promise.resolve(notPorted('monitor.clearAlerts', undefined)),
+      onData: () => () => {},
+      onAlert: () => () => {},
+      onExit: () => () => {},
+    },
+
     git: {
       branch: (cwd) => socket.invoke('git:branch', cwd),
       status: (cwd) => socket.invoke('git:status', cwd),
@@ -145,6 +155,13 @@ export function createWebApi(): API {
       markDone: () => Promise.resolve(notPorted('taskPlanner.markDone', null)),
       create: () => Promise.resolve(notPorted('taskPlanner.create', null)),
       delete: () => Promise.resolve(notPorted('taskPlanner.delete', { deleted: false })),
+      revise: () => Promise.resolve(notPorted('taskPlanner.revise', null)),
+    },
+
+    ideation: {
+      saveSpec: () => Promise.resolve(notPorted('ideation.saveSpec', null)),
+      listSpecs: () => Promise.resolve(notPorted('ideation.listSpecs', [])),
+      readSpec: () => Promise.resolve(notPorted('ideation.readSpec', null)),
     },
 
     lsp: {
@@ -340,6 +357,8 @@ export function createWebApi(): API {
       reviewPr: () => Promise.resolve(notPorted('github.reviewPr', false)),
       getPrDiff: () => Promise.resolve(notPorted('github.getPrDiff', '')),
       postReviewComments: () => Promise.resolve(notPorted('github.postReviewComments', false)),
+      listWorkflowRuns: () => Promise.resolve(notPorted('github.listWorkflowRuns', [] as import('../../../main/ipc/github.handlers').WorkflowRun[])),
+      getRunStatus: () => Promise.resolve(notPorted('github.getRunStatus', null)),
     },
 
     linear: {
@@ -350,6 +369,44 @@ export function createWebApi(): API {
       getIssue: () => Promise.resolve(notPorted('jira.getIssue', null)),
     },
 
+    voice: {
+      transcribe: () => Promise.resolve(notPorted('voice.transcribe', null)),
+    },
+
+    data: {
+      analyze: () => Promise.resolve(notPorted('data.analyze', null)),
+    },
+
+    design: {
+      extract: () => Promise.resolve(notPorted('design.extract', null)),
+    },
+
+    wizard: {
+      scaffold: () => Promise.resolve(notPorted('wizard.scaffold', { success: false, error: 'not ported' })),
+      onDone: () => () => {},
+    },
+
+    notifications: {
+      send: () => Promise.resolve(notPorted('notifications.send', false)),
+    },
+
+    handoff: {
+      set: () => Promise.resolve(notPorted('handoff.set', undefined)),
+      get: () => Promise.resolve(notPorted('handoff.get', null)),
+      list: () => Promise.resolve(notPorted('handoff.list', [] as Array<{ key: string; preview: string }>)),
+      clear: () => Promise.resolve(notPorted('handoff.clear', false)),
+    },
+
+    webhook: {
+      start: () => Promise.resolve(notPorted('webhook.start', { success: false, error: 'not available in web mode' })),
+      stop: () => Promise.resolve(notPorted('webhook.stop', false)),
+      status: () => Promise.resolve(notPorted('webhook.status', { running: false, port: 0 })),
+    },
+
+    collab: {
+      getInviteLink: () => Promise.resolve(notPorted('collab.getInviteLink', '')),
+    },
+
     agent: {
       createShadow: () => Promise.resolve(notPorted('agent.createShadow', null)),
       getShadowDiff: () => Promise.resolve(notPorted('agent.getShadowDiff', null)),
@@ -357,9 +414,9 @@ export function createWebApi(): API {
       promoteShadow: () => Promise.resolve(notPorted('agent.promoteShadow', false)),
       discardShadow: () => Promise.resolve(notPorted('agent.discardShadow', false)),
       startAutonomous: () => Promise.resolve(notPorted('agent.startAutonomous', null)),
-      stopAutonomous: () => Promise.resolve(notPorted('agent.stopAutonomous', undefined)),
+      stopAutonomous: () => Promise.resolve(notPorted('agent.stopAutonomous', false)),
       runTestFixLoop: () => Promise.resolve(notPorted('agent.runTestFixLoop', null)),
-      getActiveSession: () => Promise.resolve(notPorted('agent.getActiveSession', null)),
+      getActiveSessions: () => Promise.resolve(notPorted('agent.getActiveSessions', [] as string[])),
       listEventSessions: () => Promise.resolve(notPorted('agent.listEventSessions', [] as Array<{ id: string; branch?: string; startedAt: number }>)),
       getEventLog: () => Promise.resolve(notPorted('agent.getEventLog', [] as Array<Record<string, unknown>>)),
       verifyEventLog: () => Promise.resolve(notPorted('agent.verifyEventLog', { valid: true, totalEvents: 0 })),
@@ -371,12 +428,17 @@ export function createWebApi(): API {
       })),
       exportReportHtml: () => Promise.resolve(notPorted('agent.exportReportHtml', null)),
       exportReportPdf: () => Promise.resolve(notPorted('agent.exportReportPdf', null)),
+      getComplianceJson: () => Promise.resolve(notPorted('agent.getComplianceJson', null)),
+      mergeSession: () => Promise.resolve(notPorted('agent.mergeSession', { success: false, conflicts: [] as string[] })),
       onProgress: () => () => {},
     },
 
     deploy: {
       detect: () => Promise.resolve(notPorted('deploy.detect', null)),
       run: () => Promise.resolve(notPorted('deploy.run', { success: false, error: 'not supported in web mode' })),
+      history: () => Promise.resolve(notPorted('deploy.history', [])),
+      promote: () => Promise.resolve(notPorted('deploy.promote', { success: false, error: 'not supported in web mode' })),
+      rollback: () => Promise.resolve(notPorted('deploy.rollback', { success: false, error: 'not supported in web mode' })),
     },
 
     policy: {

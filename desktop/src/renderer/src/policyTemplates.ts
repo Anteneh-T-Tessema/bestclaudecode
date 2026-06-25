@@ -11,6 +11,14 @@ export interface PolicyConfig {
   require_approval_for: string[]
   /** Gap 142 loose end — optional since starter templates are compliance presets, not retry-budget opinions; the engine defaults to 3 when absent. */
   max_retries?: number
+  /** Run tsc --noEmit on AI-generated .ts/.tsx files before writing to disk. */
+  require_type_check?: boolean
+  /** Block any single EDIT block whose line count exceeds this limit (0 = no limit). */
+  max_edit_lines?: number
+  /** Auto-reject pending-approval after this many minutes (0 = no timeout). */
+  approval_timeout_minutes?: number
+  /** Paths (globs) that trigger an inline security review on edit. */
+  auto_review_paths?: string[]
 }
 
 export interface PolicyTemplate {

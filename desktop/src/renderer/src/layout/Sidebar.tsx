@@ -9,6 +9,7 @@ import { TaskPlannerPanel } from '../components/sidebar/TaskPlannerPanel'
 import { AuditTrailPanel } from '../components/audit/AuditTrailPanel'
 import { ArchDocPanel } from '../components/sidebar/ArchDocPanel'
 import { AgentProgressPanel } from '../components/agent/AgentProgressPanel'
+import { SwarmPanel } from '../components/sidebar/SwarmPanel'
 import { DebugPanel } from '../components/sidebar/DebugPanel'
 import { OutlinePanel } from '../components/sidebar/OutlinePanel'
 import { NotepadsPanel } from '../components/sidebar/NotepadsPanel'
@@ -17,6 +18,9 @@ import { UsageDashboardPanel } from '../components/sidebar/UsageDashboardPanel'
 import { CodebaseMapPanel } from '../components/sidebar/CodebaseMapPanel'
 import { GitHubPanel } from '../components/sidebar/GitHubPanel'
 import { EnvVarsPanel } from '../components/sidebar/EnvVarsPanel'
+import { ProjectWizardPanel } from '../components/sidebar/ProjectWizardPanel'
+import { MonitorPanel } from '../components/sidebar/MonitorPanel'
+import { IdeationPanel } from '../components/sidebar/IdeationPanel'
 import { ErrorBoundary } from '../components/ErrorBoundary'
 
 const LABELS: Record<string, string> = {
@@ -30,6 +34,7 @@ const LABELS: Record<string, string> = {
   audit: 'AUDIT TRAIL',
   archdoc: 'ARCHITECTURE',
   agent: 'AGENT',
+  swarm: 'SWARM',
   debug: 'DEBUG',
   outline: 'OUTLINE',
   notepads: 'NOTEPADS',
@@ -37,6 +42,9 @@ const LABELS: Record<string, string> = {
   map: 'CODEBASE MAP',
   github: 'GITHUB',
   env: 'ENVIRONMENT',
+  wizard: 'PROJECT WIZARD',
+  monitor: 'MONITOR',
+  ideation: 'IDEATION',
   settings: 'SETTINGS',
 }
 
@@ -70,6 +78,8 @@ export function Sidebar() {
         return <ArchDocPanel />
       case 'agent':
         return <AgentProgressPanel />
+      case 'swarm':
+        return <SwarmPanel />
       case 'debug':
         return <DebugPanel />
       case 'outline':
@@ -84,6 +94,12 @@ export function Sidebar() {
         return <GitHubPanel />
       case 'env':
         return <EnvVarsPanel />
+      case 'wizard':
+        return <ProjectWizardPanel />
+      case 'monitor':
+        return <MonitorPanel />
+      case 'ideation':
+        return <IdeationPanel />
       case 'settings':
         return <SettingsPanel />
       default:

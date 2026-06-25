@@ -21,6 +21,16 @@ function languageFromPath(p: string): string {
 interface FileEntry { status: string; path: string; staged: boolean }
 interface LogEntry { hash: string; message: string }
 interface CommitFile { status: string; path: string; oldPath?: string }
+interface DeployRecord {
+  id: string
+  ts: number
+  provider: 'vercel' | 'netlify' | 'npm'
+  target: 'preview' | 'production'
+  url?: string
+  exitCode: number
+  promotedFromId?: string
+  rolledBackFromId?: string
+}
 
 function BranchDropdown({
   projectPath,
@@ -352,10 +362,13 @@ export function GitPanel() {
   const [prGenerating, setPrGenerating] = useState(false)
   const [prCreating, setPrCreating] = useState(false)
 
-  // Gap 140 — manual one-click deploy
+  // Gap 140 — manual one-click deploy (now preview-first for vercel/netlify, with promote/rollback history)
   const [deployCmd, setDeployCmd] = useState<string | null>(null)
   const [deploying, setDeploying] = useState(false)
   const [deployResult, setDeployResult] = useState<{ deployUrl?: string; error?: string } | null>(null)
+  const [deployHistory, setDeployHistory] = useState<DeployRecord[]>([])
+  const [deployHistoryOpen, setDeployHistoryOpen] = useState(false)
+  const [deployActionId, setDeployActionId] = useState<string | null>(null)
 
   // Gap 103 — compare any two branches
   const [compareBase, setCompareBase] = useState('')
@@ -706,7 +719,16 @@ export function GitPanel() {
   useEffect(() => {
     if (!projectPath) { setDeployCmd(null); return }
     window.api.deploy.detect().then(setDeployCmd).catch(() => setDeployCmd(null))
+    window.api.deploy.history().then(setDeployHistory).catch(() => setDeployHistory([]))
   }, [projectPath])
+
+  const deployProvider: 'vercel' | 'netlify' | 'npm' | null = deployCmd
+    ? deployCmd.startsWith('vercel') ? 'vercel' : deployCmd.startsWith('netlify') ? 'netlify' : 'npm'
+    : null
+
+  const refreshDeployHistory = () => {
+    window.api.deploy.history().then(setDeployHistory).catch(() => {})
+  }
 
   const runManualDeploy = async () => {
     if (deploying) return
@@ -715,10 +737,35 @@ export function GitPanel() {
     try {
       const result = await window.api.deploy.run()
       setDeployResult(result)
-      if (result.success) toast.success('Deployed')
+      if (result.success) toast.success(deployProvider === 'npm' ? 'Deployed' : 'Preview deployed')
       else toast.error(result.error ?? 'Deploy failed')
+      refreshDeployHistory()
     } finally {
       setDeploying(false)
+    }
+  }
+
+  const promoteDeploy = async (deployId: string) => {
+    setDeployActionId(deployId)
+    try {
+      const result = await window.api.deploy.promote(deployId)
+      if (result.success) toast.success(`Promoted to production: ${result.deployUrl ?? ''}`)
+      else toast.error(result.error ?? 'Promote failed')
+      refreshDeployHistory()
+    } finally {
+      setDeployActionId(null)
+    }
+  }
+
+  const rollbackDeploy = async (deployId: string) => {
+    setDeployActionId(deployId)
+    try {
+      const result = await window.api.deploy.rollback(deployId)
+      if (result.success) toast.success('Rolled back')
+      else toast.error(result.error ?? 'Rollback failed')
+      refreshDeployHistory()
+    } finally {
+      setDeployActionId(null)
     }
   }
 
@@ -1596,7 +1643,7 @@ export function GitPanel() {
             </div>
           )}
 
-          {/* Gap 140 — manual one-click deploy, hidden entirely if no deploy target was detected */}
+          {/* Gap 140 — manual deploy (preview-first for vercel/netlify), hidden entirely if no deploy target was detected */}
           {deployCmd && (
             <div style={{ flexShrink: 0, borderBottom: `1px solid ${border[1]}`, padding: '6px 10px' }}>
               <button
@@ -1612,7 +1659,11 @@ export function GitPanel() {
                 }}
               >
                 <Rocket size={11} />
-                {deploying ? 'Deploying…' : `Deploy (${deployCmd})`}
+                {deploying
+                  ? 'Deploying…'
+                  : deployProvider === 'npm'
+                    ? `Deploy (${deployCmd})`
+                    : `Deploy Preview (${deployCmd})`}
               </button>
               {deployResult?.deployUrl && (
                 <div style={{ fontSize: 10, color: accent.cyan.fg, marginTop: 5 }}>
@@ -1621,6 +1672,72 @@ export function GitPanel() {
               )}
               {deployResult?.error && (
                 <div style={{ fontSize: 10, color: accent.red.fg, marginTop: 5 }}>{deployResult.error}</div>
+              )}
+
+              {deployHistory.length > 0 && (
+                <div style={{ marginTop: 6 }}>
+                  <button
+                    type="button"
+                    onClick={() => setDeployHistoryOpen((o) => !o)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 4, fontSize: 9.5, fontWeight: 600,
+                      color: fg[3], background: 'transparent', border: 'none', cursor: 'pointer', padding: 0,
+                    }}
+                  >
+                    {deployHistoryOpen ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                    Deployments ({deployHistory.length})
+                  </button>
+                  {deployHistoryOpen && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
+                      {deployHistory.slice(0, 5).map((d) => (
+                        <div
+                          key={d.id}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 6, fontSize: 9.5,
+                            padding: '4px 6px', borderRadius: 3, background: surface.raised,
+                          }}
+                        >
+                          <span style={{
+                            fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em',
+                            color: d.target === 'production' ? accent.green.fg : accent.amber.fg,
+                          }}>
+                            {d.target === 'production' ? 'PROD' : 'PREVIEW'}
+                          </span>
+                          <span style={{ color: fg[3] }}>{new Date(d.ts).toLocaleTimeString()}</span>
+                          {d.url && (
+                            <a href={d.url} style={{ color: accent.cyan.fg, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {d.url}
+                            </a>
+                          )}
+                          <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
+                            {d.target === 'preview' && d.provider !== 'npm' && (
+                              <button
+                                type="button"
+                                onClick={() => void promoteDeploy(d.id)}
+                                disabled={deployActionId === d.id}
+                                title="Promote to production"
+                                style={{ display: 'flex', alignItems: 'center', padding: 2, background: 'transparent', border: 'none', color: accent.green.fg, cursor: 'pointer' }}
+                              >
+                                <ArrowUp size={11} />
+                              </button>
+                            )}
+                            {d.target === 'production' && d.provider === 'vercel' && (
+                              <button
+                                type="button"
+                                onClick={() => void rollbackDeploy(d.id)}
+                                disabled={deployActionId === d.id}
+                                title="Rollback this production deployment"
+                                style={{ display: 'flex', alignItems: 'center', padding: 2, background: 'transparent', border: 'none', color: accent.red.fg, cursor: 'pointer' }}
+                              >
+                                <RotateCcw size={11} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           )}

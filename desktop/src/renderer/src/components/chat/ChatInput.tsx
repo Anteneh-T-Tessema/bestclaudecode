@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Send, Square, X, ImageIcon } from 'lucide-react'
+import { Send, Square, X, ImageIcon, Mic, MicOff, Loader } from 'lucide-react'
 import { useChatStore } from '../../store/useChatStore'
 import { useEditorStore } from '../../store/useEditorStore'
 import { useSettingsStore } from '../../store/useSettingsStore'
@@ -369,6 +369,70 @@ async function injectWebContext(content: string): Promise<string> {
   }
 }
 
+async function injectDesignContext(content: string, projectPath: string | null): Promise<string> {
+  if (!content.includes('@design') || !projectPath) return content
+  try {
+    const tokens = await window.api.design.extract(projectPath)
+    if (!tokens) return content.replace('@design', '[design tokens unavailable]')
+    const parts: string[] = []
+    if (tokens.tailwindConfig) parts.push(`<tailwind_config>\n${tokens.tailwindConfig}\n</tailwind_config>`)
+    if (Object.keys(tokens.cssVars).length > 0) {
+      const vars = Object.entries(tokens.cssVars).map(([k, v]) => `  ${k}: ${v}`).join('\n')
+      parts.push(`<css_variables>\n${vars}\n</css_variables>`)
+    }
+    for (const { file, excerpt } of tokens.themeFiles) {
+      parts.push(`<theme_file path="${file}">\n${excerpt}\n</theme_file>`)
+    }
+    const block = parts.length ? `<design_tokens>\n${parts.join('\n')}\n</design_tokens>` : '[no design tokens found]'
+    return content.replace('@design', block)
+  } catch {
+    return content.replace('@design', '[design tokens unavailable]')
+  }
+}
+
+async function injectAnalysisContext(
+  content: string,
+  projectPath: string | null,
+  addImages: (img: string) => void,
+): Promise<string> {
+  const re = /@analyze:([^\s]+)/g
+  const matches = [...content.matchAll(re)]
+  if (matches.length === 0) return content
+  let out = content
+  for (const m of matches) {
+    const rawPath = m[1]
+    const absPath = rawPath.startsWith('/') ? rawPath : `${projectPath ?? ''}/${rawPath}`
+    try {
+      const result = await window.api.data.analyze(absPath, content)
+      if (!result) continue
+      const block = `<data_analysis file="${rawPath}" rows="${result.rowCount}" columns="${result.columnCount}">\n${result.summary}\n</data_analysis>`
+      out = out.replace(m[0], block)
+      if (result.chartBase64) addImages(`data:image/png;base64,${result.chartBase64}`)
+    } catch { /* skip on error */ }
+  }
+  return out
+}
+
+async function injectHandoffContext(content: string): Promise<string> {
+  const re = /@handoff:([^\s]+)/g
+  const matches = [...content.matchAll(re)]
+  if (matches.length === 0) return content
+  let out = content
+  for (const m of matches) {
+    const key = m[1]
+    try {
+      const value = await window.api.handoff.get(key)
+      const block = value !== null
+        ? `<handoff key="${key}">\n${value}\n</handoff>`
+        : `[handoff:${key} — no value stored]`
+      out = out.replace(m[0], block)
+    } catch {
+      out = out.replace(m[0], `[handoff:${key} — unavailable]`)
+    }
+  }
+  return out
+}
+
 const MENTIONS = [
   { tag: '@selection',  desc: 'Currently selected editor text' },
   { tag: '@file',       desc: 'Full content of the active file (or pick any file)' },
@@ -391,6 +455,9 @@ const MENTIONS = [
   { tag: '@linear',     desc: 'Linear issue (e.g. ENG-123)' },
   { tag: '@jira',       desc: 'Jira issue (e.g. PROJ-45)' },
   { tag: '@screenshot', desc: 'Describe a screenshot image file' },
+  { tag: '@analyze',   desc: 'Run data analysis on a file (CSV/JSON/XLSX)' },
+  { tag: '@design',    desc: 'Inject project design tokens (Tailwind config, CSS vars, theme files)' },
+  { tag: '@handoff',   desc: 'Inject cross-agent handoff value by key (e.g. @handoff:schema)' },
 ]
 
 export function ChatInput() {
@@ -402,6 +469,12 @@ export function ChatInput() {
   const [pendingImages, setPendingImages] = useState<string[]>([])
   const imageFileInputRef = useRef<HTMLInputElement>(null)
 
+  // Voice recording state (Gap 137)
+  const [recording, setRecording] = useState(false)
+  const [transcribing, setTranscribing] = useState(false)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
+
   const addImageFile = useCallback((file: File) => {
     if (!file.type.startsWith('image/')) return
     const reader = new FileReader()
@@ -411,6 +484,40 @@ export function ChatInput() {
       }
     }
     reader.readAsDataURL(file)
+  }, [])
+
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mimeType = 'audio/webm;codecs=opus'
+      const mr = new MediaRecorder(stream, { mimeType })
+      audioChunksRef.current = []
+      mr.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data) }
+      mr.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop())
+        setTranscribing(true)
+        try {
+          const blob = new Blob(audioChunksRef.current, { type: mimeType })
+          const ab = await blob.arrayBuffer()
+          const b64 = btoa(String.fromCharCode(...new Uint8Array(ab)))
+          const result = await window.api.voice.transcribe(b64, mimeType)
+          if (result?.text) {
+            setText((prev) => prev ? `${prev} ${result.text}` : result.text)
+          }
+        } finally {
+          setTranscribing(false)
+        }
+      }
+      mr.start()
+      mediaRecorderRef.current = mr
+      setRecording(true)
+    } catch { /* mic denied or unavailable */ }
+  }, [])
+
+  const stopRecording = useCallback(() => {
+    mediaRecorderRef.current?.stop()
+    mediaRecorderRef.current = null
+    setRecording(false)
   }, [])
 
   const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -481,6 +588,24 @@ export function ChatInput() {
     const images = overrideContent !== undefined ? [] : pendingImages
     if ((!content && images.length === 0) || isStreaming) return
     if (overrideContent === undefined) { setText(''); setPendingImages([]) }
+
+    // /scaffold <ComponentName> [desc] — generate a component seeded with design tokens
+    if (content.startsWith('/scaffold ')) {
+      const args = content.slice('/scaffold '.length).trim()
+      const [componentName, ...rest] = args.split(/\s+/)
+      if (componentName) {
+        const desc = rest.join(' ')
+        const tokens = projectPath ? await window.api.design.extract(projectPath) : null
+        const tokenBlock = tokens
+          ? `<design_tokens>${tokens.tailwindConfig ? `\n<tailwind_config>\n${tokens.tailwindConfig}\n</tailwind_config>` : ''}${Object.keys(tokens.cssVars).length ? `\n<css_variables>\n${Object.entries(tokens.cssVars).map(([k, v]) => `  ${k}: ${v}`).join('\n')}\n</css_variables>` : ''}${tokens.themeFiles.map((f) => `\n<theme_file path="${f.file}">\n${f.excerpt}\n</theme_file>`).join('')}\n</design_tokens>`
+          : ''
+        const scaffoldPrompt = `${tokenBlock}\n\nScaffold a React component named \`${componentName}\`${desc ? ` — ${desc}` : ''}. Use the design tokens above to match the project's visual style. Produce a complete, working component using the \`<<<EDIT>>>\` block format.`
+        addUserMessage(content, [])
+        window.dispatchEvent(new CustomEvent('lakoora:scaffold:generated', { detail: { componentName } }))
+        await send(scaffoldPrompt)
+        return
+      }
+    }
 
     // /fix-tests <command> — start a standalone test-fix loop; short-circuit chat
     if (content.startsWith('/fix-tests ')) {
@@ -628,6 +753,19 @@ export function ChatInput() {
     // @linear / @jira — inject external issue tracker context
     finalContent = await injectLinearContext(finalContent)
     finalContent = await injectJiraContext(finalContent)
+
+    // @design — inject Tailwind config, CSS vars, theme files as design_tokens block
+    finalContent = await injectDesignContext(finalContent, projectPath)
+
+    // @handoff:<key> — inject cross-agent handoff value
+    finalContent = await injectHandoffContext(finalContent)
+
+    // @analyze:<path> — run data analysis and inject summary + chart
+    finalContent = await injectAnalysisContext(
+      finalContent,
+      projectPath,
+      (img) => setPendingImages((prev) => [...prev, img]),
+    )
 
     // @docs — inject package documentation context
     finalContent = await injectDocsContext(finalContent)
@@ -1253,6 +1391,25 @@ export function ChatInput() {
             }}
           >
             <ImageIcon size={13} />
+          </button>
+        )}
+        {!isStreaming && (
+          <button
+            onClick={recording ? stopRecording : startRecording}
+            title={recording ? 'Stop recording' : 'Record voice input'}
+            style={{
+              background: 'none',
+              border: 'none',
+              borderRadius: 6,
+              padding: '5px 8px',
+              cursor: 'pointer',
+              color: recording ? accent.amber.fg : transcribing ? accent.amber.fg : fg[3],
+              display: 'flex',
+              alignItems: 'center',
+              animation: recording ? 'pulse 1.2s ease-in-out infinite' : 'none',
+            }}
+          >
+            {transcribing ? <Loader size={13} /> : recording ? <MicOff size={13} /> : <Mic size={13} />}
           </button>
         )}
         <input

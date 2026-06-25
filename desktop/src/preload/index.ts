@@ -5,7 +5,7 @@ import type { BM25Response, DocsResult, BrowseResult } from '../main/ipc/search.
 import type { GithubItem, GithubListItem } from '../main/ipc/github.handlers'
 import type { BlameEntry } from '../main/ipc/git.handlers'
 import type { ShadowInfo } from '../main/ipc/sandbox.handlers'
-import type { PlanSummary, TaskPlanDetail } from '../main/ipc/taskplanner.handlers'
+import type { PlanSummary, TaskPlanDetail, Subtask } from '../main/ipc/taskplanner.handlers'
 import type { ArchDocResult } from '../main/ipc/archDoc.handlers'
 import type { McpServerConfig, McpServerStatus } from '../main/mcp/mcpManager'
 import type { SessionSummary, VerifyResult, ComplianceSummary } from '../main/agentEventLog'
@@ -77,6 +77,34 @@ const api = {
       ipcRenderer.invoke('terminal:runCommand', { command, cwd }) as Promise<{ stdout: string; stderr: string; exitCode: number }>,
     logRun: (command: string, cwd: string, exitCode: number, outputSnippet: string) =>
       ipcRenderer.invoke('terminal:logRun', { command, cwd, exitCode, outputSnippet }) as Promise<void>,
+  },
+
+  // ── Monitor (lightweight built-in observability — live log tail + alerts) ──
+  monitor: {
+    start: (cmd: string, cwd?: string): Promise<{ id?: string; error?: string }> =>
+      ipcRenderer.invoke('monitor:start', cmd, cwd),
+    stop: (id: string): Promise<void> => ipcRenderer.invoke('monitor:stop', id),
+    listAlerts: (): Promise<import('../main/monitorAlertLog').AlertRecord[]> =>
+      ipcRenderer.invoke('monitor:listAlerts'),
+    clearAlerts: (): Promise<void> => ipcRenderer.invoke('monitor:clearAlerts'),
+    onData: (id: string, cb: (data: string) => void) => {
+      const ch = `monitor:data:${id}`
+      const handler = (_: Electron.IpcRendererEvent, data: string) => cb(data)
+      ipcRenderer.on(ch, handler)
+      return (): void => { ipcRenderer.removeListener(ch, handler) }
+    },
+    onAlert: (id: string, cb: (alert: import('../main/monitorAlertLog').AlertRecord) => void) => {
+      const ch = `monitor:alert:${id}`
+      const handler = (_: Electron.IpcRendererEvent, alert: import('../main/monitorAlertLog').AlertRecord) => cb(alert)
+      ipcRenderer.on(ch, handler)
+      return (): void => { ipcRenderer.removeListener(ch, handler) }
+    },
+    onExit: (id: string, cb: (code: number) => void) => {
+      const ch = `monitor:exit:${id}`
+      const handler = (_: Electron.IpcRendererEvent, code: number) => cb(code)
+      ipcRenderer.on(ch, handler)
+      return (): void => { ipcRenderer.removeListener(ch, handler) }
+    },
   },
 
   // ── Git ────────────────────────────────────────────────────────────────────
@@ -218,6 +246,18 @@ const api = {
     create: (goal: string): Promise<TaskPlanDetail | null> => ipcRenderer.invoke('taskplanner:new', goal),
     // Gap 83 — delete a plan file from disk
     delete: (planPath: string): Promise<{ deleted: boolean }> => ipcRenderer.invoke('taskplanner:delete', planPath),
+    // Ideation — replaces a plan's not-done subtasks with AI-authored ones
+    revise: (planFile: string, subtasks: Subtask[]): Promise<TaskPlanDetail | null> =>
+      ipcRenderer.invoke('taskplanner:revise', planFile, subtasks),
+  },
+
+  // ── Ideation (idea → AI-drafted spec → real subtasks) ──────────────────────
+  ideation: {
+    saveSpec: (slug: string, markdown: string): Promise<{ path: string } | null> =>
+      ipcRenderer.invoke('ideation:saveSpec', slug, markdown),
+    listSpecs: (): Promise<Array<{ slug: string; path: string; mtime: number }>> =>
+      ipcRenderer.invoke('ideation:listSpecs'),
+    readSpec: (slug: string): Promise<string | null> => ipcRenderer.invoke('ideation:readSpec', slug),
   },
 
   // ── LSP (subprocess bridge → pyright-langserver + typescript-language-server)
@@ -520,6 +560,10 @@ const api = {
     getPrDiff: (number: number): Promise<string> => ipcRenderer.invoke('github:getPrDiff', number),
     postReviewComments: (number: number, body: string, event: 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES', comments: import('../main/ipc/github.handlers').DraftReviewComment[]): Promise<boolean> =>
       ipcRenderer.invoke('github:postReviewComments', { number, body, event, comments }),
+    listWorkflowRuns: (branch: string): Promise<import('../main/ipc/github.handlers').WorkflowRun[]> =>
+      ipcRenderer.invoke('github:listWorkflowRuns', branch),
+    getRunStatus: (runId: number): Promise<import('../main/ipc/github.handlers').RunStatus | null> =>
+      ipcRenderer.invoke('github:getRunStatus', runId),
   },
 
   // ── Linear ───────────────────────────────────────────────────────────────────
@@ -532,6 +576,60 @@ const api = {
   jira: {
     getIssue: (issueKey: string): Promise<import('../main/ipc/linear.handlers').ExternalIssue | null> =>
       ipcRenderer.invoke('jira:getIssue', issueKey),
+  },
+
+  // ── Voice (Gap 137 — local Whisper transcription) ────────────────────────────
+  voice: {
+    transcribe: (audioBase64: string, mimeType: string): Promise<{ text: string } | null> =>
+      ipcRenderer.invoke('voice:transcribe', audioBase64, mimeType),
+  },
+
+  // ── Data analysis (Gap 136 — pandas + matplotlib) ────────────────────────────
+  data: {
+    analyze: (filePath: string, query: string): Promise<import('../main/ipc/dataAnalysis.handlers').DataAnalysisResult | null> =>
+      ipcRenderer.invoke('data:analyze', filePath, query),
+  },
+
+  // ── Design token extraction ───────────────────────────────────────────────
+  design: {
+    extract: (projectPath: string): Promise<import('../main/ipc/design.handlers').DesignTokens | null> =>
+      ipcRenderer.invoke('design:extract', projectPath),
+  },
+
+  // ── Project Wizard ────────────────────────────────────────────────────────
+  wizard: {
+    scaffold: (opts: import('../main/ipc/wizard.handlers').WizardScaffoldOpts): Promise<{ success: boolean; projectPath?: string; error?: string }> =>
+      ipcRenderer.invoke('wizard:scaffold', opts),
+    onDone: (cb: (data: { projectPath: string }) => void) => {
+      const handler = (_: Electron.IpcRendererEvent, data: { projectPath: string }) => cb(data)
+      ipcRenderer.on('wizard:done', handler)
+      return (): void => { ipcRenderer.removeListener('wizard:done', handler) }
+    },
+  },
+
+  // ── Notifications (Slack outbound) ───────────────────────────────────────
+  notifications: {
+    send: (text: string): Promise<boolean> => ipcRenderer.invoke('notifications:send', { text }),
+  },
+
+  // ── Cross-agent handoff store ─────────────────────────────────────────────
+  handoff: {
+    set: (key: string, value: string): Promise<void> => ipcRenderer.invoke('handoff:set', key, value),
+    get: (key: string): Promise<string | null> => ipcRenderer.invoke('handoff:get', key),
+    list: (): Promise<Array<{ key: string; preview: string }>> => ipcRenderer.invoke('handoff:list'),
+    clear: (key: string): Promise<boolean> => ipcRenderer.invoke('handoff:clear', key),
+  },
+
+  // ── Inbound webhook listener (Slack slash commands, GitHub PR events) ────
+  webhook: {
+    start: (): Promise<{ success: boolean; port?: number; error?: string }> => ipcRenderer.invoke('webhook:start'),
+    stop: (): Promise<boolean> => ipcRenderer.invoke('webhook:stop'),
+    status: (): Promise<{ running: boolean; port: number }> => ipcRenderer.invoke('webhook:status'),
+  },
+
+  // ── Team Collaboration (shared agent sessions — remote watch + approve) ──
+  collab: {
+    getInviteLink: (sessionId: string): Promise<string> => ipcRenderer.invoke('collab:getInviteLink', sessionId),
   },
 
   // ── Agent (shadow workspace + autonomous orchestrator) ────────────────────────
@@ -548,10 +646,10 @@ const api = {
       ipcRenderer.invoke('agent:discardShadow', shadowId),
     startAutonomous: (opts: { planFile: string; model: string }): Promise<string | null> =>
       ipcRenderer.invoke('agent:startAutonomous', opts),
-    stopAutonomous: (): Promise<void> =>
-      ipcRenderer.invoke('agent:stopAutonomous'),
-    getActiveSession: (): Promise<string | null> =>
-      ipcRenderer.invoke('agent:getActiveSession'),
+    stopAutonomous: (sessionId: string): Promise<boolean> =>
+      ipcRenderer.invoke('agent:stopAutonomous', sessionId),
+    getActiveSessions: (): Promise<string[]> =>
+      ipcRenderer.invoke('agent:getActiveSessions'),
     runTestFixLoop: (opts: { command: string; model: string }): Promise<string | null> =>
       ipcRenderer.invoke('agent:runTestFixLoop', opts),
     listEventSessions: (): Promise<SessionSummary[]> =>
@@ -572,6 +670,10 @@ const api = {
       ipcRenderer.invoke('agent:exportReportHtml', sessionId),
     exportReportPdf: (sessionId: string): Promise<string | null> =>
       ipcRenderer.invoke('agent:exportReportPdf', sessionId),
+    getComplianceJson: (sessionId: string): Promise<string | null> =>
+      ipcRenderer.invoke('agent:getComplianceJson', sessionId),
+    mergeSession: (branch: string): Promise<{ success: boolean; conflicts: string[]; error?: string }> =>
+      ipcRenderer.invoke('agent:mergeSession', branch),
     onProgress: (cb: (progress: unknown) => void) => {
       const handler = (_: Electron.IpcRendererEvent, progress: unknown) => cb(progress)
       ipcRenderer.on('agent:progress', handler)
@@ -584,6 +686,12 @@ const api = {
     detect: (): Promise<string | null> => ipcRenderer.invoke('deploy:detect'),
     run: (): Promise<{ success: boolean; deployUrl?: string; error?: string }> =>
       ipcRenderer.invoke('deploy:run'),
+    history: (): Promise<import('../main/deployHistory').DeployRecord[]> =>
+      ipcRenderer.invoke('deploy:history'),
+    promote: (deployId: string): Promise<{ success: boolean; deployUrl?: string; error?: string }> =>
+      ipcRenderer.invoke('deploy:promote', deployId),
+    rollback: (deployId: string): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('deploy:rollback', deployId),
   },
 
   // ── Policy (Gap 67 — dry-run governance rules against a sample value) ──────

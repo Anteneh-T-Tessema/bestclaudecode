@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Github, RefreshCw, GitPullRequest, CircleDot, ExternalLink, Check, MessageSquare, XCircle, Bot } from 'lucide-react'
+import { Github, RefreshCw, GitPullRequest, CircleDot, ExternalLink, Check, MessageSquare, XCircle, Bot, CheckCircle2, AlertCircle, Loader2, Activity } from 'lucide-react'
 import { EmptyState } from '../EmptyState'
 import { toast } from '../../store/useToastStore'
 import { PanelHeader, IconButton, accent, border, fg, surface } from '../../design'
@@ -17,7 +17,7 @@ interface GithubListItem {
   labels?: string[]
 }
 
-type Kind = 'prs' | 'issues'
+type Kind = 'prs' | 'issues' | 'runs'
 type StateFilter = 'open' | 'closed' | 'all'
 
 function relativeDate(iso: string): string {
@@ -225,10 +225,55 @@ function ItemRow({ item, kind, onChanged }: { item: GithubListItem; kind: Kind; 
   )
 }
 
+interface WorkflowRun {
+  databaseId: number
+  name: string
+  status: string
+  conclusion: string | null
+  url: string
+  createdAt: string
+}
+
+function RunStatusIcon({ status, conclusion }: { status: string; conclusion: string | null }) {
+  if (status === 'completed') {
+    if (conclusion === 'success') return <CheckCircle2 size={11} style={{ color: accent.green.fg }} />
+    if (conclusion === 'failure') return <XCircle size={11} style={{ color: accent.red.fg }} />
+    return <AlertCircle size={11} style={{ color: accent.amber.fg }} />
+  }
+  return <Loader2 size={11} style={{ color: accent.cyan.fg, animation: 'spin 1s linear infinite' }} />
+}
+
+function RunRow({ run }: { run: WorkflowRun }) {
+  const age = (() => {
+    const d = new Date(run.createdAt)
+    const mins = Math.floor((Date.now() - d.getTime()) / 60000)
+    if (mins < 60) return `${mins}m ago`
+    const hrs = Math.floor(mins / 60)
+    if (hrs < 24) return `${hrs}h ago`
+    return `${Math.floor(hrs / 24)}d ago`
+  })()
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: `1px solid ${border[0]}` }}>
+      <RunStatusIcon status={run.status} conclusion={run.conclusion} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: fg[0], overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {run.name}
+        </div>
+        <div style={{ fontSize: 9, color: fg[3], marginTop: 2 }}>{run.status}{run.conclusion ? ` · ${run.conclusion}` : ''} · {age}</div>
+      </div>
+      <a href={run.url} target="_blank" rel="noreferrer" aria-label="Open run in GitHub" style={{ color: fg[3], display: 'flex' }}>
+        <ExternalLink size={10} />
+      </a>
+    </div>
+  )
+}
+
 export function GitHubPanel() {
   const [kind, setKind] = useState<Kind>('prs')
   const [stateFilter, setStateFilter] = useState<StateFilter>('open')
   const [items, setItems] = useState<GithubListItem[]>([])
+  const [runs, setRuns] = useState<WorkflowRun[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(false)
 
@@ -236,10 +281,16 @@ export function GitHubPanel() {
     setLoading(true)
     setError(false)
     try {
-      const result = kind === 'prs'
-        ? await window.api.github.listPrs(stateFilter)
-        : await window.api.github.listIssues(stateFilter)
-      setItems(result)
+      if (kind === 'runs') {
+        const branch = await window.api.git.branch(window.api.settings.get('projectPath') as unknown as string).catch(() => null)
+        const result = await window.api.github.listWorkflowRuns(branch ?? 'main')
+        setRuns(result)
+      } else {
+        const result = kind === 'prs'
+          ? await window.api.github.listPrs(stateFilter)
+          : await window.api.github.listIssues(stateFilter)
+        setItems(result)
+      }
     } catch {
       setError(true)
     } finally {
@@ -255,6 +306,8 @@ export function GitHubPanel() {
     </IconButton>
   )
 
+  const TAB_LABELS: Record<Kind, string> = { prs: 'Pull Requests', issues: 'Issues', runs: 'CI Runs' }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       <PanelHeader
@@ -264,7 +317,7 @@ export function GitHubPanel() {
       />
 
       <div style={{ display: 'flex', gap: 4, padding: '8px 10px', borderBottom: `1px solid ${border[1]}`, flexShrink: 0 }}>
-        {(['prs', 'issues'] as Kind[]).map((k) => (
+        {(['prs', 'issues', 'runs'] as Kind[]).map((k) => (
           <button
             key={k}
             type="button"
@@ -276,22 +329,24 @@ export function GitHubPanel() {
               color: kind === k ? accent.violet.fg : fg[3],
             }}
           >
-            {k === 'prs' ? 'Pull Requests' : 'Issues'}
+            {TAB_LABELS[k]}
           </button>
         ))}
-        <select
-          value={stateFilter}
-          onChange={(e) => setStateFilter(e.target.value as StateFilter)}
-          title="Filter by state"
-          style={{
-            marginLeft: 'auto', background: surface.raised, border: `1px solid ${border[0]}`,
-            borderRadius: 4, padding: '2px 6px', fontSize: 10, color: fg[0], outline: 'none',
-          }}
-        >
-          <option value="open">Open</option>
-          <option value="closed">Closed</option>
-          <option value="all">All</option>
-        </select>
+        {kind !== 'runs' && (
+          <select
+            value={stateFilter}
+            onChange={(e) => setStateFilter(e.target.value as StateFilter)}
+            title="Filter by state"
+            style={{
+              marginLeft: 'auto', background: surface.raised, border: `1px solid ${border[0]}`,
+              borderRadius: 4, padding: '2px 6px', fontSize: 10, color: fg[0], outline: 'none',
+            }}
+          >
+            <option value="open">Open</option>
+            <option value="closed">Closed</option>
+            <option value="all">All</option>
+          </select>
+        )}
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto' }}>
@@ -302,15 +357,23 @@ export function GitHubPanel() {
             description="Requires the `gh` CLI installed and authenticated (`gh auth login`) in this project's repo."
           />
         )}
-        {!error && !loading && items.length === 0 && (
+        {kind === 'runs' && !error && !loading && runs.length === 0 && (
+          <EmptyState
+            icon={<Activity size={20} />}
+            title="No workflow runs"
+            description="No CI runs found for the current branch."
+          />
+        )}
+        {kind === 'runs' && runs.map((run) => <RunRow key={run.databaseId} run={run} />)}
+        {kind !== 'runs' && !error && !loading && items.length === 0 && (
           <EmptyState
             icon={kind === 'prs' ? <GitPullRequest size={20} /> : <CircleDot size={20} />}
             title={`No ${stateFilter} ${kind === 'prs' ? 'pull requests' : 'issues'}`}
             description="Nothing to show for this filter."
           />
         )}
-        {items.map((item) => (
-          <ItemRow key={item.number} item={item} kind={kind} onChanged={load} />
+        {kind !== 'runs' && items.map((item) => (
+          <ItemRow key={item.number} item={item} kind={kind as 'prs' | 'issues'} onChanged={load} />
         ))}
       </div>
     </div>

@@ -146,6 +146,22 @@ export interface DraftReviewComment {
   body: string
 }
 
+export async function mergeBranch(
+  cwd: string,
+  branch: string,
+): Promise<{ success: boolean; conflicts: string[]; error?: string }> {
+  try {
+    const { stdout, stderr } = await exec('git', ['merge', branch, '--no-commit', '--no-ff'], { cwd })
+    const combined = stdout + stderr
+    const conflicts = [...combined.matchAll(/CONFLICT[^:]*:\s+(.+)/g)].map((m) => m[1].trim())
+    return { success: conflicts.length === 0, conflicts }
+  } catch (err) {
+    const msg = String(err)
+    const conflicts = [...msg.matchAll(/CONFLICT[^:]*:\s+(.+)/g)].map((m) => m[1].trim())
+    return { success: false, conflicts, error: msg }
+  }
+}
+
 export async function postPrReview(
   cwd: string,
   number: number,

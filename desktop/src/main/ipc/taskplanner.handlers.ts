@@ -15,6 +15,7 @@ export interface Subtask {
   description: string
   depends_on: string[]
   done: boolean
+  role?: string
 }
 
 export interface TaskPlanDetail {
@@ -46,6 +47,20 @@ export function registerTaskPlannerHandlers(): void {
     const result = await runPythonJson(['-m', 'src.task_planner', '--new', goal, '--save'])
     return result.ok ? (result.stats as TaskPlanDetail) : null
   })
+
+  // Ideation — replaces a freshly-created plan's placeholder subtasks with
+  // AI-authored ones. `--revise --json` only prints {done, total} counts
+  // (verified in task_planner.py), not the revised plan, so we follow up
+  // with `--show` to return the full TaskPlanDetail the caller needs.
+  ipcMain.handle(
+    'taskplanner:revise',
+    async (_event, planFile: string, subtasks: Subtask[]): Promise<TaskPlanDetail | null> => {
+      const revise = await runPythonJson(['-m', 'src.task_planner', '--revise', planFile, JSON.stringify(subtasks), '--json'])
+      if (!revise.ok) return null
+      const show = await runPythonJson(['-m', 'src.task_planner', '--show', planFile, '--json'])
+      return show.ok ? (show.stats as TaskPlanDetail) : null
+    }
+  )
 
   // Gap 83 — delete a plan file from disk.
   ipcMain.handle('taskplanner:delete', async (_event, planPath: string): Promise<{ deleted: boolean }> => {

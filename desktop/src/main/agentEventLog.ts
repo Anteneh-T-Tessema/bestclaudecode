@@ -116,6 +116,47 @@ export function listSessions(): SessionSummary[] {
   }
 }
 
+export interface SessionReport {
+  sessionId: string
+  generatedAt: string
+  events: Array<Record<string, unknown>>
+  verification: VerifyResult
+  summary: {
+    totalEdits: number
+    totalRuns: number
+    blockedEvents: number
+    approvalRequests: number
+    approvalRejections: number
+  }
+}
+
+/** Writes a machine-readable JSON compliance report alongside the markdown report. Returns the file path or null. */
+export function writeComplianceJson(sessionId: string): string | null {
+  try {
+    const events = readEvents(sessionId)
+    if (events.length === 0) return null
+    const verification = verifyEventLog(sessionId)
+    const report: SessionReport = {
+      sessionId,
+      generatedAt: new Date().toISOString(),
+      events,
+      verification,
+      summary: {
+        totalEdits: events.filter((e) => e.status === 'edit-applied').length,
+        totalRuns: events.filter((e) => e.status === 'run-executed').length,
+        blockedEvents: events.filter((e) => e.status === 'blocked').length,
+        approvalRequests: events.filter((e) => e.status === 'pending-approval').length,
+        approvalRejections: events.filter((e) => e.status === 'approval-rejected').length,
+      },
+    }
+    const outPath = path.join(logDir(), `${sessionId}-report.json`)
+    fs.writeFileSync(outPath, JSON.stringify(report, null, 2), 'utf-8')
+    return outPath
+  } catch {
+    return null
+  }
+}
+
 export interface ComplianceSummary {
   totalSessions: number
   totalBlockedEvents: number

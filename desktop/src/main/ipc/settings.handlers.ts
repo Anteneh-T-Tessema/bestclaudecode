@@ -26,6 +26,8 @@ const MUTABLE_KEYS = new Set([
   'livePreviewUrlsByProject',
   // Gap 134 — Jira non-secret config fields
   'jiraEmail', 'jiraBaseUrl',
+  // Inbound webhook listener port (non-secret; the shared secret is webhookSecret, encrypted).
+  'webhookPort',
 ])
 
 interface EngineHealth {

@@ -1,7 +1,26 @@
 import { ipcMain } from 'electron'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
 import { runPythonJson } from '../pythonBridge'
 import { repoRoot } from '../paths'
 import { createPr, listPrs, listIssues, commentOnPr, reviewPr, getPrDiff, postPrReview, type GithubListItem, type DraftReviewComment } from '../gitOps'
+
+const exec = promisify(execFile)
+
+export interface WorkflowRun {
+  databaseId: number
+  name: string
+  status: string
+  conclusion: string | null
+  url: string
+  createdAt: string
+}
+
+export interface RunStatus {
+  status: string
+  conclusion: string | null
+  jobs: Array<{ name: string; status: string; conclusion: string | null }>
+}
 
 export type { GithubListItem, DraftReviewComment }
 
@@ -71,5 +90,30 @@ export function registerGithubHandlers(): void {
     { number, body, event: evt, comments }: { number: number; body: string; event: 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES'; comments: DraftReviewComment[] },
   ): Promise<boolean> => {
     return postPrReview(repoRoot(), number, { body, event: evt, comments })
+  })
+
+  ipcMain.handle('github:listWorkflowRuns', async (_event, branch: string): Promise<WorkflowRun[]> => {
+    try {
+      const { stdout } = await exec('gh', [
+        'run', 'list', '--branch', branch,
+        '--json', 'databaseId,name,status,conclusion,url,createdAt',
+        '--limit', '10',
+      ], { cwd: repoRoot() })
+      return JSON.parse(stdout.trim()) as WorkflowRun[]
+    } catch {
+      return []
+    }
+  })
+
+  ipcMain.handle('github:getRunStatus', async (_event, runId: number): Promise<RunStatus | null> => {
+    try {
+      const { stdout } = await exec('gh', [
+        'run', 'view', String(runId),
+        '--json', 'status,conclusion,jobs',
+      ], { cwd: repoRoot() })
+      return JSON.parse(stdout.trim()) as RunStatus
+    } catch {
+      return null
+    }
   })
 }

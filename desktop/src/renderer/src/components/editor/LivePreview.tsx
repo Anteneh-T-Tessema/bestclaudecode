@@ -4,6 +4,7 @@ import { surface, border, fg, accent } from '../../design'
 import { useSettingsStore } from '../../store/useSettingsStore'
 import type { WebviewElement, ConsoleMessageEvent } from '../../types/webview'
 import { InspectResultCard } from './InspectResultCard'
+import { toast } from '../../store/useToastStore'
 
 // HTMLWebViewElement (declared by @types/react) is an empty marker interface —
 // cast through it to access the actual Electron webview methods/events.
@@ -120,6 +121,16 @@ export function LivePreview() {
     if (isElectron && webview) webview.reload()
     else if (iframeRef.current) iframeRef.current.src = activeUrl
   }, [isElectron, activeUrl])
+
+  // Mount-once: show a toast when /scaffold generates a component.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const componentName = (e as CustomEvent<{ componentName: string }>).detail?.componentName ?? 'Component'
+      toast.info(`"${componentName}" scaffolded — click Refresh to preview`)
+    }
+    window.addEventListener('lakoora:scaffold:generated', handler)
+    return () => window.removeEventListener('lakoora:scaffold:generated', handler)
+  }, [])
 
   // Mount-once: register the console-message listener for click results.
   useEffect(() => {

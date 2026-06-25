@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Files, GitBranch, Search, MessageSquare, ShieldCheck, Settings, Brain, Radar, ListTodo, BookOpen, Bot, Bug, ListTree, StickyNote, DollarSign, Map, Github, KeyRound } from 'lucide-react'
+import { Files, GitBranch, Search, MessageSquare, ShieldCheck, Settings, Brain, Radar, ListTodo, BookOpen, Bot, Bug, ListTree, StickyNote, DollarSign, Map, Github, KeyRound, LayoutGrid, Wand2, Activity, Lightbulb } from 'lucide-react'
 import { useAppStore, type ActivityId } from '../store/useAppStore'
 import { IconButton, Tooltip, accent, surface, border, type AccentName } from '../design'
 
@@ -21,6 +21,7 @@ const ACTIVITIES: ActivityDef[] = [
   { id: 'audit', icon: ShieldCheck, label: 'Audit Trail', accentName: 'green' },
   { id: 'archdoc', icon: BookOpen, label: 'Architecture Doc', accentName: 'blue' },
   { id: 'agent', icon: Bot, label: 'Agent Progress', accentName: 'violet' },
+  { id: 'swarm', icon: LayoutGrid, label: 'Swarm (Active Sessions)', accentName: 'amber' },
   { id: 'debug', icon: Bug, label: 'Debug', accentName: 'red' },
   { id: 'outline', icon: ListTree, label: 'Outline', accentName: 'cyan' },
   { id: 'notepads', icon: StickyNote, label: 'Notepads', accentName: 'amber' },
@@ -28,6 +29,9 @@ const ACTIVITIES: ActivityDef[] = [
   { id: 'map', icon: Map, label: 'Codebase Map', accentName: 'cyan' },
   { id: 'github', icon: Github, label: 'GitHub', accentName: 'violet' },
   { id: 'env', icon: KeyRound, label: 'Environment', accentName: 'amber' },
+  { id: 'wizard', icon: Wand2, label: 'New Project Wizard', accentName: 'green' },
+  { id: 'monitor', icon: Activity, label: 'Monitor', accentName: 'red' },
+  { id: 'ideation', icon: Lightbulb, label: 'Ideation', accentName: 'amber' },
 ]
 
 const BOTTOM: ActivityDef = { id: 'settings', icon: Settings, label: 'Settings' }
@@ -79,14 +83,17 @@ function ActivityButton({
 
 export function ActivityBar() {
   const { activeActivity, setActiveActivity } = useAppStore()
-  const [agentRunning, setAgentRunning] = useState(false)
+  const [runningCount, setRunningCount] = useState(0)
 
   useEffect(() => {
-    window.api.agent.getActiveSession().then((id) => setAgentRunning(!!id))
+    window.api.agent.getActiveSessions().then((ids) => setRunningCount(ids.length))
     const off = window.api.agent.onProgress((raw: unknown) => {
       const p = raw as { status: string }
-      if (p.status === 'running' || p.status === 'retrying') setAgentRunning(true)
-      if (p.status === 'finished' || p.status === 'blocked' || p.status === 'error') setAgentRunning(false)
+      const active = ['running', 'retrying', 'preparing', 'finalizing', 'deploying', 'pending-approval']
+      const terminal = ['finished', 'blocked', 'error', 'pr-opened', 'push-failed-kept-locally', 'deployed', 'approval-rejected']
+      if (active.includes(p.status) || terminal.includes(p.status)) {
+        window.api.agent.getActiveSessions().then((ids) => setRunningCount(ids.length))
+      }
     })
     return off
   }, [])
@@ -115,15 +122,21 @@ export function ActivityBar() {
               isActive={activeActivity === activity.id}
               onClick={() => setActiveActivity(activity.id)}
             />
-            {activity.id === 'agent' && agentRunning && (
+            {activity.id === 'agent' && runningCount > 0 && (
               <span style={{
                 position: 'absolute', top: 4, right: 4,
-                width: 7, height: 7, borderRadius: '50%',
+                width: runningCount > 1 ? 14 : 7,
+                height: runningCount > 1 ? 14 : 7,
+                borderRadius: '50%',
                 background: accent.amber.fg,
                 boxShadow: `0 0 6px ${accent.amber.fg}`,
                 animation: 'pulse 1.2s ease-in-out infinite',
                 pointerEvents: 'none',
-              }} />
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 9, color: '#000', fontWeight: 700,
+              }}>
+                {runningCount > 1 ? runningCount : null}
+              </span>
             )}
           </div>
         ))}

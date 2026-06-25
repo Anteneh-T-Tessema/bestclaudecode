@@ -64,14 +64,18 @@ class Subtask:
     description: str
     depends_on: list[str] = field(default_factory=list)
     done: bool = False
+    role: str = ""
 
     def to_dict(self) -> dict:
-        return {
+        d: dict = {
             "id": self.id,
             "description": self.description,
             "depends_on": self.depends_on,
             "done": self.done,
         }
+        if self.role:
+            d["role"] = self.role
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "Subtask":
@@ -80,6 +84,7 @@ class Subtask:
             description=d["description"],
             depends_on=d.get("depends_on", []),
             done=d.get("done", False),
+            role=d.get("role", ""),
         )
 
 

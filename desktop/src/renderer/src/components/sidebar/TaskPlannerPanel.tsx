@@ -18,6 +18,7 @@ interface Subtask {
   description: string
   depends_on: string[]
   done: boolean
+  role?: string
 }
 
 interface TaskPlanDetail {
@@ -149,6 +150,13 @@ function PlanRow({
                 }}
               >
                 [{s.id}] {s.description}
+                {s.role && (
+                  <span style={{
+                    marginLeft: 4, fontSize: 8, fontWeight: 700, letterSpacing: '0.05em',
+                    color: s.role === 'security' ? accent.violet.fg : s.role === 'frontend' ? accent.cyan.fg : s.role === 'test' ? accent.green.fg : s.role === 'docs' ? fg[3] : accent.amber.fg,
+                    textTransform: 'uppercase',
+                  }}>{s.role}</span>
+                )}
                 {s.depends_on.length > 0 && (
                   <span style={{ color: fg[4], fontSize: 9 }}> (after: {s.depends_on.join(', ')})</span>
                 )}
@@ -168,7 +176,7 @@ export function TaskPlannerPanel() {
   const [loading, setLoading] = useState(false)
   const [newGoal, setNewGoal] = useState('')
   const [creating, setCreating] = useState(false)
-  const [activeSessionPlanFile, setActiveSessionPlanFile] = useState<string | null>(null)
+  const [activeSessionsByPlanFile, setActiveSessionsByPlanFile] = useState<Map<string, string>>(new Map())
 
   const activeModel = useChatStore((s) => s.activeModel)
 
@@ -239,16 +247,17 @@ export function TaskPlannerPanel() {
     const model = activeModel ?? 'claude-sonnet-4-6'
     const sessionId = await window.api.agent.startAutonomous({ planFile, model })
     if (sessionId) {
-      setActiveSessionPlanFile(planFile)
+      setActiveSessionsByPlanFile((prev) => new Map([...prev, [planFile, sessionId]]))
       toast.success('Autonomous agent started')
     } else {
       toast.error('Failed to start autonomous agent')
     }
   }
 
-  const stopAutonomous = async () => {
-    await window.api.agent.stopAutonomous()
-    setActiveSessionPlanFile(null)
+  const stopAutonomous = async (planFile: string) => {
+    const sessionId = activeSessionsByPlanFile.get(planFile)
+    if (sessionId) await window.api.agent.stopAutonomous(sessionId)
+    setActiveSessionsByPlanFile((prev) => { const m = new Map(prev); m.delete(planFile); return m })
     toast.success('Autonomous agent stopped')
   }
 
@@ -261,16 +270,16 @@ export function TaskPlannerPanel() {
         ))
       }
       if (p.status === 'finished') {
-        setActiveSessionPlanFile(null)
+        setActiveSessionsByPlanFile((prev) => { const m = new Map(prev); m.delete(p.planFile); return m })
         toast.success('Agent finished all subtasks')
         refresh()
       }
       if (p.status === 'blocked') {
-        setActiveSessionPlanFile(null)
+        setActiveSessionsByPlanFile((prev) => { const m = new Map(prev); m.delete(p.planFile); return m })
         toast.error(`Agent blocked: ${p.error ?? 'unknown error'}`)
       }
       if (p.status === 'error') {
-        setActiveSessionPlanFile(null)
+        setActiveSessionsByPlanFile((prev) => { const m = new Map(prev); m.delete(p.planFile); return m })
         toast.error(`Agent error: ${p.error ?? 'unknown error'}`)
       }
     })
@@ -349,9 +358,9 @@ export function TaskPlannerPanel() {
             onToggle={() => toggleExpand(summary)}
             onMarkDone={(id) => markDone(summary, id)}
             onStartAutonomous={() => startAutonomous(summary.path)}
-            onStopAutonomous={stopAutonomous}
+            onStopAutonomous={() => stopAutonomous(summary.path)}
             onDelete={() => deletePlan(summary)}
-            isRunning={activeSessionPlanFile === summary.path}
+            isRunning={activeSessionsByPlanFile.has(summary.path)}
           />
         ))}
       </div>

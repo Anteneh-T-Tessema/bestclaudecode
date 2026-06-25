@@ -19,6 +19,16 @@ import { registerPolicyHandlers } from './policy.handlers'
 import { registerDeployHandlers } from './deploy.handlers'
 import { registerLinearHandlers } from './linear.handlers'
 import { registerJiraHandlers } from './jira.handlers'
+import { registerVoiceHandlers } from './voice.handlers'
+import { registerDataAnalysisHandlers } from './dataAnalysis.handlers'
+import { registerDesignHandlers } from './design.handlers'
+import { registerHandoffHandlers } from './handoff.handlers'
+import { registerNotificationsHandlers } from './notifications.handlers'
+import { registerWizardHandlers } from './wizard.handlers'
+import { registerWebhookHandlers } from './webhook.handlers'
+import { registerMonitorHandlers } from './monitor.handlers'
+import { registerIdeationHandlers } from './ideation.handlers'
+import { registerCollabHandlers } from './collab.handlers'
 
 export function registerAllIPC(): void {
   registerDecisionsHandlers()
@@ -41,6 +51,16 @@ export function registerAllIPC(): void {
   registerDeployHandlers()
   registerLinearHandlers()
   registerJiraHandlers()
+  registerVoiceHandlers()
+  registerDataAnalysisHandlers()
+  registerDesignHandlers()
+  registerHandoffHandlers()
+  registerNotificationsHandlers()
+  registerWizardHandlers()
+  registerWebhookHandlers()
+  registerMonitorHandlers()
+  registerIdeationHandlers()
+  registerCollabHandlers()
 
   ipcMain.on('window:minimize', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)

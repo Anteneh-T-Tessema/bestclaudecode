@@ -173,7 +173,7 @@ function StatusRow({ label, ok, detail }: { label: string; ok: boolean; detail?:
 }
 
 // Gap 88 — these three are encrypted via safeStorage (settings:setSecret), not the plain settings:set channel.
-const SECRET_FIELDS = new Set(['anthropicApiKey', 'openaiApiKey', 'googleApiKey', 'linearApiKey', 'jiraApiToken'])
+const SECRET_FIELDS = new Set(['anthropicApiKey', 'openaiApiKey', 'googleApiKey', 'linearApiKey', 'jiraApiToken', 'slackWebhookUrl', 'webhookSecret'])
 
 export function SettingsPanel() {
   const [engine, setEngine] = useState<EngineHealth | null>(null)
@@ -195,6 +195,11 @@ export function SettingsPanel() {
   const [jiraApiToken, setJiraApiToken] = useState('')
   const [jiraEmail, setJiraEmail] = useState('')
   const [jiraBaseUrl, setJiraBaseUrl] = useState('')
+  const [slackWebhookUrl, setSlackWebhookUrl] = useState('')
+  const [webhookSecret, setWebhookSecret] = useState('')
+  const [webhookPort, setWebhookPort] = useState('7391')
+  const [webhookStatus, setWebhookStatus] = useState<{ running: boolean; port: number } | null>(null)
+  const [webhookBusy, setWebhookBusy] = useState(false)
   const [savedField, setSavedField] = useState<string | null>(null)
 
   // .lakoorarules editor
@@ -218,13 +223,19 @@ export function SettingsPanel() {
       window.api.settings.getSecret('googleApiKey'),
       window.api.settings.getSecret('linearApiKey'),
       window.api.settings.getSecret('jiraApiToken'),
-    ]).then(([a, o, g, lin, jir]) => {
+      window.api.settings.getSecret('slackWebhookUrl'),
+      window.api.settings.getSecret('webhookSecret'),
+    ]).then(([a, o, g, lin, jir, slack, webhookSec]) => {
       setAnthropicKey(a)
       setOpenaiKey(o)
       setGoogleKey(g)
       setLinearApiKey(lin)
       setJiraApiToken(jir)
+      setSlackWebhookUrl(slack)
+      setWebhookSecret(webhookSec)
     })
+    window.api.settings.get('webhookPort').then((v) => { if (v) setWebhookPort(String(v)) }).catch(() => {})
+    window.api.webhook.status().then(setWebhookStatus).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -279,7 +290,7 @@ export function SettingsPanel() {
   }
 
   const saveKey = useCallback(
-    async (field: 'anthropicApiKey' | 'openaiApiKey' | 'googleApiKey' | 'ollamaUrl' | 'linearApiKey' | 'jiraApiToken' | 'jiraEmail' | 'jiraBaseUrl', value: string) => {
+    async (field: 'anthropicApiKey' | 'openaiApiKey' | 'googleApiKey' | 'ollamaUrl' | 'linearApiKey' | 'jiraApiToken' | 'jiraEmail' | 'jiraBaseUrl' | 'slackWebhookUrl' | 'webhookSecret' | 'webhookPort', value: string) => {
       if (SECRET_FIELDS.has(field)) {
         const result = await window.api.settings.setSecret(field, value)
         if (!result.success) { toast.error('Failed to save key'); return }
@@ -291,6 +302,28 @@ export function SettingsPanel() {
     },
     [saveSettings]
   )
+
+  const toggleWebhookServer = useCallback(async () => {
+    setWebhookBusy(true)
+    try {
+      if (webhookStatus?.running) {
+        await window.api.webhook.stop()
+        setWebhookStatus((s) => (s ? { ...s, running: false } : s))
+        toast.success('Webhook server stopped')
+        return
+      }
+      await saveKey('webhookPort', webhookPort)
+      const result = await window.api.webhook.start()
+      if (result.success) {
+        setWebhookStatus({ running: true, port: result.port ?? parseInt(webhookPort, 10) })
+        toast.success(`Webhook server listening on port ${result.port}`)
+      } else {
+        toast.error(result.error ?? 'Failed to start webhook server')
+      }
+    } finally {
+      setWebhookBusy(false)
+    }
+  }, [webhookStatus, webhookPort, saveKey])
 
   const checkAll = useCallback(async () => {
     setChecking(true)
@@ -428,6 +461,67 @@ export function SettingsPanel() {
               saved={savedField === 'jiraBaseUrl'}
               secret={false}
             />
+          </div>
+        </div>
+
+        <div>
+          <div style={{
+            fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+            color: fg[3], marginBottom: 8, paddingBottom: 6, borderBottom: `1px solid ${border[1]}`,
+          }}>
+            Notifications
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <ApiKeyField
+              label="Slack Webhook URL"
+              value={slackWebhookUrl}
+              onChange={setSlackWebhookUrl}
+              onSave={() => saveKey('slackWebhookUrl', slackWebhookUrl)}
+              placeholder="https://hooks.slack.com/services/…"
+              saved={savedField === 'slackWebhookUrl'}
+              secret={true}
+            />
+          </div>
+        </div>
+
+        <div>
+          <div style={{
+            fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+            color: fg[3], marginBottom: 8, paddingBottom: 6, borderBottom: `1px solid ${border[1]}`,
+          }}>
+            Webhooks
+          </div>
+          <p style={{ fontSize: 10, color: fg[3], margin: '0 0 10px', lineHeight: 1.5 }}>
+            Accept inbound Slack slash commands (POST /webhook/slack) and GitHub PR-opened
+            events (POST /webhook/github) to trigger Lakoora agents. GET /health for status.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <ApiKeyField
+              label="Port"
+              value={webhookPort}
+              onChange={setWebhookPort}
+              onSave={() => saveKey('webhookPort', webhookPort)}
+              placeholder="7391"
+              saved={savedField === 'webhookPort'}
+              secret={false}
+            />
+            <ApiKeyField
+              label="Shared Secret (optional, sent as X-Lakoora-Secret)"
+              value={webhookSecret}
+              onChange={setWebhookSecret}
+              onSave={() => saveKey('webhookSecret', webhookSecret)}
+              placeholder="leave blank to accept unauthenticated requests"
+              saved={savedField === 'webhookSecret'}
+              secret={true}
+            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <Button variant="ghost" disabled={webhookBusy} onClick={toggleWebhookServer}>
+                {webhookStatus?.running ? 'Stop Server' : 'Start Server'}
+              </Button>
+              <span style={{ fontSize: 10, fontWeight: 600, color: webhookStatus?.running ? accent.green.fg : fg[3] }}>
+                {webhookStatus?.running ? `● Listening on :${webhookStatus.port}` : '○ Stopped'}
+              </span>
+            </div>
           </div>
         </div>
 
