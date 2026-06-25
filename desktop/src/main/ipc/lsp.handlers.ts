@@ -82,6 +82,29 @@ function registerForLang(lang: LangKey): void {
   ipcMain.handle(`lsp:${lang}:semanticTokens`, (_event, uri: string) =>
     client.semanticTokens(uri)
   )
+  // Gap 121 — document symbols
+  ipcMain.handle(`lsp:${lang}:documentSymbol`, (_event, uri: string) =>
+    client.documentSymbol(uri)
+  )
+  // Gap 122 — selection range
+  ipcMain.handle(`lsp:${lang}:selectionRange`, (_event, uri: string, positions: Array<{ line: number; character: number }>) =>
+    client.selectionRange(uri, positions)
+  )
+  // Gap 123 — on-type formatting
+  ipcMain.handle(`lsp:${lang}:onTypeFormatting`, (_event, uri: string, line: number, character: number, ch: string, tabSize: number, insertSpaces: boolean) =>
+    client.onTypeFormatting(uri, line, character, ch, tabSize, insertSpaces)
+  )
+  // Gap 124 — linked editing ranges
+  ipcMain.handle(`lsp:${lang}:linkedEditingRange`, (_event, uri: string, line: number, character: number) =>
+    client.linkedEditingRange(uri, line, character)
+  )
+  // Gap 125 — document links
+  ipcMain.handle(`lsp:${lang}:documentLink`, (_event, uri: string) =>
+    client.documentLink(uri)
+  )
+  ipcMain.handle(`lsp:${lang}:documentLinkResolve`, (_event, item: unknown) =>
+    client.documentLinkResolve(item)
+  )
 
   client.on('diagnostics', (params: unknown) => {
     for (const win of BrowserWindow.getAllWindows()) {

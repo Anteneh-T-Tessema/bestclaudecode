@@ -179,6 +179,12 @@ interface LspClientApi {
   codeLensResolve: (item: unknown) => Promise<unknown>
   workspaceSymbol: (query: string) => Promise<unknown>
   semanticTokens: (uri: string) => Promise<unknown>
+  documentSymbol: (uri: string) => Promise<unknown>
+  selectionRange: (uri: string, positions: Array<{ line: number; character: number }>) => Promise<unknown>
+  onTypeFormatting: (uri: string, line: number, character: number, ch: string, tabSize: number, insertSpaces: boolean) => Promise<unknown>
+  linkedEditingRange: (uri: string, line: number, character: number) => Promise<unknown>
+  documentLink: (uri: string) => Promise<unknown>
+  documentLinkResolve: (item: unknown) => Promise<unknown>
   didOpen: (uri: string, text: string) => Promise<void>
   didChange: (uri: string, text: string) => Promise<void>
   onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => () => void
@@ -231,6 +237,21 @@ interface LspCodeLens {
 
 interface LspSemanticTokens {
   data: number[]
+}
+
+interface LspDocumentLink {
+  range: { start: { line: number; character: number }; end: { line: number; character: number } }
+  target?: string
+}
+
+interface LspSelectionRange {
+  range: { start: { line: number; character: number }; end: { line: number; character: number } }
+  parent?: LspSelectionRange
+}
+
+interface LspLinkedEditingRanges {
+  ranges: Array<{ start: { line: number; character: number }; end: { line: number; character: number } }>
+  wordPattern?: string
 }
 
 // Map from Monaco language ID → { LSP api accessor, diagnostic source label }.
@@ -730,6 +751,99 @@ function registerLspProviders(monaco: Monaco, lspEntry: ReturnType<typeof resolv
         return { data: new Uint32Array(result.data) }
       },
       releaseDocumentSemanticTokens() {},
+    })
+
+    // Gap 122 — Selection range: expand/shrink selection by AST node boundary
+    monaco.languages.registerSelectionRangeProvider(lang, {
+      async provideSelectionRanges(model, positions) {
+        const lspPositions = positions.map((p) => ({ line: p.lineNumber - 1, character: p.column - 1 }))
+        const result = (await getApi().selectionRange(
+          fileToUri(model.uri.path),
+          lspPositions,
+        )) as LspSelectionRange[] | null
+        if (!result?.length) return []
+
+        function toMonacoRange(r: LspSelectionRange): MonacoNS.languages.SelectionRange {
+          return {
+            range: {
+              startLineNumber: r.range.start.line + 1,
+              startColumn: r.range.start.character + 1,
+              endLineNumber: r.range.end.line + 1,
+              endColumn: r.range.end.character + 1,
+            },
+          }
+        }
+        return result.map((sr) => {
+          const ranges: MonacoNS.languages.SelectionRange[] = []
+          let cur: LspSelectionRange | undefined = sr
+          while (cur) {
+            ranges.push(toMonacoRange(cur))
+            cur = cur.parent
+          }
+          return ranges
+        })
+      },
+    })
+
+    // Gap 123 — On-type formatting: auto-format on ; } : etc.
+    monaco.languages.registerOnTypeFormattingEditProvider(lang, {
+      autoFormatTriggerCharacters: [';', '}', ':', '\n'],
+      async provideOnTypeFormattingEdits(model, position, ch, options) {
+        const result = (await getApi().onTypeFormatting(
+          fileToUri(model.uri.path),
+          position.lineNumber - 1,
+          position.column - 1,
+          ch,
+          options.tabSize,
+          options.insertSpaces,
+        )) as LspTextEdit[] | null
+        if (!result?.length) return []
+        return lspTextEditsToMonaco(result)
+      },
+    })
+
+    // Gap 124 — Linked editing ranges: rename matching HTML/JSX open+close tags together
+    monaco.languages.registerLinkedEditingRangeProvider(lang, {
+      async provideLinkedEditingRanges(model, position) {
+        const result = (await getApi().linkedEditingRange(
+          fileToUri(model.uri.path),
+          position.lineNumber - 1,
+          position.column - 1,
+        )) as LspLinkedEditingRanges | null
+        if (!result?.ranges?.length) return null
+        return {
+          ranges: result.ranges.map((r) => ({
+            startLineNumber: r.start.line + 1,
+            startColumn: r.start.character + 1,
+            endLineNumber: r.end.line + 1,
+            endColumn: r.end.character + 1,
+          })),
+          wordPattern: result.wordPattern ? new RegExp(result.wordPattern) : undefined,
+        }
+      },
+    })
+
+    // Gap 125 — Document links: make file paths / URLs in source code clickable
+    monaco.languages.registerLinkProvider(lang, {
+      async provideLinks(model) {
+        const result = (await getApi().documentLink(
+          fileToUri(model.uri.path),
+        )) as LspDocumentLink[] | null
+        if (!result?.length) return { links: [] }
+        return {
+          links: result
+            .filter((l) => !!l.target)
+            .map((l) => ({
+              range: {
+                startLineNumber: l.range.start.line + 1,
+                startColumn: l.range.start.character + 1,
+                endLineNumber: l.range.end.line + 1,
+                endColumn: l.range.end.character + 1,
+              },
+              url: l.target!,
+            })),
+        }
+      },
     })
   }
 }

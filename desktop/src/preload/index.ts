@@ -254,6 +254,12 @@ const api = {
       codeLensResolve: (item: unknown) => ipcRenderer.invoke('lsp:python:codeLensResolve', item),
       workspaceSymbol: (query: string) => ipcRenderer.invoke('lsp:python:workspaceSymbol', query),
       semanticTokens: (uri: string) => ipcRenderer.invoke('lsp:python:semanticTokens', uri),
+      documentSymbol: (uri: string) => ipcRenderer.invoke('lsp:python:documentSymbol', uri),
+      selectionRange: (uri: string, positions: Array<{ line: number; character: number }>) => ipcRenderer.invoke('lsp:python:selectionRange', uri, positions),
+      onTypeFormatting: (uri: string, line: number, character: number, ch: string, tabSize: number, insertSpaces: boolean) => ipcRenderer.invoke('lsp:python:onTypeFormatting', uri, line, character, ch, tabSize, insertSpaces),
+      linkedEditingRange: (uri: string, line: number, character: number) => ipcRenderer.invoke('lsp:python:linkedEditingRange', uri, line, character),
+      documentLink: (uri: string) => ipcRenderer.invoke('lsp:python:documentLink', uri),
+      documentLinkResolve: (item: unknown) => ipcRenderer.invoke('lsp:python:documentLinkResolve', item),
       onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => {
         const handler = (_: Electron.IpcRendererEvent, params: { uri: string; diagnostics: unknown[] }) => cb(params)
         ipcRenderer.on('lsp:python:diagnostics', handler)
@@ -296,6 +302,12 @@ const api = {
       codeLensResolve: (item: unknown) => ipcRenderer.invoke('lsp:ts:codeLensResolve', item),
       workspaceSymbol: (query: string) => ipcRenderer.invoke('lsp:ts:workspaceSymbol', query),
       semanticTokens: (uri: string) => ipcRenderer.invoke('lsp:ts:semanticTokens', uri),
+      documentSymbol: (uri: string) => ipcRenderer.invoke('lsp:ts:documentSymbol', uri),
+      selectionRange: (uri: string, positions: Array<{ line: number; character: number }>) => ipcRenderer.invoke('lsp:ts:selectionRange', uri, positions),
+      onTypeFormatting: (uri: string, line: number, character: number, ch: string, tabSize: number, insertSpaces: boolean) => ipcRenderer.invoke('lsp:ts:onTypeFormatting', uri, line, character, ch, tabSize, insertSpaces),
+      linkedEditingRange: (uri: string, line: number, character: number) => ipcRenderer.invoke('lsp:ts:linkedEditingRange', uri, line, character),
+      documentLink: (uri: string) => ipcRenderer.invoke('lsp:ts:documentLink', uri),
+      documentLinkResolve: (item: unknown) => ipcRenderer.invoke('lsp:ts:documentLinkResolve', item),
       onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => {
         const handler = (_: Electron.IpcRendererEvent, params: { uri: string; diagnostics: unknown[] }) => cb(params)
         ipcRenderer.on('lsp:ts:diagnostics', handler)
@@ -336,6 +348,12 @@ const api = {
       codeLensResolve: (item: unknown) => ipcRenderer.invoke('lsp:go:codeLensResolve', item),
       workspaceSymbol: (query: string) => ipcRenderer.invoke('lsp:go:workspaceSymbol', query),
       semanticTokens: (uri: string) => ipcRenderer.invoke('lsp:go:semanticTokens', uri),
+      documentSymbol: (uri: string) => ipcRenderer.invoke('lsp:go:documentSymbol', uri),
+      selectionRange: (uri: string, positions: Array<{ line: number; character: number }>) => ipcRenderer.invoke('lsp:go:selectionRange', uri, positions),
+      onTypeFormatting: (uri: string, line: number, character: number, ch: string, tabSize: number, insertSpaces: boolean) => ipcRenderer.invoke('lsp:go:onTypeFormatting', uri, line, character, ch, tabSize, insertSpaces),
+      linkedEditingRange: (uri: string, line: number, character: number) => ipcRenderer.invoke('lsp:go:linkedEditingRange', uri, line, character),
+      documentLink: (uri: string) => ipcRenderer.invoke('lsp:go:documentLink', uri),
+      documentLinkResolve: (item: unknown) => ipcRenderer.invoke('lsp:go:documentLinkResolve', item),
       onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => {
         const handler = (_: Electron.IpcRendererEvent, params: { uri: string; diagnostics: unknown[] }) => cb(params)
         ipcRenderer.on('lsp:go:diagnostics', handler)
@@ -376,6 +394,12 @@ const api = {
       codeLensResolve: (item: unknown) => ipcRenderer.invoke('lsp:rust:codeLensResolve', item),
       workspaceSymbol: (query: string) => ipcRenderer.invoke('lsp:rust:workspaceSymbol', query),
       semanticTokens: (uri: string) => ipcRenderer.invoke('lsp:rust:semanticTokens', uri),
+      documentSymbol: (uri: string) => ipcRenderer.invoke('lsp:rust:documentSymbol', uri),
+      selectionRange: (uri: string, positions: Array<{ line: number; character: number }>) => ipcRenderer.invoke('lsp:rust:selectionRange', uri, positions),
+      onTypeFormatting: (uri: string, line: number, character: number, ch: string, tabSize: number, insertSpaces: boolean) => ipcRenderer.invoke('lsp:rust:onTypeFormatting', uri, line, character, ch, tabSize, insertSpaces),
+      linkedEditingRange: (uri: string, line: number, character: number) => ipcRenderer.invoke('lsp:rust:linkedEditingRange', uri, line, character),
+      documentLink: (uri: string) => ipcRenderer.invoke('lsp:rust:documentLink', uri),
+      documentLinkResolve: (item: unknown) => ipcRenderer.invoke('lsp:rust:documentLinkResolve', item),
       onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => {
         const handler = (_: Electron.IpcRendererEvent, params: { uri: string; diagnostics: unknown[] }) => cb(params)
         ipcRenderer.on('lsp:rust:diagnostics', handler)
@@ -416,6 +440,12 @@ const api = {
       codeLensResolve: (item: unknown) => ipcRenderer.invoke('lsp:java:codeLensResolve', item),
       workspaceSymbol: (query: string) => ipcRenderer.invoke('lsp:java:workspaceSymbol', query),
       semanticTokens: (uri: string) => ipcRenderer.invoke('lsp:java:semanticTokens', uri),
+      documentSymbol: (uri: string) => ipcRenderer.invoke('lsp:java:documentSymbol', uri),
+      selectionRange: (uri: string, positions: Array<{ line: number; character: number }>) => ipcRenderer.invoke('lsp:java:selectionRange', uri, positions),
+      onTypeFormatting: (uri: string, line: number, character: number, ch: string, tabSize: number, insertSpaces: boolean) => ipcRenderer.invoke('lsp:java:onTypeFormatting', uri, line, character, ch, tabSize, insertSpaces),
+      linkedEditingRange: (uri: string, line: number, character: number) => ipcRenderer.invoke('lsp:java:linkedEditingRange', uri, line, character),
+      documentLink: (uri: string) => ipcRenderer.invoke('lsp:java:documentLink', uri),
+      documentLinkResolve: (item: unknown) => ipcRenderer.invoke('lsp:java:documentLinkResolve', item),
       onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => {
         const handler = (_: Electron.IpcRendererEvent, params: { uri: string; diagnostics: unknown[] }) => cb(params)
         ipcRenderer.on('lsp:java:diagnostics', handler)
@@ -456,6 +486,12 @@ const api = {
       codeLensResolve: (item: unknown) => ipcRenderer.invoke('lsp:c:codeLensResolve', item),
       workspaceSymbol: (query: string) => ipcRenderer.invoke('lsp:c:workspaceSymbol', query),
       semanticTokens: (uri: string) => ipcRenderer.invoke('lsp:c:semanticTokens', uri),
+      documentSymbol: (uri: string) => ipcRenderer.invoke('lsp:c:documentSymbol', uri),
+      selectionRange: (uri: string, positions: Array<{ line: number; character: number }>) => ipcRenderer.invoke('lsp:c:selectionRange', uri, positions),
+      onTypeFormatting: (uri: string, line: number, character: number, ch: string, tabSize: number, insertSpaces: boolean) => ipcRenderer.invoke('lsp:c:onTypeFormatting', uri, line, character, ch, tabSize, insertSpaces),
+      linkedEditingRange: (uri: string, line: number, character: number) => ipcRenderer.invoke('lsp:c:linkedEditingRange', uri, line, character),
+      documentLink: (uri: string) => ipcRenderer.invoke('lsp:c:documentLink', uri),
+      documentLinkResolve: (item: unknown) => ipcRenderer.invoke('lsp:c:documentLinkResolve', item),
       onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => {
         const handler = (_: Electron.IpcRendererEvent, params: { uri: string; diagnostics: unknown[] }) => cb(params)
         ipcRenderer.on('lsp:c:diagnostics', handler)

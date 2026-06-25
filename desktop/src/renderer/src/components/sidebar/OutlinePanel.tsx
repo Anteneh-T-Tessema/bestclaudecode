@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { useEditorStore } from '../../store/useEditorStore'
 import { EmptyState } from '../EmptyState'
 import { List } from 'lucide-react'
@@ -33,6 +33,46 @@ const KIND_BADGE: Record<SymbolKind, string> = {
   variable:  'v',
 }
 
+function lspKindToSymbolKind(kind: number): SymbolKind {
+  if (kind === 5 || kind === 23) return 'class'
+  if (kind === 6 || kind === 9) return 'method'
+  if (kind === 10 || kind === 22) return 'enum'
+  if (kind === 11) return 'interface'
+  if (kind === 12) return 'function'
+  if (kind === 26) return 'type'
+  return 'variable'
+}
+
+interface RawDocSym {
+  name: string
+  kind: number
+  range?: { start: { line: number } }
+  selectionRange?: { start: { line: number } }
+  location?: { range: { start: { line: number } } }
+  children?: RawDocSym[]
+}
+
+function flattenDocSymbols(syms: RawDocSym[], indent = 0): OutlineSymbol[] {
+  const out: OutlineSymbol[] = []
+  for (const s of syms) {
+    const lineNum = s.selectionRange?.start.line ?? s.range?.start.line ?? s.location?.range.start.line ?? 0
+    out.push({ name: s.name, kind: lspKindToSymbolKind(s.kind), line: lineNum + 1, indent })
+    if (s.children?.length) out.push(...flattenDocSymbols(s.children, indent + 1))
+  }
+  return out
+}
+
+function lspApiForLanguage(lang: string | undefined) {
+  if (!lang) return null
+  if (lang === 'python') return window.api.lsp.python
+  if (lang === 'typescript' || lang === 'javascript' || lang === 'typescriptreact' || lang === 'javascriptreact') return window.api.lsp.ts
+  if (lang === 'go') return window.api.lsp.go
+  if (lang === 'rust') return window.api.lsp.rust
+  if (lang === 'java') return window.api.lsp.java
+  if (lang === 'c' || lang === 'cpp') return window.api.lsp.c
+  return null
+}
+
 export function extractSymbols(content: string, language: string): OutlineSymbol[] {
   const lines = content.split('\n')
   const symbols: OutlineSymbol[] = []
@@ -41,7 +81,7 @@ export function extractSymbols(content: string, language: string): OutlineSymbol
     symbols.push({ name, kind, line: lineIdx + 1, indent })
   }
 
-  if (language === 'typescript' || language === 'javascript') {
+  if (language === 'typescript' || language === 'javascript' || language === 'typescriptreact' || language === 'javascriptreact') {
     lines.forEach((line, i) => {
       const t = line.trimStart()
       const ind = line.length - t.length
@@ -62,11 +102,9 @@ export function extractSymbols(content: string, language: string): OutlineSymbol
       m = t.match(/^(?:export\s+)?(?:const\s+)?enum\s+(\w+)/)
       if (m) { push(m[1], 'enum', i, ind); return }
 
-      // const/let arrow functions & function expressions
       m = t.match(/^(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:\(|function[\s*(])/)
       if (m) { push(m[1], 'function', i, ind); return }
 
-      // Class methods (indented, followed by `(`)
       m = t.match(/^(?:(?:private|public|protected|static|async|override|abstract|get|set)\s+)*(\w+)\s*[<(]/)
       if (m && ind > 0) {
         const skip = ['if', 'for', 'while', 'switch', 'catch', 'return', 'throw', 'new', 'import', 'export', 'const', 'let', 'var', 'type', 'interface', 'class', 'enum', 'function']
@@ -121,13 +159,35 @@ export function extractSymbols(content: string, language: string): OutlineSymbol
   return symbols
 }
 
+// Gap 121 — OutlinePanel uses LSP textDocument/documentSymbol as the primary
+// source so the outline reflects the language server's parsed AST instead of
+// regex heuristics. Falls back to extractSymbols for unsupported languages.
 export function OutlinePanel() {
   const activeTab = useEditorStore((s) => s.getActiveTab())
+  const [lspSymbols, setLspSymbols] = useState<OutlineSymbol[] | null>(null)
 
-  const symbols = useMemo(() => {
+  useEffect(() => {
+    setLspSymbols(null)
+    if (!activeTab) return
+    const api = lspApiForLanguage(activeTab.language)
+    if (!api) return
+    let cancelled = false
+    const uri = `file://${activeTab.filePath}`
+    void api.documentSymbol(uri).then((raw) => {
+      if (cancelled) return
+      const syms = raw as RawDocSym[] | null
+      if (!syms?.length) return
+      setLspSymbols(flattenDocSymbols(syms))
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [activeTab?.id, activeTab?.filePath, activeTab?.language, activeTab?.content])
+
+  const regexSymbols = useMemo(() => {
     if (!activeTab) return []
     return extractSymbols(activeTab.content, activeTab.language)
   }, [activeTab?.id, activeTab?.content, activeTab?.language])
+
+  const symbols = lspSymbols ?? regexSymbols
 
   if (!activeTab) {
     return (
@@ -166,7 +226,7 @@ export function OutlinePanel() {
             alignItems: 'center',
             gap: 7,
             width: '100%',
-            padding: `3px 10px 3px ${10 + sym.indent * 0.5}px`,
+            padding: `3px 10px 3px ${10 + sym.indent * 12}px`,
             background: 'none',
             border: 'none',
             borderBottom: `1px solid ${border[2]}`,

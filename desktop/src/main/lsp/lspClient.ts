@@ -64,6 +64,11 @@ export class LspClient extends EventEmitter {
             inlayHint: {},
             foldingRange: {},
             documentHighlight: {},
+            documentSymbol: {},
+            selectionRange: {},
+            onTypeFormatting: {},
+            linkedEditingRange: {},
+            documentLink: {},
             codeLens: { dynamicRegistration: false },
             semanticTokens: {
               requests: { full: true },
@@ -295,6 +300,46 @@ export class LspClient extends EventEmitter {
   async semanticTokens(uri: string): Promise<unknown> {
     await this.start()
     return this.request('textDocument/semanticTokens/full', { textDocument: { uri } })
+  }
+
+  // Gap 121 — Document symbols: structured symbol list for the outline panel
+  async documentSymbol(uri: string): Promise<unknown> {
+    await this.start()
+    return this.request('textDocument/documentSymbol', { textDocument: { uri } })
+  }
+
+  // Gap 122 — Selection range: expand/shrink selection by AST node boundary
+  async selectionRange(uri: string, positions: Array<{ line: number; character: number }>): Promise<unknown> {
+    await this.start()
+    return this.request('textDocument/selectionRange', { textDocument: { uri }, positions })
+  }
+
+  // Gap 123 — On-type formatting: auto-format triggered by specific characters
+  async onTypeFormatting(uri: string, line: number, character: number, ch: string, tabSize: number, insertSpaces: boolean): Promise<unknown> {
+    await this.start()
+    return this.request('textDocument/onTypeFormatting', {
+      textDocument: { uri }, position: { line, character }, ch,
+      options: { tabSize, insertSpaces },
+    })
+  }
+
+  // Gap 124 — Linked editing ranges: sync-rename matching HTML/JSX tag pairs
+  async linkedEditingRange(uri: string, line: number, character: number): Promise<unknown> {
+    await this.start()
+    return this.request('textDocument/linkedEditingRange', {
+      textDocument: { uri }, position: { line, character },
+    })
+  }
+
+  // Gap 125 — Document links: make file paths / URLs in source clickable
+  async documentLink(uri: string): Promise<unknown> {
+    await this.start()
+    return this.request('textDocument/documentLink', { textDocument: { uri } })
+  }
+
+  async documentLinkResolve(item: unknown): Promise<unknown> {
+    await this.start()
+    return this.request('documentLink/resolve', item)
   }
 
   stop(): void {
