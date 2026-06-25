@@ -235,6 +235,17 @@ const api = {
         ipcRenderer.invoke('lsp:python:rename', uri, line, character, newName),
       format: (uri: string, tabSize: number, insertSpaces: boolean) =>
         ipcRenderer.invoke('lsp:python:format', uri, tabSize, insertSpaces),
+      signatureHelp: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:python:signatureHelp', uri, line, character),
+      completion: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:python:completion', uri, line, character),
+      inlayHint: (uri: string, startLine: number, endLine: number) =>
+        ipcRenderer.invoke('lsp:python:inlayHint', uri, startLine, endLine),
+      foldingRange: (uri: string) => ipcRenderer.invoke('lsp:python:foldingRange', uri),
+      typeDefinition: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:python:typeDefinition', uri, line, character),
+      implementation: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:python:implementation', uri, line, character),
       onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => {
         const handler = (_: Electron.IpcRendererEvent, params: { uri: string; diagnostics: unknown[] }) => cb(params)
         ipcRenderer.on('lsp:python:diagnostics', handler)
@@ -258,6 +269,17 @@ const api = {
         ipcRenderer.invoke('lsp:ts:rename', uri, line, character, newName),
       format: (uri: string, tabSize: number, insertSpaces: boolean) =>
         ipcRenderer.invoke('lsp:ts:format', uri, tabSize, insertSpaces),
+      signatureHelp: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:ts:signatureHelp', uri, line, character),
+      completion: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:ts:completion', uri, line, character),
+      inlayHint: (uri: string, startLine: number, endLine: number) =>
+        ipcRenderer.invoke('lsp:ts:inlayHint', uri, startLine, endLine),
+      foldingRange: (uri: string) => ipcRenderer.invoke('lsp:ts:foldingRange', uri),
+      typeDefinition: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:ts:typeDefinition', uri, line, character),
+      implementation: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:ts:implementation', uri, line, character),
       onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => {
         const handler = (_: Electron.IpcRendererEvent, params: { uri: string; diagnostics: unknown[] }) => cb(params)
         ipcRenderer.on('lsp:ts:diagnostics', handler)
@@ -279,6 +301,17 @@ const api = {
         ipcRenderer.invoke('lsp:go:rename', uri, line, character, newName),
       format: (uri: string, tabSize: number, insertSpaces: boolean) =>
         ipcRenderer.invoke('lsp:go:format', uri, tabSize, insertSpaces),
+      signatureHelp: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:go:signatureHelp', uri, line, character),
+      completion: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:go:completion', uri, line, character),
+      inlayHint: (uri: string, startLine: number, endLine: number) =>
+        ipcRenderer.invoke('lsp:go:inlayHint', uri, startLine, endLine),
+      foldingRange: (uri: string) => ipcRenderer.invoke('lsp:go:foldingRange', uri),
+      typeDefinition: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:go:typeDefinition', uri, line, character),
+      implementation: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:go:implementation', uri, line, character),
       onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => {
         const handler = (_: Electron.IpcRendererEvent, params: { uri: string; diagnostics: unknown[] }) => cb(params)
         ipcRenderer.on('lsp:go:diagnostics', handler)
@@ -300,6 +333,17 @@ const api = {
         ipcRenderer.invoke('lsp:rust:rename', uri, line, character, newName),
       format: (uri: string, tabSize: number, insertSpaces: boolean) =>
         ipcRenderer.invoke('lsp:rust:format', uri, tabSize, insertSpaces),
+      signatureHelp: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:rust:signatureHelp', uri, line, character),
+      completion: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:rust:completion', uri, line, character),
+      inlayHint: (uri: string, startLine: number, endLine: number) =>
+        ipcRenderer.invoke('lsp:rust:inlayHint', uri, startLine, endLine),
+      foldingRange: (uri: string) => ipcRenderer.invoke('lsp:rust:foldingRange', uri),
+      typeDefinition: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:rust:typeDefinition', uri, line, character),
+      implementation: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:rust:implementation', uri, line, character),
       onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => {
         const handler = (_: Electron.IpcRendererEvent, params: { uri: string; diagnostics: unknown[] }) => cb(params)
         ipcRenderer.on('lsp:rust:diagnostics', handler)
@@ -321,6 +365,17 @@ const api = {
         ipcRenderer.invoke('lsp:java:rename', uri, line, character, newName),
       format: (uri: string, tabSize: number, insertSpaces: boolean) =>
         ipcRenderer.invoke('lsp:java:format', uri, tabSize, insertSpaces),
+      signatureHelp: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:java:signatureHelp', uri, line, character),
+      completion: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:java:completion', uri, line, character),
+      inlayHint: (uri: string, startLine: number, endLine: number) =>
+        ipcRenderer.invoke('lsp:java:inlayHint', uri, startLine, endLine),
+      foldingRange: (uri: string) => ipcRenderer.invoke('lsp:java:foldingRange', uri),
+      typeDefinition: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:java:typeDefinition', uri, line, character),
+      implementation: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:java:implementation', uri, line, character),
       onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => {
         const handler = (_: Electron.IpcRendererEvent, params: { uri: string; diagnostics: unknown[] }) => cb(params)
         ipcRenderer.on('lsp:java:diagnostics', handler)
@@ -342,6 +397,17 @@ const api = {
         ipcRenderer.invoke('lsp:c:rename', uri, line, character, newName),
       format: (uri: string, tabSize: number, insertSpaces: boolean) =>
         ipcRenderer.invoke('lsp:c:format', uri, tabSize, insertSpaces),
+      signatureHelp: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:c:signatureHelp', uri, line, character),
+      completion: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:c:completion', uri, line, character),
+      inlayHint: (uri: string, startLine: number, endLine: number) =>
+        ipcRenderer.invoke('lsp:c:inlayHint', uri, startLine, endLine),
+      foldingRange: (uri: string) => ipcRenderer.invoke('lsp:c:foldingRange', uri),
+      typeDefinition: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:c:typeDefinition', uri, line, character),
+      implementation: (uri: string, line: number, character: number) =>
+        ipcRenderer.invoke('lsp:c:implementation', uri, line, character),
       onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => {
         const handler = (_: Electron.IpcRendererEvent, params: { uri: string; diagnostics: unknown[] }) => cb(params)
         ipcRenderer.on('lsp:c:diagnostics', handler)

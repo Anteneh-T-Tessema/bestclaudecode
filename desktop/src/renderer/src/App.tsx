@@ -10,6 +10,7 @@ import { ToastContainer } from './components/ToastContainer'
 import { KeyboardShortcuts } from './components/KeyboardShortcuts'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { useSettingsStore } from './store/useSettingsStore'
+import { useEditorStore } from './store/useEditorStore'
 import { useTsExtraLibs } from './hooks/useTsExtraLibs'
 import { DARK_TOKENS, LIGHT_TOKENS } from './design/tokens'
 
@@ -26,12 +27,27 @@ applyThemeVars(DARK_TOKENS)
 export default function App() {
   const loadSettings = useSettingsStore((s) => s.load)
   const theme = useSettingsStore((s) => s.theme)
+  const settingsLoaded = useSettingsStore((s) => s.loaded)
   const zenMode = useAppStore((s) => s.zenMode)
+  const restoreSession = useEditorStore((s) => s.restoreSession)
+  const saveSession = useEditorStore((s) => s.saveSession)
+  const tabs = useEditorStore((s) => s.tabs)
+  const activeTabId = useEditorStore((s) => s.activeTabId)
   useTsExtraLibs()
 
   useEffect(() => {
     loadSettings()
   }, [loadSettings])
+
+  // Gap 115 — restore the previous session once settings are loaded
+  useEffect(() => {
+    if (settingsLoaded) void restoreSession()
+  }, [settingsLoaded, restoreSession])
+
+  // Gap 115 — persist session whenever open tabs or active tab changes
+  useEffect(() => {
+    if (settingsLoaded && tabs.length > 0) void saveSession()
+  }, [tabs, activeTabId, settingsLoaded, saveSession])
 
   useEffect(() => {
     applyThemeVars(theme === 'light' ? LIGHT_TOKENS : DARK_TOKENS)

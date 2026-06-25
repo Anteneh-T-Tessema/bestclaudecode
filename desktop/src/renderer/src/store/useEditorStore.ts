@@ -76,6 +76,9 @@ interface EditorStore {
   openSplit: (tabId: string) => void
   closeSplit: () => void
   setSplitTabId: (id: string) => void
+  // Gap 115 — session persistence: restore open tabs on relaunch
+  saveSession: () => Promise<void>
+  restoreSession: () => Promise<void>
 }
 
 export const useEditorStore = create<EditorStore>((set, get) => ({
@@ -163,5 +166,44 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   getActiveTab: () => {
     const { tabs, activeTabId } = get()
     return tabs.find((t) => t.id === activeTabId) ?? null
+  },
+
+  saveSession: async () => {
+    const { tabs, activeTabId } = get()
+    const activeTab = tabs.find((t) => t.id === activeTabId)
+    const sessionTabs = tabs.map((t) => ({
+      filePath: t.filePath,
+      cursorLine: t.cursorLine,
+      cursorCol: t.cursorCol,
+    }))
+    try {
+      await window.api.settings.set('sessionTabs', sessionTabs)
+      await window.api.settings.set('sessionActiveFile', activeTab?.filePath ?? '')
+    } catch { /* ignore */ }
+  },
+
+  restoreSession: async () => {
+    try {
+      const raw = await window.api.settings.get('sessionTabs')
+      const activeFile = (await window.api.settings.get('sessionActiveFile')) as string | undefined
+      if (!Array.isArray(raw) || raw.length === 0) return
+      const entries = raw as Array<{ filePath: string; cursorLine?: number; cursorCol?: number }>
+      for (const entry of entries) {
+        try {
+          const content = await window.api.fs.readFile(entry.filePath)
+          get().openFile(entry.filePath, content)
+          if ((entry.cursorLine ?? 0) > 0) {
+            const { tabs } = get()
+            const tab = tabs.find((t) => t.filePath === entry.filePath)
+            if (tab) get().setCursor(tab.id, entry.cursorLine!, entry.cursorCol ?? 1)
+          }
+        } catch { /* file may have been deleted */ }
+      }
+      if (activeFile) {
+        const { tabs } = get()
+        const active = tabs.find((t) => t.filePath === activeFile)
+        if (active) get().setActiveTab(active.id)
+      }
+    } catch { /* ignore */ }
   },
 }))

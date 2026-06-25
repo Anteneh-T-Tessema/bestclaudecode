@@ -162,14 +162,55 @@ function relativeTime(unixSeconds: number): string {
 interface LspClientApi {
   hover: (uri: string, line: number, character: number) => Promise<unknown>
   definition: (uri: string, line: number, character: number) => Promise<unknown>
+  typeDefinition: (uri: string, line: number, character: number) => Promise<unknown>
+  implementation: (uri: string, line: number, character: number) => Promise<unknown>
   references: (uri: string, line: number, character: number) => Promise<unknown>
   codeAction: (uri: string, range: unknown, diagnostics: unknown[]) => Promise<unknown>
   executeCommand: (command: string, args: unknown[]) => Promise<unknown>
   rename: (uri: string, line: number, character: number, newName: string) => Promise<unknown>
   format: (uri: string, tabSize: number, insertSpaces: boolean) => Promise<unknown>
+  signatureHelp: (uri: string, line: number, character: number) => Promise<unknown>
+  completion: (uri: string, line: number, character: number) => Promise<unknown>
+  inlayHint: (uri: string, startLine: number, endLine: number) => Promise<unknown>
+  foldingRange: (uri: string) => Promise<unknown>
   didOpen: (uri: string, text: string) => Promise<void>
   didChange: (uri: string, text: string) => Promise<void>
   onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => () => void
+}
+
+interface LspSignatureHelp {
+  signatures?: Array<{
+    label: string
+    documentation?: string | { value?: string }
+    parameters?: Array<{ label: string | [number, number]; documentation?: string | { value?: string } }>
+  }>
+  activeSignature?: number
+  activeParameter?: number
+}
+
+interface LspCompletionItem {
+  label: string
+  kind?: number
+  detail?: string
+  documentation?: string | { value?: string }
+  insertText?: string
+  insertTextFormat?: number
+}
+
+interface LspCompletionList {
+  items?: LspCompletionItem[]
+}
+
+interface LspInlayHint {
+  position: { line: number; character: number }
+  label: string | Array<{ value: string }>
+  kind?: number
+}
+
+interface LspFoldingRange {
+  startLine: number
+  endLine: number
+  kind?: string
 }
 
 // Map from Monaco language ID → { LSP api accessor, diagnostic source label }.
@@ -415,6 +456,164 @@ function registerLspProviders(monaco: Monaco, lspEntry: ReturnType<typeof resolv
         )) as LspTextEdit[] | null
         if (!result?.length) return []
         return lspTextEditsToMonaco(result)
+      },
+    })
+
+    // Gap 109 — Signature Help: param doc popup on ( and ,
+    monaco.languages.registerSignatureHelpProvider(lang, {
+      signatureHelpTriggerCharacters: ['(', ','],
+      signatureHelpRetriggerCharacters: [','],
+      async provideSignatureHelp(model, position) {
+        const result = (await getApi().signatureHelp(
+          fileToUri(model.uri.path),
+          position.lineNumber - 1,
+          position.column - 1,
+        )) as LspSignatureHelp | null
+        if (!result?.signatures?.length) return null
+        return {
+          value: {
+            signatures: result.signatures.map((sig) => ({
+              label: sig.label,
+              documentation: typeof sig.documentation === 'string'
+                ? { value: sig.documentation }
+                : { value: sig.documentation?.value ?? '' },
+              parameters: (sig.parameters ?? []).map((p) => ({
+                label: p.label,
+                documentation: typeof p.documentation === 'string'
+                  ? { value: p.documentation }
+                  : { value: (p.documentation as { value?: string } | undefined)?.value ?? '' },
+              })),
+            })),
+            activeSignature: result.activeSignature ?? 0,
+            activeParameter: result.activeParameter ?? 0,
+          },
+          dispose() {},
+        }
+      },
+    })
+
+    // Gap 110 — LSP completions alongside AI inline completions
+    monaco.languages.registerCompletionItemProvider(lang, {
+      triggerCharacters: ['.', ':', '"', "'", '/', '@', '<', '#', ' '],
+      async provideCompletionItems(model, position) {
+        const result = (await getApi().completion(
+          fileToUri(model.uri.path),
+          position.lineNumber - 1,
+          position.column - 1,
+        )) as LspCompletionList | LspCompletionItem[] | null
+        const items: LspCompletionItem[] = Array.isArray(result)
+          ? result
+          : (result?.items ?? [])
+        if (!items.length) return { suggestions: [] }
+        const word = model.getWordUntilPosition(position)
+        const range = {
+          startLineNumber: position.lineNumber,
+          startColumn: word.startColumn,
+          endLineNumber: position.lineNumber,
+          endColumn: position.column,
+        }
+        return {
+          suggestions: items.map((item) => ({
+            label: item.label,
+            kind: (item.kind ?? 1) - 1,
+            detail: item.detail,
+            documentation: typeof item.documentation === 'string'
+              ? { value: item.documentation }
+              : { value: item.documentation?.value ?? '' },
+            insertText: item.insertText ?? item.label,
+            insertTextRules: item.insertTextFormat === 2
+              ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
+              : monaco.languages.CompletionItemInsertTextRule.None,
+            range,
+          })),
+        }
+      },
+    })
+
+    // Gap 111 — Inlay hints: inline type annotations and param names
+    monaco.languages.registerInlayHintsProvider(lang, {
+      async provideInlayHints(model, range) {
+        const { useSettingsStore } = await import('../../store/useSettingsStore')
+        if (!useSettingsStore.getState().inlayHints) return { hints: [], dispose() {} }
+        const result = (await getApi().inlayHint(
+          fileToUri(model.uri.path),
+          range.startLineNumber - 1,
+          range.endLineNumber,
+        )) as LspInlayHint[] | null
+        if (!result?.length) return { hints: [], dispose() {} }
+        return {
+          hints: result.map((h) => ({
+            label: typeof h.label === 'string' ? h.label : h.label.map((p) => p.value).join(''),
+            position: { lineNumber: h.position.line + 1, column: h.position.character + 1 },
+            kind: h.kind === 1
+              ? monaco.languages.InlayHintKind.Type
+              : monaco.languages.InlayHintKind.Parameter,
+          })),
+          dispose() {},
+        }
+      },
+    })
+
+    // Gap 112 — Code folding regions from the language server
+    monaco.languages.registerFoldingRangeProvider(lang, {
+      async provideFoldingRanges(model) {
+        const result = (await getApi().foldingRange(
+          fileToUri(model.uri.path),
+        )) as LspFoldingRange[] | null
+        if (!result?.length) return []
+        return result.map((r) => ({
+          start: r.startLine + 1,
+          end: r.endLine + 1,
+          kind: r.kind === 'comment'
+            ? monaco.languages.FoldingRangeKind.Comment
+            : r.kind === 'imports'
+            ? monaco.languages.FoldingRangeKind.Imports
+            : monaco.languages.FoldingRangeKind.Region,
+        }))
+      },
+    })
+
+    // Gap 113 — "Go to Type Definition"
+    monaco.languages.registerTypeDefinitionProvider(lang, {
+      async provideTypeDefinition(model, position) {
+        const result = (await getApi().typeDefinition(
+          fileToUri(model.uri.path),
+          position.lineNumber - 1,
+          position.column - 1,
+        )) as LspLocation | LspLocation[] | null
+        if (!result) return []
+        const locations = Array.isArray(result) ? result : [result]
+        return locations.map((loc) => ({
+          uri: monaco.Uri.parse(loc.uri),
+          range: {
+            startLineNumber: loc.range.start.line + 1,
+            startColumn: loc.range.start.character + 1,
+            endLineNumber: loc.range.end.line + 1,
+            endColumn: loc.range.end.character + 1,
+          },
+        }))
+      },
+    })
+
+    // Gap 114 — "Go to Implementation"
+    monaco.languages.registerImplementationProvider(lang, {
+      async provideImplementation(model, position) {
+        const result = (await getApi().implementation(
+          fileToUri(model.uri.path),
+          position.lineNumber - 1,
+          position.column - 1,
+        )) as LspLocation | LspLocation[] | null
+        if (!result) return []
+        const locations = Array.isArray(result) ? result : [result]
+        return locations.map((loc) => ({
+          uri: monaco.Uri.parse(loc.uri),
+          range: {
+            startLineNumber: loc.range.start.line + 1,
+            startColumn: loc.range.start.character + 1,
+            endLineNumber: loc.range.end.line + 1,
+            endColumn: loc.range.end.character + 1,
+          },
+        }))
       },
     })
   }

@@ -35,6 +35,30 @@ function registerForLang(lang: LangKey): void {
   ipcMain.handle(`lsp:${lang}:format`, (_event, uri: string, tabSize: number, insertSpaces: boolean) =>
     client.format(uri, tabSize, insertSpaces)
   )
+  // Gap 109 — signature help
+  ipcMain.handle(`lsp:${lang}:signatureHelp`, (_event, uri: string, line: number, character: number) =>
+    client.signatureHelp(uri, line, character)
+  )
+  // Gap 110 — LSP completions
+  ipcMain.handle(`lsp:${lang}:completion`, (_event, uri: string, line: number, character: number) =>
+    client.completion(uri, line, character)
+  )
+  // Gap 111 — inlay hints
+  ipcMain.handle(`lsp:${lang}:inlayHint`, (_event, uri: string, startLine: number, endLine: number) =>
+    client.inlayHint(uri, startLine, endLine)
+  )
+  // Gap 112 — folding ranges
+  ipcMain.handle(`lsp:${lang}:foldingRange`, (_event, uri: string) =>
+    client.foldingRange(uri)
+  )
+  // Gap 113 — go to type definition
+  ipcMain.handle(`lsp:${lang}:typeDefinition`, (_event, uri: string, line: number, character: number) =>
+    client.typeDefinition(uri, line, character)
+  )
+  // Gap 114 — go to implementation
+  ipcMain.handle(`lsp:${lang}:implementation`, (_event, uri: string, line: number, character: number) =>
+    client.implementation(uri, line, character)
+  )
 
   client.on('diagnostics', (params: unknown) => {
     for (const win of BrowserWindow.getAllWindows()) {

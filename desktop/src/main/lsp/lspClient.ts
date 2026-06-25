@@ -52,11 +52,17 @@ export class LspClient extends EventEmitter {
           textDocument: {
             hover: { contentFormat: ['plaintext', 'markdown'] },
             definition: {},
+            typeDefinition: {},
+            implementation: {},
             references: {},
             codeAction: { codeActionLiteralSupport: { codeActionKind: { valueSet: ['quickfix', 'refactor'] } } },
             rename: {},
             formatting: {},
             publishDiagnostics: {},
+            signatureHelp: { signatureInformation: { parameterInformation: { labelOffsetSupport: true } } },
+            completion: { completionItem: { snippetSupport: true } },
+            inlayHint: {},
+            foldingRange: {},
           },
         },
         initializationOptions: this.config.initializationOptions,
@@ -184,6 +190,54 @@ export class LspClient extends EventEmitter {
     await this.start()
     return this.request('textDocument/formatting', {
       textDocument: { uri }, options: { tabSize, insertSpaces },
+    })
+  }
+
+  // Gap 109 — "Signature Help": parameter doc popup triggered on ( and ,
+  async signatureHelp(uri: string, line: number, character: number): Promise<unknown> {
+    await this.start()
+    return this.request('textDocument/signatureHelp', {
+      textDocument: { uri }, position: { line, character },
+    })
+  }
+
+  // Gap 110 — LSP-backed completions (separate from AI inline completions)
+  async completion(uri: string, line: number, character: number): Promise<unknown> {
+    await this.start()
+    return this.request('textDocument/completion', {
+      textDocument: { uri }, position: { line, character },
+      context: { triggerKind: 1 },
+    })
+  }
+
+  // Gap 111 — Inlay hints: type annotations and param names rendered inline
+  async inlayHint(uri: string, startLine: number, endLine: number): Promise<unknown> {
+    await this.start()
+    return this.request('textDocument/inlayHint', {
+      textDocument: { uri },
+      range: { start: { line: startLine, character: 0 }, end: { line: endLine, character: 0 } },
+    })
+  }
+
+  // Gap 112 — Code folding regions from the language server
+  async foldingRange(uri: string): Promise<unknown> {
+    await this.start()
+    return this.request('textDocument/foldingRange', { textDocument: { uri } })
+  }
+
+  // Gap 113 — "Go to Type Definition"
+  async typeDefinition(uri: string, line: number, character: number): Promise<unknown> {
+    await this.start()
+    return this.request('textDocument/typeDefinition', {
+      textDocument: { uri }, position: { line, character },
+    })
+  }
+
+  // Gap 114 — "Go to Implementation"
+  async implementation(uri: string, line: number, character: number): Promise<unknown> {
+    await this.start()
+    return this.request('textDocument/implementation', {
+      textDocument: { uri }, position: { line, character },
     })
   }
 

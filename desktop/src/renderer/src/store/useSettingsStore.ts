@@ -15,6 +15,7 @@ interface SettingsStore {
   tabSize: 2 | 4
   autoSave: boolean
   formatOnSave: boolean
+  inlayHints: boolean
   stickyScroll: boolean
   recentFiles: string[]
   projectPath: string
@@ -44,6 +45,7 @@ const DEFAULTS = {
   tabSize: 2 as 2 | 4,
   autoSave: true,
   formatOnSave: false,
+  inlayHints: false,
   stickyScroll: true,
   recentFiles: [] as string[],
   projectPath: '',

@@ -30,6 +30,7 @@ export function StatusBar() {
   const tabSize = useSettingsStore((s) => s.tabSize)
   const autoSave = useSettingsStore((s) => s.autoSave)
   const formatOnSave = useSettingsStore((s) => s.formatOnSave)
+  const inlayHints = useSettingsStore((s) => s.inlayHints)
   const stickyScroll = useSettingsStore((s) => s.stickyScroll)
   const fontSize = useSettingsStore((s) => s.fontSize)
   const theme = useSettingsStore((s) => s.theme)
@@ -213,6 +214,14 @@ export function StatusBar() {
           style={{ ...itemStyle, cursor: 'pointer', background: 'none', border: 'none', borderLeft: `1px solid ${border[2]}`, color: formatOnSave ? accent.cyan.fg : fg[1] }}
         >
           Format
+        </button>
+        <button
+          type="button"
+          onClick={() => setEditorSetting('inlayHints', !inlayHints)}
+          title="Toggle inlay hints (LSP type annotations and parameter names)"
+          style={{ ...itemStyle, cursor: 'pointer', background: 'none', border: 'none', borderLeft: `1px solid ${border[2]}`, color: inlayHints ? accent.cyan.fg : fg[1] }}
+        >
+          Hints
         </button>
         <button
           type="button"
