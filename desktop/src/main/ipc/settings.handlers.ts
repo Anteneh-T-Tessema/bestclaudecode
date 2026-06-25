@@ -19,6 +19,11 @@ const MUTABLE_KEYS = new Set([
   'theme', 'fontSize', 'sidebarWidth', 'rightPanelWidth',
   'bottomPanelHeight', 'projectPath', 'recentProjects', 'ollamaUrl', 'activeModel',
   'globalRules', 'wordWrap', 'minimap', 'tabSize', 'autoSave', 'stickyScroll', 'recentFiles',
+  // formatOnSave/inlayHints predate this list's last update (Gaps 105/111) and were
+  // never added — their toggles updated local state but silently failed to persist.
+  'formatOnSave', 'inlayHints',
+  // Gap 139 loose end — per-project Live Preview URLs.
+  'livePreviewUrlsByProject',
 ])
 
 interface EngineHealth {

@@ -53,7 +53,7 @@ export function registerFsHandlers(): void {
     'fs:readFile', 'fs:writeFile', 'fs:readDir',
     'fs:createDir', 'fs:deleteEntry', 'fs:rename', 'fs:exists',
     'fs:openDialog', 'fs:openFile', 'fs:watchDir', 'fs:unwatchDir',
-    'fs:searchInFiles', 'fs:replaceInFiles', 'fs:findFiles', 'fs:isGitignored',
+    'fs:searchInFiles', 'fs:replaceInFiles', 'fs:findFiles', 'fs:isGitignored', 'fs:findEnvFiles',
   ]
   for (const ch of channels) ipcMain.removeHandler(ch)
 
@@ -294,5 +294,30 @@ export function registerFsHandlers(): void {
     }
     await walk(root)
     return results
+  })
+
+  // Gap 141 loose end — fs:findFiles deliberately skips dotfiles (it's tuned
+  // for the general file index), so monorepo .env discovery needs its own
+  // targeted walk for files literally named ".env".
+  ipcMain.handle('fs:findEnvFiles', async (_, root: string): Promise<string[]> => {
+    assertInProject(root)
+    const rules = loadIgnoreRules(root)
+    const results: string[] = []
+    async function walk(dir: string) {
+      let entries: Dirent[]
+      try { entries = await fs.readdir(dir, { withFileTypes: true }) } catch { return }
+      for (const e of entries) {
+        const full = path.join(dir, e.name)
+        if (e.isDirectory()) {
+          if (IGNORE_DIRS.has(e.name) || isIgnored(path.relative(root, full), rules)) continue
+          await walk(full)
+        } else if (e.name === '.env') {
+          results.push(path.relative(root, full))
+        }
+        if (results.length >= 200) return
+      }
+    }
+    await walk(root)
+    return results.sort((a, b) => a.split(path.sep).length - b.split(path.sep).length)
   })
 }

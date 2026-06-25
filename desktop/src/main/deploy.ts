@@ -16,11 +16,10 @@ export function extractUrl(text: string): string | null {
  * Detects a deploy command for `targetPath` in priority order: npm `deploy`
  * script, Vercel project, Netlify project. Returns null if none found.
  *
- * Note: the Vercel branch runs bare `vercel` (a preview deploy, not
- * production) while the Netlify branch below intentionally runs
- * `netlify deploy --prod` — this asymmetry is inherited from the existing
- * Vercel behavior (unchanged here to avoid altering established autonomous
- * agent behavior) and is a candidate for a future gap to reconcile.
+ * Both the Vercel and Netlify branches deploy to production (`--prod`), not
+ * a preview URL — a deploy triggered either by the manual button or by the
+ * autonomous agent at the end of a session is meant to produce a real,
+ * shareable result, not a throwaway preview link.
  */
 export async function detectDeployCommand(targetPath: string): Promise<string | null> {
   try {
@@ -32,7 +31,7 @@ export async function detectDeployCommand(targetPath: string): Promise<string | 
   for (const candidate of ['vercel.json', '.vercel']) {
     try {
       await fs.access(path.join(targetPath, candidate))
-      return 'vercel'
+      return 'vercel --prod'
     } catch { /* not found */ }
   }
 

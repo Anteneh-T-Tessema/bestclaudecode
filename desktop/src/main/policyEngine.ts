@@ -13,12 +13,23 @@ export interface PolicyConfig {
   block_commands: string[]
   block_paths: string[]
   require_approval_for: string[]
+  /**
+   * Gap 142 loose end — max retry attempts per subtask before the autonomous
+   * agent blocks instead of giving up after one. Unlike the three array
+   * fields above (where "empty" means "no restriction"), an absent/invalid
+   * value here defaults to 3, not 0 — a missing policy file should still
+   * retry, not give up immediately.
+   */
+  max_retries: number
 }
+
+const DEFAULT_MAX_RETRIES = 3
 
 const EMPTY_POLICY: PolicyConfig = {
   block_commands: [],
   block_paths: [],
   require_approval_for: [],
+  max_retries: DEFAULT_MAX_RETRIES,
 }
 
 function asStringArray(value: unknown): string[] {
@@ -34,6 +45,9 @@ export function loadPolicy(projectPath: string): PolicyConfig {
       block_commands: asStringArray(parsed.block_commands),
       block_paths: asStringArray(parsed.block_paths),
       require_approval_for: asStringArray(parsed.require_approval_for),
+      max_retries: typeof parsed.max_retries === 'number' && parsed.max_retries > 0
+        ? Math.floor(parsed.max_retries)
+        : DEFAULT_MAX_RETRIES,
     }
   } catch {
     return EMPTY_POLICY

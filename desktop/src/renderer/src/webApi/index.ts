@@ -46,6 +46,7 @@ export function createWebApi(): API {
       onFileChange: () => () => {},
       findFiles: () => Promise.resolve(notPorted('fs.findFiles', [] as string[])),
       isGitignored: () => Promise.resolve(notPorted('fs.isGitignored', false)),
+      findEnvFiles: () => Promise.resolve(notPorted('fs.findEnvFiles', [] as string[])),
     },
 
     terminal: {

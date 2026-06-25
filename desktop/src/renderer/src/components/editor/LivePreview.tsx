@@ -17,10 +17,14 @@ const DEFAULT_URL = 'http://localhost:3000'
 // requires webviewTag: true in BrowserWindow webPreferences — see
 // main/window.ts) when running in Electron, falling back to a sandboxed
 // <iframe> in the web/socket build. No port auto-detection: the URL is
-// manually entered and remembered across sessions via useSettingsStore.
+// manually entered and remembered per-project (keyed by projectPath) via
+// useSettingsStore, since different projects almost always run on different
+// ports/URLs.
 export function LivePreview() {
-  const storedUrl = useSettingsStore((s) => s.livePreviewUrl)
+  const projectPath = useSettingsStore((s) => s.projectPath)
+  const urlsByProject = useSettingsStore((s) => s.livePreviewUrlsByProject)
   const setSetting = useSettingsStore((s) => s.set)
+  const storedUrl = projectPath ? urlsByProject[projectPath] : undefined
   const [urlInput, setUrlInput] = useState(storedUrl || DEFAULT_URL)
   const [activeUrl, setActiveUrl] = useState(storedUrl || DEFAULT_URL)
   const [loading, setLoading] = useState(false)
@@ -29,13 +33,26 @@ export function LivePreview() {
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
   const isElectron = typeof window !== 'undefined' && window.isElectron === true
 
+  // Reload the remembered URL whenever the open project changes. Deliberately
+  // not depending on urlsByProject itself, so this doesn't fight the user's
+  // in-progress typing every time navigate() below updates the record.
+  useEffect(() => {
+    const next = projectPath ? urlsByProject[projectPath] : undefined
+    setUrlInput(next || DEFAULT_URL)
+    setActiveUrl(next || DEFAULT_URL)
+    setFailed(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectPath])
+
   const navigate = useCallback((url: string) => {
     const normalized = /^https?:\/\//.test(url) ? url : `http://${url}`
     setUrlInput(normalized)
     setActiveUrl(normalized)
     setFailed(false)
-    void setSetting('livePreviewUrl', normalized)
-  }, [setSetting])
+    if (projectPath) {
+      void setSetting('livePreviewUrlsByProject', { ...urlsByProject, [projectPath]: normalized })
+    }
+  }, [setSetting, projectPath, urlsByProject])
 
   const refresh = useCallback(() => {
     setFailed(false)

@@ -51,6 +51,7 @@ const api = {
     },
     findFiles: (root: string): Promise<string[]> => ipcRenderer.invoke('fs:findFiles', root),
     isGitignored: (relPath: string): Promise<boolean> => ipcRenderer.invoke('fs:isGitignored', relPath),
+    findEnvFiles: (root: string): Promise<string[]> => ipcRenderer.invoke('fs:findEnvFiles', root),
   },
 
   // ── Terminal ───────────────────────────────────────────────────────────────

@@ -9,6 +9,8 @@ export interface PolicyConfig {
   block_commands: string[]
   block_paths: string[]
   require_approval_for: string[]
+  /** Gap 142 loose end — optional since starter templates are compliance presets, not retry-budget opinions; the engine defaults to 3 when absent. */
+  max_retries?: number
 }
 
 export interface PolicyTemplate {

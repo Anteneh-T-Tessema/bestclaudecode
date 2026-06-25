@@ -87,10 +87,14 @@ function EnvRow({
 
 // Gap 141 — project .env manager, distinct from the IDE's own encrypted AI
 // provider keys (Gap 88, SettingsPanel.tsx). Reads/writes the project's real
-// .env file via the existing generic fs IPC, preserving comments/blank lines
-// verbatim so re-saving never strips the user's own formatting.
+// .env file(s) via the existing generic fs IPC, preserving comments/blank
+// lines verbatim so re-saving never strips the user's own formatting.
+// Discovers every .env anywhere in the project (not just the root) so
+// monorepos with e.g. apps/web/.env and apps/api/.env are both reachable.
 export function EnvVarsPanel() {
   const projectPath = useSettingsStore((s) => s.projectPath)
+  const [envPaths, setEnvPaths] = useState<string[]>([])
+  const [selectedPath, setSelectedPath] = useState('.env')
   const [lines, setLines] = useState<EnvLine[] | null>(null)
   const [isGitignored, setIsGitignored] = useState(true)
   const [newKey, setNewKey] = useState('')
@@ -98,22 +102,32 @@ export function EnvVarsPanel() {
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
 
+  // Re-discover .env files whenever the project changes, defaulting the
+  // selection to the root .env (or the first one found if root has none).
+  useEffect(() => {
+    if (!projectPath) { setEnvPaths([]); return }
+    window.api.fs.findEnvFiles(projectPath).then((found) => {
+      setEnvPaths(found)
+      setSelectedPath(found.includes('.env') ? '.env' : found[0] ?? '.env')
+    }).catch(() => setEnvPaths([]))
+  }, [projectPath])
+
   const load = useCallback(async () => {
     if (!projectPath) { setLines(null); return }
     try {
-      const content = await window.api.fs.readFile(`${projectPath}/.env`)
+      const content = await window.api.fs.readFile(`${projectPath}/${selectedPath}`)
       setLines(parseEnv(content ?? ''))
     } catch {
       setLines([])
     }
     setDirty(false)
     try {
-      const ignored = await window.api.fs.isGitignored('.env')
+      const ignored = await window.api.fs.isGitignored(selectedPath)
       setIsGitignored(ignored)
     } catch {
       setIsGitignored(true)
     }
-  }, [projectPath])
+  }, [projectPath, selectedPath])
 
   useEffect(() => { void load() }, [load])
 
@@ -143,14 +157,17 @@ export function EnvVarsPanel() {
     if (!projectPath || !lines) return
     setSaving(true)
     try {
-      await window.api.fs.writeFile(`${projectPath}/.env`, serializeEnv(lines))
+      await window.api.fs.writeFile(`${projectPath}/${selectedPath}`, serializeEnv(lines))
       setDirty(false)
-      toast.success('Saved .env')
+      toast.success(`Saved ${selectedPath}`)
+      // A brand-new file at a not-yet-discovered path just got created — make
+      // sure it shows up in the selector on the next discovery pass too.
+      setEnvPaths((prev) => (prev.includes(selectedPath) ? prev : [...prev, selectedPath]))
       try {
-        setIsGitignored(await window.api.fs.isGitignored('.env'))
+        setIsGitignored(await window.api.fs.isGitignored(selectedPath))
       } catch { /* ignore — banner just won't update until next reload */ }
     } catch (err) {
-      toast.error(`Failed to save .env: ${(err as Error).message}`)
+      toast.error(`Failed to save ${selectedPath}: ${(err as Error).message}`)
     } finally {
       setSaving(false)
     }
@@ -167,6 +184,9 @@ export function EnvVarsPanel() {
   }
 
   const rows = (lines ?? []).map((l, idx) => ({ line: l, idx })).filter((r) => r.line.key !== null)
+  // Always offer the selected path as an option, even if it's a brand-new
+  // root .env that findEnvFiles hasn't discovered yet (file doesn't exist).
+  const selectorOptions = envPaths.includes(selectedPath) ? envPaths : [...envPaths, selectedPath]
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
@@ -178,7 +198,7 @@ export function EnvVarsPanel() {
             type="button"
             onClick={() => void save()}
             disabled={!dirty || saving}
-            title="Save .env"
+            title={`Save ${selectedPath}`}
             style={{
               display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none',
               cursor: dirty && !saving ? 'pointer' : 'not-allowed',
@@ -190,6 +210,22 @@ export function EnvVarsPanel() {
         }
       />
 
+      {/* Gap 141 loose end — monorepos can have multiple .env files; pick which one to edit. */}
+      <div style={{ padding: '6px 10px', borderBottom: `1px solid ${border[1]}` }}>
+        <select
+          value={selectedPath}
+          onChange={(e) => setSelectedPath(e.target.value)}
+          title="Which .env file to edit"
+          style={{
+            width: '100%', boxSizing: 'border-box', background: surface.raised,
+            border: `1px solid ${border[0]}`, borderRadius: 4, padding: '4px 6px',
+            fontSize: 10.5, color: fg[0], outline: 'none', fontFamily: 'monospace',
+          }}
+        >
+          {selectorOptions.map((p) => <option key={p} value={p}>{p}</option>)}
+        </select>
+      </div>
+
       {!isGitignored && (
         <div style={{
           display: 'flex', alignItems: 'flex-start', gap: 6, padding: '7px 10px',
@@ -197,7 +233,7 @@ export function EnvVarsPanel() {
         }}>
           <AlertTriangle size={12} color={accent.amber.fg} style={{ flexShrink: 0, marginTop: 1 }} />
           <span style={{ fontSize: 10, color: accent.amber.fg, lineHeight: 1.4 }}>
-            .env is not in your .gitignore — committing it could leak secrets.
+            {selectedPath} is not in your .gitignore — committing it could leak secrets.
           </span>
         </div>
       )}

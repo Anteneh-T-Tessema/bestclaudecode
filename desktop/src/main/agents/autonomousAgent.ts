@@ -643,8 +643,9 @@ export async function startAutonomousSession(opts: {
       // Gap 142 — bounded retry budget per subtask. retryCount tracks completed
       // failed attempts (0-indexed); isRetry distinguishes "any attempt past the
       // first" for prompt/status purposes and is unaffected by the count itself.
+      // max_retries is project-configurable via .lakoorapolicies.json (defaults to 3).
       let retryCount = 0
-      const MAX_RETRIES = 3
+      const MAX_RETRIES = policy.max_retries
       // Cached per subtask id so a retry of the same subtask reuses the
       // already-fetched context block instead of re-querying chat_context.
       let cachedContextSubtaskId = ''

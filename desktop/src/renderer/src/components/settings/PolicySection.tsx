@@ -5,7 +5,7 @@ import { useSettingsStore } from '../../store/useSettingsStore'
 import { toast } from '../../store/useToastStore'
 import { POLICY_TEMPLATES, type PolicyConfig, type PolicyTemplate } from '../../policyTemplates'
 
-const EMPTY_CONFIG: PolicyConfig = { block_commands: [], block_paths: [], require_approval_for: [] }
+const EMPTY_CONFIG: PolicyConfig = { block_commands: [], block_paths: [], require_approval_for: [], max_retries: 3 }
 const TEMPLATES_DIR = (projectPath: string) => `${projectPath}/.lakoora/policy-templates`
 
 function toLines(values: string[]): string {
@@ -70,6 +70,7 @@ export function PolicySection() {
               block_commands: Array.isArray(raw.block_commands) ? raw.block_commands : [],
               block_paths: Array.isArray(raw.block_paths) ? raw.block_paths : [],
               require_approval_for: Array.isArray(raw.require_approval_for) ? raw.require_approval_for : [],
+              max_retries: typeof raw.max_retries === 'number' ? raw.max_retries : 3,
             },
           })
         } catch { /* skip corrupt file */ }
@@ -91,6 +92,7 @@ export function PolicySection() {
             block_commands: Array.isArray(parsed.block_commands) ? parsed.block_commands : [],
             block_paths: Array.isArray(parsed.block_paths) ? parsed.block_paths : [],
             require_approval_for: Array.isArray(parsed.require_approval_for) ? parsed.require_approval_for : [],
+            max_retries: typeof parsed.max_retries === 'number' ? parsed.max_retries : 3,
           })
         } catch {
           setConfig(EMPTY_CONFIG)
@@ -146,7 +148,7 @@ export function PolicySection() {
 
   const runTest = async () => {
     if (!testValue.trim()) return
-    const result = await window.api.policy.test({ kind: testKind, value: testValue, config })
+    const result = await window.api.policy.test({ kind: testKind, value: testValue, config: { ...config, max_retries: config.max_retries ?? 3 } })
     setTestResult(result)
   }
 
@@ -200,6 +202,28 @@ export function PolicySection() {
         value={toLines(config.require_approval_for)}
         onChange={(v) => setConfig((c) => ({ ...c, require_approval_for: fromLines(v) }))}
       />
+
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 10, color: fg[3], marginBottom: 4, fontWeight: 600 }}>
+          Max retries per subtask before the agent blocks
+        </div>
+        <input
+          type="number"
+          min={1}
+          max={20}
+          value={config.max_retries ?? 3}
+          title="Max retries per subtask before the agent blocks"
+          placeholder="3"
+          onChange={(e) => {
+            const n = parseInt(e.target.value, 10)
+            setConfig((c) => ({ ...c, max_retries: Number.isFinite(n) && n > 0 ? n : 3 }))
+          }}
+          style={{
+            width: 80, background: surface.raised, border: `1px solid ${border[0]}`,
+            borderRadius: 4, padding: '5px 8px', fontSize: 10.5, color: fg[0], outline: 'none',
+          }}
+        />
+      </div>
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginBottom: 8 }}>
         <button
