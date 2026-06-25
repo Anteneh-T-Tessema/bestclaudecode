@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { Plus, Trash2, StickyNote } from 'lucide-react'
+import { Plus, Trash2, StickyNote, Download } from 'lucide-react'
 import { useNotepadStore } from '../../store/useNotepadStore'
 import { useSettingsStore } from '../../store/useSettingsStore'
+import { toast } from '../../store/useToastStore'
 import { EmptyState } from '../EmptyState'
 import { accent, border, fg, surface } from '../../design'
 
@@ -32,6 +33,21 @@ export function NotepadsPanel() {
     if (editingTitleId) {
       renameNotepad(editingTitleId, titleDraft.trim() || 'Untitled')
       setEditingTitleId(null)
+    }
+  }
+
+  // Gap 91 — export a notepad to a .md file in the project, so it persists
+  // beyond localStorage and becomes visible to the agent and to git.
+  const exportNotepad = async () => {
+    if (!activeNotepad || !projectPath) return
+    const slug = activeNotepad.title.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'untitled'
+    const dir = `${projectPath}/notes`
+    try {
+      await window.api.fs.createDir(dir)
+      await window.api.fs.writeFile(`${dir}/${slug}.md`, `# ${activeNotepad.title}\n\n${activeNotepad.content}`)
+      toast.success(`Exported to notes/${slug}.md`)
+    } catch {
+      toast.error('Failed to export notepad')
     }
   }
 
@@ -144,6 +160,9 @@ export function NotepadsPanel() {
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
           {/* Title row */}
           <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
             padding: '6px 10px',
             borderBottom: `1px solid ${border[2]}`,
             flexShrink: 0,
@@ -159,7 +178,7 @@ export function NotepadsPanel() {
                   if (e.key === 'Enter' || e.key === 'Escape') commitRename()
                 }}
                 style={{
-                  width: '100%',
+                  flex: 1,
                   background: surface.raised,
                   border: `1px solid ${accent.amber.fg}`,
                   borderRadius: 4,
@@ -173,13 +192,26 @@ export function NotepadsPanel() {
               />
             ) : (
               <span
-                style={{ fontSize: 12, fontWeight: 600, color: fg[0], cursor: 'text', userSelect: 'none' }}
+                style={{ flex: 1, fontSize: 12, fontWeight: 600, color: fg[0], cursor: 'text', userSelect: 'none' }}
                 onDoubleClick={() => startRename(activeNotepad.id, activeNotepad.title)}
                 title="Double-click to rename"
               >
                 {activeNotepad.title}
               </span>
             )}
+            <button
+              type="button"
+              onClick={() => void exportNotepad()}
+              disabled={!projectPath}
+              title="Export to notes/*.md in the project"
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                width: 20, height: 20, borderRadius: 4, border: 'none', flexShrink: 0,
+                background: 'none', color: fg[3], cursor: projectPath ? 'pointer' : 'not-allowed',
+              }}
+            >
+              <Download size={12} />
+            </button>
           </div>
 
           {/* Content textarea */}

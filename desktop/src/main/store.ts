@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { app, safeStorage } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 
@@ -97,4 +97,29 @@ export const store = {
     data[key] = value
     writeData(data)
   },
+}
+
+// Gap 88 — API keys encrypted at rest via Electron's OS-keychain-backed safeStorage
+// (macOS Keychain / Windows DPAPI / Linux Secret Service) instead of the plain
+// lakoora-settings.json field. Falls back to plaintext when no OS keychain is
+// available (e.g. some headless Linux setups), and to the legacy plain field for
+// keys saved before this existed.
+export function getSecret(key: string): string {
+  const raw = getCache()[`secret:${key}`] as string | undefined
+  if (raw) {
+    if (!safeStorage.isEncryptionAvailable()) return raw
+    try {
+      return safeStorage.decryptString(Buffer.from(raw, 'base64'))
+    } catch {
+      return raw
+    }
+  }
+  return (getCache()[key] as string | undefined) ?? ''
+}
+
+export function setSecret(key: string, value: string): void {
+  const encoded = safeStorage.isEncryptionAvailable()
+    ? safeStorage.encryptString(value).toString('base64')
+    : value
+  store.set(`secret:${key}`, encoded)
 }

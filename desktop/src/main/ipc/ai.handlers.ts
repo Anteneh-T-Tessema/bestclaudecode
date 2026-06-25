@@ -2,8 +2,9 @@ import { ipcMain, BrowserWindow } from 'electron'
 import { randomUUID } from 'crypto'
 import path from 'path'
 import { spawn } from 'child_process'
-import { store } from '../store'
+import { store, getSecret } from '../store'
 import { resolveModel } from '../modelRouter'
+import { queryAgentMemory } from '../agentMemory'
 
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
@@ -155,15 +156,31 @@ export function registerAiHandlers(): void {
     void (async () => {
       const timeoutHandle = setTimeout(() => controller.abort(), 90_000)
       try {
-        const { messages, model, systemPrompt } = opts
+        const { messages, model, systemPrompt: rawSystemPrompt } = opts
         const resolvedModel = resolveModel(model, messages[messages.length - 1]?.content ?? '')
+
+        // Gap 92 — surface cross-session memory relevant to the latest user
+        // message, the same BM25 lookup the autonomous agent already runs
+        // per-subtask, so regular chat benefits from accumulated learnings
+        // without the user needing to type @memory explicitly.
+        let systemPrompt = rawSystemPrompt
+        const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user')?.content ?? ''
+        if (lastUserMessage.trim()) {
+          const memories = await queryAgentMemory(lastUserMessage)
+          if (memories.length > 0) {
+            const block = memories
+              .map((m) => `**${m.key}**${m.tags.length ? ` [${m.tags.join(', ')}]` : ''}\n${m.content}`)
+              .join('\n\n')
+            systemPrompt = `${systemPrompt ?? ''}\n\n## Relevant past learnings\n\n${block}`.trim()
+          }
+        }
 
         let totalInputTokens = 0
         let totalOutputTokens = 0
 
         if (resolvedModel.startsWith('claude')) {
           const { default: Anthropic } = await import('@anthropic-ai/sdk')
-          const apiKey = store.get('anthropicApiKey') as string | undefined
+          const apiKey = getSecret('anthropicApiKey')
           if (!apiKey) throw new Error('Anthropic API key not configured. Go to Settings to add it.')
 
           const client = new Anthropic({ apiKey })
@@ -235,7 +252,7 @@ export function registerAiHandlers(): void {
           }
         } else if (resolvedModel.startsWith('gpt') || resolvedModel.startsWith('o1') || resolvedModel.startsWith('o3')) {
           const { default: OpenAI } = await import('openai')
-          const apiKey = store.get('openaiApiKey') as string | undefined
+          const apiKey = getSecret('openaiApiKey')
           if (!apiKey) throw new Error('OpenAI API key not configured. Go to Settings to add it.')
 
           const client = new OpenAI({ apiKey })
@@ -325,7 +342,7 @@ export function registerAiHandlers(): void {
           }
         } else if (resolvedModel.startsWith('gemini')) {
           const { GoogleGenerativeAI, SchemaType } = await import('@google/generative-ai')
-          const apiKey = store.get('googleApiKey') as string | undefined
+          const apiKey = getSecret('googleApiKey')
           if (!apiKey) throw new Error('Google API key not configured. Go to Settings to add it.')
 
           const client = new GoogleGenerativeAI(apiKey)
@@ -488,13 +505,13 @@ export function registerAiHandlers(): void {
     const snippets = getContextSnippets(windowId)
 
     try {
-      const mistralKey = store.get('mistralApiKey') as string | undefined
+      const mistralKey = getSecret('mistralApiKey')
       if (mistralKey) {
         const result = await codestralFIM(prefix, suffix, snippets, mistralKey).catch(() => null)
         if (result !== null) return result
       }
 
-      const fireworksKey = store.get('fireworksApiKey') as string | undefined
+      const fireworksKey = getSecret('fireworksApiKey')
       if (fireworksKey) {
         const result = await fireworksFIM(prefix, suffix, snippets, fireworksKey).catch(() => null)
         if (result !== null) return result
@@ -513,7 +530,7 @@ Completion (text only, no preamble):`
 
       if (model.startsWith('claude')) {
         const { default: Anthropic } = await import('@anthropic-ai/sdk')
-        const apiKey = store.get('anthropicApiKey') as string | undefined
+        const apiKey = getSecret('anthropicApiKey')
         if (!apiKey) return null
         const client = new Anthropic({ apiKey })
         const msg = await client.messages.create({
@@ -524,7 +541,7 @@ Completion (text only, no preamble):`
         return block?.type === 'text' ? block.text.trimStart() : null
       } else if (model.startsWith('gpt') || model.startsWith('o1') || model.startsWith('o3')) {
         const { default: OpenAI } = await import('openai')
-        const apiKey = store.get('openaiApiKey') as string | undefined
+        const apiKey = getSecret('openaiApiKey')
         if (!apiKey) return null
         const client = new OpenAI({ apiKey })
         const resp = await client.chat.completions.create({

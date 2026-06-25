@@ -116,6 +116,15 @@ const api = {
       ipcRenderer.invoke('git:stashApply', { cwd, ref }),
     stashDrop: (cwd: string, ref: string): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke('git:stashDrop', { cwd, ref }),
+    // Gap 85 — discard unstaged changes for one file
+    discardFile: (cwd: string, filePath: string): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('git:discardFile', { cwd, filePath }),
+    // Gap 89 — soft-reset HEAD~1, keep changes staged
+    undoLastCommit: (cwd: string): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('git:undoLastCommit', { cwd }),
+    // Gap 90 — merge a local branch into the current branch
+    merge: (cwd: string, branch: string): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('git:merge', { cwd, branch }),
   },
 
   // ── AI Chat (streaming) ────────────────────────────────────────────────────
@@ -367,6 +376,10 @@ const api = {
       ipcRenderer.invoke('settings:validateKey', { provider, key }),
     exportSettings: (): Promise<string | null> => ipcRenderer.invoke('settings:exportSettings'),
     importSettings: (): Promise<string[] | null> => ipcRenderer.invoke('settings:importSettings'),
+    // Gap 88 — encrypted API key storage (safeStorage, OS-keychain-backed)
+    setSecret: (key: string, value: string): Promise<{ success: boolean }> =>
+      ipcRenderer.invoke('settings:setSecret', key, value),
+    getSecret: (key: string): Promise<string> => ipcRenderer.invoke('settings:getSecret', key),
   },
 
   // ── Debugger (DAP) ─────────────────────────────────────────────────────────

@@ -20,7 +20,7 @@ import { BrowserWindow } from 'electron'
 import { randomUUID } from 'crypto'
 import { runPythonJson, runCommand } from '../pythonBridge'
 import { repoRoot } from '../paths'
-import { store } from '../store'
+import { store, getSecret } from '../store'
 import { runChatContext } from '../chatContext'
 import { queryAgentMemory } from '../agentMemory'
 import { resolveModel } from '../modelRouter'
@@ -259,7 +259,7 @@ async function streamToString(
 
   if (model.startsWith('claude')) {
     const { default: Anthropic } = await import('@anthropic-ai/sdk')
-    const apiKey = store.get('anthropicApiKey') as string | undefined
+    const apiKey = getSecret('anthropicApiKey')
     if (!apiKey) throw new Error('Anthropic API key not configured')
     const client = new Anthropic({ apiKey })
     const systemMessage = messages.find((m) => m.role === 'system')
@@ -286,7 +286,7 @@ async function streamToString(
 
   if (model.startsWith('gpt')) {
     const { default: OpenAI } = await import('openai')
-    const apiKey = store.get('openaiApiKey') as string | undefined
+    const apiKey = getSecret('openaiApiKey')
     if (!apiKey) throw new Error('OpenAI API key not configured')
     const client = new OpenAI({ apiKey })
     const stream = await client.chat.completions.create({

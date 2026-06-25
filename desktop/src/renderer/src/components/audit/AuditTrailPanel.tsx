@@ -100,6 +100,8 @@ export function AuditTrailPanel() {
   const [loading, setLoading] = useState(false)
   const [query, setQuery] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
+  // Gap 93 — filter the audit trail down to one agent at a time.
+  const [agentFilter, setAgentFilter] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -116,6 +118,8 @@ export function AuditTrailPanel() {
   }, [query])
 
   useEffect(() => { load() }, [load])
+
+  const filteredEntries = agentFilter ? entries.filter((e) => e.agent === agentFilter) : entries
 
   const exportJson = async () => {
     const result = await window.api.decisions.export()
@@ -183,8 +187,8 @@ export function AuditTrailPanel() {
         </div>
       )}
 
-      <div style={{ padding: '6px 12px', borderBottom: `1px solid ${border[1]}`, flexShrink: 0 }}>
-        <div style={{ position: 'relative' }}>
+      <div style={{ padding: '6px 12px', borderBottom: `1px solid ${border[1]}`, flexShrink: 0, display: 'flex', gap: 6 }}>
+        <div style={{ position: 'relative', flex: 1 }}>
           <Search style={{ position: 'absolute', left: 6, top: '50%', transform: 'translateY(-50%)', width: 11, height: 11, color: fg[3] }} />
           <input
             value={query}
@@ -197,21 +201,37 @@ export function AuditTrailPanel() {
             }}
           />
         </div>
+        {stats && stats.agents.length > 1 && (
+          <select
+            value={agentFilter}
+            onChange={(e) => setAgentFilter(e.target.value)}
+            title="Filter by agent"
+            style={{
+              flexShrink: 0, background: surface.raised, border: `1px solid ${border[0]}`,
+              borderRadius: 3, padding: '0 6px', fontSize: 10.5, color: fg[0], outline: 'none',
+            }}
+          >
+            <option value="">All agents</option>
+            {stats.agents.map((a) => (
+              <option key={a} value={a}>{a}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       <div style={{ flex: 1, overflow: 'auto' }}>
-        {entries.length === 0 && !loading ? (
+        {filteredEntries.length === 0 && !loading ? (
           <EmptyState
             icon={<ShieldCheck style={{ width: 22, height: 22 }} />}
-            title={query ? 'No matches' : 'No decisions logged yet'}
+            title={query || agentFilter ? 'No matches' : 'No decisions logged yet'}
             description={
-              query
-                ? 'No decision log entries match your search.'
+              query || agentFilter
+                ? 'No decision log entries match your search or filter.'
                 : 'Run /implement or /blueprint-build to start building a transparent, reviewable audit trail of every agent decision.'
             }
           />
         ) : (
-          entries.map((entry) => (
+          filteredEntries.map((entry) => (
             <DecisionRow
               key={entry.filename}
               entry={entry}

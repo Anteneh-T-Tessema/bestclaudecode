@@ -83,6 +83,9 @@ export function createWebApi(): API {
       stashList: () => Promise.resolve(notPorted('git.stashList', [] as Array<{ ref: string; name: string; age: string }>)),
       stashApply: () => Promise.resolve(notPorted('git.stashApply', { success: false })),
       stashDrop: () => Promise.resolve(notPorted('git.stashDrop', { success: false })),
+      discardFile: () => Promise.resolve(notPorted('git.discardFile', { success: false })),
+      undoLastCommit: () => Promise.resolve(notPorted('git.undoLastCommit', { success: false })),
+      merge: () => Promise.resolve(notPorted('git.merge', { success: false })),
     },
 
     ai: {
@@ -258,6 +261,8 @@ export function createWebApi(): API {
       validateKey: (provider, key) => socket.invoke('settings:validateKey', { provider, key }),
       exportSettings: () => Promise.resolve(notPorted('settings.exportSettings', null)),
       importSettings: () => Promise.resolve(notPorted('settings.importSettings', null)),
+      setSecret: () => Promise.resolve(notPorted('settings.setSecret', { success: false })),
+      getSecret: () => Promise.resolve(notPorted('settings.getSecret', '')),
     },
 
     window: {

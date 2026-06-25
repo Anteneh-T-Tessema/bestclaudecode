@@ -238,12 +238,14 @@ function FileRow({
   name,
   selected,
   onClick,
+  onDiscard,
 }: {
   label: string
   color: string
   name: string
   selected: boolean
   onClick: () => void
+  onDiscard?: () => void
 }) {
   const [hovered, setHovered] = useState(false)
   const bg = selected ? accent.amber.subtle : hovered ? surface.raised : 'transparent'
@@ -280,6 +282,20 @@ function FileRow({
       >
         {name}
       </span>
+      {onDiscard && hovered && (
+        <button
+          type="button"
+          title="Discard changes"
+          onClick={(e) => { e.stopPropagation(); onDiscard() }}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            width: 16, height: 16, borderRadius: 3, border: 'none', flexShrink: 0,
+            background: 'transparent', color: accent.red.fg, cursor: 'pointer', padding: 0,
+          }}
+        >
+          <RotateCcw style={{ width: 9, height: 9 }} />
+        </button>
+      )}
     </div>
   )
 }
@@ -309,6 +325,14 @@ export function GitPanel() {
   const [commitFilesLoading, setCommitFilesLoading] = useState<string | null>(null)
   const [branchDropdownOpen, setBranchDropdownOpen] = useState(false)
   const branchBadgeRef = useRef<HTMLSpanElement>(null)
+
+  // Gap 89 — undo last commit
+  const [undoing, setUndoing] = useState(false)
+
+  // Gap 90 — merge branch
+  const [mergeBranch, setMergeBranch] = useState('')
+  const [merging, setMerging] = useState(false)
+  const [allBranches, setAllBranches] = useState<string[]>([])
 
   // Checkpoints (git stash)
   interface Checkpoint { ref: string; name: string; age: string }
@@ -447,7 +471,12 @@ export function GitPanel() {
   useEffect(() => {
     refresh()
     loadCheckpoints()
-  }, [refresh, loadCheckpoints])
+    if (projectPath) {
+      window.api.git.listBranches(projectPath)
+        .then((r) => setAllBranches((r as { branches: string[] }).branches ?? []))
+        .catch(() => {})
+    }
+  }, [refresh, loadCheckpoints, projectPath])
 
   useEffect(() => {
     if (cpInputOpen) setTimeout(() => cpInputRef.current?.focus(), 30)
@@ -484,6 +513,54 @@ export function GitPanel() {
       refresh()
     } else {
       toast.error(`Stage failed: ${result.error}`)
+    }
+  }
+
+  // Gap 85 — discard unstaged changes for a single file
+  const discardFile = async (filePath: string) => {
+    if (!projectPath) return
+    const result = await window.api.git.discardFile(projectPath, filePath)
+    if (result.success) {
+      toast.success(`Discarded changes in ${filePath.split('/').pop()}`)
+      setSelected((prev) => { const next = new Set(prev); next.delete(filePath); return next })
+      refresh()
+    } else {
+      toast.error(`Discard failed: ${result.error}`)
+    }
+  }
+
+  // Gap 89 — soft reset HEAD~1
+  const undoLastCommit = async () => {
+    if (!projectPath) return
+    setUndoing(true)
+    try {
+      const result = await window.api.git.undoLastCommit(projectPath)
+      if (result.success) {
+        toast.success('Last commit undone (changes re-staged)')
+        refresh()
+      } else {
+        toast.error(`Undo failed: ${result.error}`)
+      }
+    } finally {
+      setUndoing(false)
+    }
+  }
+
+  // Gap 90 — merge branch
+  const handleMerge = async () => {
+    if (!projectPath || !mergeBranch) return
+    setMerging(true)
+    try {
+      const result = await window.api.git.merge(projectPath, mergeBranch)
+      if (result.success) {
+        toast.success(`Merged ${mergeBranch}`)
+        setMergeBranch('')
+        refresh()
+      } else {
+        toast.error(`Merge failed: ${result.error}`)
+      }
+    } finally {
+      setMerging(false)
     }
   }
 
@@ -845,6 +922,7 @@ export function GitPanel() {
                     name={f.path.split('/').pop() ?? f.path}
                     selected={isSel}
                     onClick={() => { toggleSelect(f.path); void openDiff(f) }}
+                    onDiscard={() => void discardFile(f.path)}
                   />
                 )
               })}
@@ -1036,9 +1114,65 @@ export function GitPanel() {
             )}
           </div>
 
+          {/* Gap 90 — Merge branch */}
+          {allBranches.filter((b) => b !== branch).length > 0 && (
+            <div style={{ flexShrink: 0, padding: '6px 10px', borderBottom: `1px solid ${border[1]}` }}>
+              <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: fg[3], marginBottom: 5 }}>
+                Merge Branch
+              </div>
+              <div style={{ display: 'flex', gap: 5 }}>
+                <select
+                  value={mergeBranch}
+                  onChange={(e) => setMergeBranch(e.target.value)}
+                  title="Branch to merge into the current branch"
+                  style={{
+                    flex: 1, background: surface.raised, border: `1px solid ${border[0]}`,
+                    borderRadius: 4, padding: '4px 6px', fontSize: 10.5, color: fg[0], outline: 'none',
+                  }}
+                >
+                  <option value="">Select branch…</option>
+                  {allBranches.filter((b) => b !== branch).map((b) => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => void handleMerge()}
+                  disabled={!mergeBranch || merging}
+                  style={{
+                    flexShrink: 0, fontSize: 10, fontWeight: 700, padding: '4px 10px', borderRadius: 4,
+                    border: `1px solid ${mergeBranch ? accent.cyan.border : border[0]}`,
+                    background: mergeBranch ? accent.cyan.subtle : surface.raised,
+                    color: mergeBranch ? accent.cyan.fg : fg[3],
+                    cursor: mergeBranch && !merging ? 'pointer' : 'not-allowed',
+                  }}
+                >
+                  {merging ? 'Merging…' : 'Merge'}
+                </button>
+              </div>
+            </div>
+          )}
+
           {log.length > 0 && (
             <div>
-              <SectionLabel>Recent Commits</SectionLabel>
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <div style={{ flex: 1 }}><SectionLabel>Recent Commits</SectionLabel></div>
+                <button
+                  type="button"
+                  onClick={() => void undoLastCommit()}
+                  disabled={undoing}
+                  title="Undo last commit (soft reset — keeps changes staged)"
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 4,
+                    margin: '0 10px 0 0', padding: '2px 7px', borderRadius: 3, fontSize: 9, fontWeight: 700,
+                    border: `1px solid ${border[0]}`, background: 'transparent', color: fg[3],
+                    cursor: undoing ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  <RotateCcw style={{ width: 8, height: 8 }} className={undoing ? 'agent-pulse' : ''} />
+                  Undo
+                </button>
+              </div>
               {log.map((entry) => {
                 const isExpanded = expandedCommit === entry.hash
                 const cFiles = commitFileMap[entry.hash]

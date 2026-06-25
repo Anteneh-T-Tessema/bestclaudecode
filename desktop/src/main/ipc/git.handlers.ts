@@ -304,4 +304,34 @@ export function registerGitHandlers(): void {
       return { success: false, error: (e as Error).message }
     }
   })
+
+  // Gap 85 — discard unstaged changes for a single file (git restore).
+  ipcMain.handle('git:discardFile', async (_, { cwd, filePath }: { cwd: string; filePath: string }) => {
+    try {
+      await git(cwd, ['restore', '--', filePath])
+      return { success: true }
+    } catch (e) {
+      return { success: false, error: (e as Error).message }
+    }
+  })
+
+  // Gap 89 — soft-reset HEAD~1 (undo last commit, keep changes staged).
+  ipcMain.handle('git:undoLastCommit', async (_, { cwd }: { cwd: string }) => {
+    try {
+      await git(cwd, ['reset', '--soft', 'HEAD~1'])
+      return { success: true }
+    } catch (e) {
+      return { success: false, error: (e as Error).message }
+    }
+  })
+
+  // Gap 90 — merge a local branch into the current branch.
+  ipcMain.handle('git:merge', async (_, { cwd, branch }: { cwd: string; branch: string }) => {
+    try {
+      await git(cwd, ['merge', '--no-ff', branch])
+      return { success: true }
+    } catch (e) {
+      return { success: false, error: (e as Error).message }
+    }
+  })
 }

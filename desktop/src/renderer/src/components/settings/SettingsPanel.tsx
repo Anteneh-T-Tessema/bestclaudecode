@@ -172,15 +172,15 @@ function StatusRow({ label, ok, detail }: { label: string; ok: boolean; detail?:
   )
 }
 
+// Gap 88 — these three are encrypted via safeStorage (settings:setSecret), not the plain settings:set channel.
+const SECRET_FIELDS = new Set(['anthropicApiKey', 'openaiApiKey', 'googleApiKey'])
+
 export function SettingsPanel() {
   const [engine, setEngine] = useState<EngineHealth | null>(null)
   const [bridge, setBridge] = useState<BridgeResult | null>(null)
   const [checking, setChecking] = useState(false)
 
   const settingsLoaded = useSettingsStore((s) => s.loaded)
-  const storeAnthropicKey = useSettingsStore((s) => s.anthropicApiKey)
-  const storeOpenaiKey = useSettingsStore((s) => s.openaiApiKey)
-  const storeGoogleKey = useSettingsStore((s) => s.googleApiKey)
   const storeOllamaUrl = useSettingsStore((s) => s.ollamaUrl)
   const recentProjects = useSettingsStore((s) => s.recentProjects)
   const projectPath = useSettingsStore((s) => s.projectPath)
@@ -205,17 +205,28 @@ export function SettingsPanel() {
   const [globalRulesSaved, setGlobalRulesSaved] = useState(false)
   const globalRulesLoaded = useRef(false)
 
+  // Gap 88 — API keys are encrypted at rest (safeStorage) and loaded individually,
+  // not via the bulk settings:getAll used for plain preferences.
+  useEffect(() => {
+    Promise.all([
+      window.api.settings.getSecret('anthropicApiKey'),
+      window.api.settings.getSecret('openaiApiKey'),
+      window.api.settings.getSecret('googleApiKey'),
+    ]).then(([a, o, g]) => {
+      setAnthropicKey(a)
+      setOpenaiKey(o)
+      setGoogleKey(g)
+    })
+  }, [])
+
   useEffect(() => {
     if (!settingsLoaded) return
-    setAnthropicKey(storeAnthropicKey)
-    setOpenaiKey(storeOpenaiKey)
-    setGoogleKey(storeGoogleKey)
     setOllamaUrl(storeOllamaUrl)
     if (!globalRulesLoaded.current) {
       setGlobalRulesDraft(storeGlobalRules)
       globalRulesLoaded.current = true
     }
-  }, [settingsLoaded, storeAnthropicKey, storeOpenaiKey, storeGoogleKey, storeOllamaUrl, storeGlobalRules])
+  }, [settingsLoaded, storeOllamaUrl, storeGlobalRules])
 
   const saveGlobalRules = async () => {
     setGlobalRulesSaving(true)
@@ -259,7 +270,12 @@ export function SettingsPanel() {
 
   const saveKey = useCallback(
     async (field: 'anthropicApiKey' | 'openaiApiKey' | 'googleApiKey' | 'ollamaUrl', value: string) => {
-      await saveSettings({ [field]: value })
+      if (SECRET_FIELDS.has(field)) {
+        const result = await window.api.settings.setSecret(field, value)
+        if (!result.success) { toast.error('Failed to save key'); return }
+      } else {
+        await saveSettings({ [field]: value })
+      }
       toast.success('Saved')
       flashSaved(field)
     },
@@ -280,6 +296,26 @@ export function SettingsPanel() {
     }
   }, [])
 
+  // Gap 94 — rebuild the semantic search index (src.chat_context --build-index),
+  // surfaced here since file changes outside the IDE's own writes (git pull,
+  // external editor) otherwise leave it stale with no visible way to refresh.
+  const [rebuilding, setRebuilding] = useState(false)
+  const [rebuildResult, setRebuildResult] = useState<{ indexed: number; backend: string } | null>(null)
+
+  const rebuildIndex = useCallback(async () => {
+    setRebuilding(true)
+    setRebuildResult(null)
+    try {
+      const result = await window.api.search.buildIndex()
+      setRebuildResult(result)
+      toast.success(`Indexed ${result.indexed} file${result.indexed !== 1 ? 's' : ''}`)
+    } catch {
+      toast.error('Failed to rebuild search index')
+    } finally {
+      setRebuilding(false)
+    }
+  }, [])
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       <PanelHeader
@@ -296,7 +332,7 @@ export function SettingsPanel() {
             AI Providers
           </div>
           <p style={{ fontSize: 10, color: fg[3], margin: '0 0 10px', lineHeight: 1.5 }}>
-            Required for AI Chat and Cmd+K inline edit. Keys are stored locally via electron-store, never sent anywhere but the provider you select.
+            Required for AI Chat and Cmd+K inline edit. Keys are encrypted at rest via your OS keychain, never sent anywhere but the provider you select.
           </p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <ApiKeyField
@@ -515,6 +551,33 @@ export function SettingsPanel() {
               {bridge.ok
                 ? `Python bridge OK · ${(bridge.stats as { total?: number } | undefined)?.total ?? 0} cycles reported`
                 : `Python bridge failed: ${bridge.error}`}
+            </div>
+          )}
+        </div>
+
+        <div>
+          <div style={{
+            fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+            color: fg[3], marginBottom: 8, paddingBottom: 6, borderBottom: `1px solid ${border[1]}`,
+          }}>
+            Search Index
+          </div>
+          <p style={{ fontSize: 10, color: fg[3], margin: '0 0 8px', lineHeight: 1.5 }}>
+            Powers @codebase and the automatic retrieval baseline. Rebuild after pulling
+            changes made outside the IDE, or if search results feel stale.
+          </p>
+
+          <Button variant="ghost" size="sm" disabled={rebuilding} onClick={rebuildIndex}>
+            {rebuilding ? 'Rebuilding…' : 'Rebuild Search Index'}
+          </Button>
+
+          {rebuildResult && (
+            <div style={{ marginTop: 8 }}>
+              <StatusRow
+                label="Indexed"
+                ok={rebuildResult.indexed > 0}
+                detail={`${rebuildResult.indexed} files · ${rebuildResult.backend || 'unknown backend'}`}
+              />
             </div>
           )}
         </div>

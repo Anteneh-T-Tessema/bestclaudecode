@@ -8,6 +8,7 @@ import { useAppStore } from '../../store/useAppStore'
 import { toast } from '../../store/useToastStore'
 import { surface, border, fg, accent } from '../../design'
 import { ModelSelector } from './ModelSelector'
+import { extractSymbols } from '../sidebar/OutlinePanel'
 
 const BASE_SYSTEM_PROMPT = `You are an expert AI coding agent for the Lakoora IDE. Help the user understand, write, debug, and improve their code. Be concise and accurate.
 
@@ -340,6 +341,7 @@ async function injectWebContext(content: string): Promise<string> {
 const MENTIONS = [
   { tag: '@selection',  desc: 'Currently selected editor text' },
   { tag: '@file',       desc: 'Full content of the active file (or pick any file)' },
+  { tag: '@outline',    desc: 'Symbol map (classes, functions, methods) of the active file' },
   { tag: '@folder',     desc: 'List files in a project folder' },
   { tag: '@terminal',   desc: 'Last ~100 lines of terminal output' },
   { tag: '@problems',   desc: 'Current diagnostics / lint errors' },
@@ -538,6 +540,18 @@ export function ChatInput() {
       finalContent = finalContent.replace(
         '@file',
         `\n\nCurrent file (${activeTab.label}):\n\`\`\`${activeTab.language}\n${activeTab.content}\n\`\`\``
+      )
+    }
+
+    // Gap 87 — @outline: inject the current file's symbol map (classes, functions, methods)
+    if (finalContent.includes('@outline') && activeTab) {
+      const symbols = extractSymbols(activeTab.content, activeTab.language)
+      const body = symbols.length > 0
+        ? symbols.map((s) => `${'  '.repeat(Math.floor(s.indent / 2))}${s.kind} ${s.name} (line ${s.line})`).join('\n')
+        : '(no symbols found)'
+      finalContent = finalContent.replace(
+        '@outline',
+        `\n\nOutline of ${activeTab.label}:\n\`\`\`\n${body}\n\`\`\``
       )
     }
 

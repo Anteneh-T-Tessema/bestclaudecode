@@ -2,7 +2,7 @@ import { ipcMain } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 import { repoRoot, venvPython, venvPytest, venvRuff } from '../paths'
-import { store } from '../store'
+import { store, getSecret, setSecret } from '../store'
 import { runPythonJson, runCommand, type PythonBridgeResult, type CommandResult } from '../pythonBridge'
 
 // Mirrored from renderer/RunProposalCard.tsx — main process is the authoritative gate.
@@ -14,7 +14,7 @@ const MAIN_BLOCKED = [
 ]
 
 // Only these keys may be set via the public settings:set channel.
-// Secret keys (API keys) are written via settings:setSecret (keytar) once Phase 1-C lands.
+// Secret keys (API keys) are written via settings:setSecret (Gap 88 — safeStorage-encrypted).
 const MUTABLE_KEYS = new Set([
   'theme', 'fontSize', 'sidebarWidth', 'rightPanelWidth',
   'bottomPanelHeight', 'projectPath', 'recentProjects', 'ollamaUrl', 'activeModel',
@@ -161,13 +161,30 @@ export function registerSettingsHandlers(): void {
   })
 
   ipcMain.handle('settings:getAll', () => {
-    // Only return non-secret keys. API keys must be read via settings:get individually
-    // (or via settings:setSecret once keytar is wired in Phase 1-C).
+    // Only return non-secret keys. API keys are read individually via settings:getSecret.
     const result: Record<string, unknown> = {}
     for (const key of MUTABLE_KEYS) {
       result[key] = store.get(key)
     }
     return result
+  })
+
+  // Gap 88 — encrypted API key storage (safeStorage, OS-keychain-backed).
+  ipcMain.handle('settings:setSecret', (_event, key: string, value: string): { success: boolean } => {
+    try {
+      setSecret(key, value)
+      return { success: true }
+    } catch {
+      return { success: false }
+    }
+  })
+
+  ipcMain.handle('settings:getSecret', (_event, key: string): string => {
+    try {
+      return getSecret(key)
+    } catch {
+      return ''
+    }
   })
 
   // Gap 81 — git diff context block: formats recent changes relative to a ref.

@@ -6,7 +6,7 @@ import { accent, border, fg, surface } from '../../design'
 
 type SymbolKind = 'function' | 'class' | 'interface' | 'method' | 'type' | 'enum' | 'variable'
 
-interface OutlineSymbol {
+export interface OutlineSymbol {
   name: string
   kind: SymbolKind
   line: number
@@ -33,7 +33,7 @@ const KIND_BADGE: Record<SymbolKind, string> = {
   variable:  'v',
 }
 
-function extractSymbols(content: string, language: string): OutlineSymbol[] {
+export function extractSymbols(content: string, language: string): OutlineSymbol[] {
   const lines = content.split('\n')
   const symbols: OutlineSymbol[] = []
 

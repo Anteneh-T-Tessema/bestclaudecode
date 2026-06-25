@@ -7,6 +7,7 @@ import { useChatStore } from '../../store/useChatStore'
 type Subtask = { id: string; description: string; depends_on: string[]; done: boolean }
 type SessionSummary = { id: string; branch?: string; startedAt: number }
 type VerifyResult = { valid: boolean; brokenAtSeq?: number; totalEvents: number }
+type ShadowInfo = { id: string; path: string; branch: string; base_ref: string; repo_root: string }
 
 interface AgentProgress {
   sessionId: string
@@ -241,6 +242,72 @@ export function AgentProgressPanel() {
       setIsReplaying(false)
     }
   }, [selectedSession, isReplaying, isRunning, replaySpeed])
+
+  // Gap 86 — shadow workspace: isolated branch the agent can write to, reviewed
+  // and explicitly promoted or discarded rather than landing directly on the working tree.
+  const [shadow, setShadow] = useState<ShadowInfo | null>(null)
+  const [shadowDiff, setShadowDiff] = useState<string | null>(null)
+  const [shadowBusy, setShadowBusy] = useState(false)
+  const [shadowDiffOpen, setShadowDiffOpen] = useState(false)
+
+  const createShadow = useCallback(async () => {
+    setShadowBusy(true)
+    try {
+      const info = await window.api.agent.createShadow()
+      if (info) {
+        setShadow(info)
+        toast.success(`Shadow workspace created on ${info.branch}`)
+      } else {
+        toast.error('Failed to create shadow workspace')
+      }
+    } finally {
+      setShadowBusy(false)
+    }
+  }, [])
+
+  const toggleShadowDiff = useCallback(async () => {
+    if (!shadow) return
+    if (shadowDiffOpen) { setShadowDiffOpen(false); return }
+    const diff = await window.api.agent.getShadowDiffVsBase(shadow.id)
+    setShadowDiff(diff ?? '(no changes)')
+    setShadowDiffOpen(true)
+  }, [shadow, shadowDiffOpen])
+
+  const promoteShadow = useCallback(async () => {
+    if (!shadow) return
+    setShadowBusy(true)
+    try {
+      const ok = await window.api.agent.promoteShadow(shadow.id)
+      if (ok) {
+        toast.success('Shadow workspace promoted to working tree')
+        setShadow(null)
+        setShadowDiff(null)
+        setShadowDiffOpen(false)
+      } else {
+        toast.error('Failed to promote shadow workspace')
+      }
+    } finally {
+      setShadowBusy(false)
+    }
+  }, [shadow])
+
+  const discardShadow = useCallback(async () => {
+    if (!shadow) return
+    setShadowBusy(true)
+    try {
+      const ok = await window.api.agent.discardShadow(shadow.id)
+      if (ok) {
+        toast.success('Shadow workspace discarded')
+        setShadow(null)
+        setShadowDiff(null)
+        setShadowDiffOpen(false)
+      } else {
+        toast.error('Failed to discard shadow workspace')
+      }
+    } finally {
+      setShadowBusy(false)
+    }
+  }, [shadow])
 
   const launch = useCallback(async () => {
     const trimmed = goal.trim()
@@ -568,6 +635,88 @@ export function AgentProgressPanel() {
           )}
         </div>
       )}
+
+      {/* Gap 86 — shadow workspace: an isolated branch the agent can write to without
+          touching the working tree, reviewed via diff and explicitly promoted or discarded. */}
+      <div style={{ padding: '8px 12px', borderBottom: `1px solid ${border[1]}`, flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: shadow ? 6 : 0 }}>
+          <GitBranch size={11} color={accent.cyan.fg} />
+          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: fg[3], flex: 1 }}>
+            Shadow Workspace
+          </span>
+          {!shadow && (
+            <button
+              type="button"
+              onClick={() => void createShadow()}
+              disabled={shadowBusy}
+              style={{
+                fontSize: 10, fontWeight: 600, padding: '3px 9px', borderRadius: 4,
+                border: `1px solid ${border[0]}`, background: surface.raised, color: fg[2],
+                cursor: shadowBusy ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {shadowBusy ? 'Creating…' : 'Create'}
+            </button>
+          )}
+        </div>
+        {shadow && (
+          <div>
+            <div style={{ fontSize: 10, color: fg[3], fontFamily: 'monospace', marginBottom: 6 }}>
+              {shadow.branch} <span style={{ color: fg[4] }}>(base: {shadow.base_ref})</span>
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                type="button"
+                onClick={() => void toggleShadowDiff()}
+                style={{
+                  fontSize: 10, fontWeight: 600, padding: '4px 9px', borderRadius: 4,
+                  border: `1px solid ${border[0]}`, background: surface.raised, color: fg[2],
+                  cursor: 'pointer',
+                }}
+              >
+                {shadowDiffOpen ? 'Hide Diff' : 'View Diff'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void promoteShadow()}
+                disabled={shadowBusy}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 4,
+                  fontSize: 10, fontWeight: 700, padding: '4px 9px', borderRadius: 4,
+                  background: accent.green.subtle, border: `1px solid ${accent.green.border}`,
+                  color: accent.green.fg, cursor: shadowBusy ? 'not-allowed' : 'pointer',
+                }}
+              >
+                <Check size={10} /> Promote
+              </button>
+              <button
+                type="button"
+                onClick={() => void discardShadow()}
+                disabled={shadowBusy}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 4,
+                  fontSize: 10, fontWeight: 700, padding: '4px 9px', borderRadius: 4,
+                  background: accent.red.subtle, border: `1px solid ${accent.red.border}`,
+                  color: accent.red.fg, cursor: shadowBusy ? 'not-allowed' : 'pointer',
+                }}
+              >
+                <X size={10} /> Discard
+              </button>
+            </div>
+            {shadowDiffOpen && shadowDiff && (
+              <pre
+                style={{
+                  marginTop: 6, maxHeight: 200, overflow: 'auto', fontSize: 9.5,
+                  fontFamily: 'monospace', color: fg[2], background: surface.void,
+                  border: `1px solid ${border[1]}`, borderRadius: 4, padding: 8, whiteSpace: 'pre-wrap',
+                }}
+              >
+                {shadowDiff}
+              </pre>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Subtask dependency graph (Gap 59) — flat list with explicit "needs:" annotations
           rather than a nested tree, since depends_on can have multiple parents (a DAG, not
