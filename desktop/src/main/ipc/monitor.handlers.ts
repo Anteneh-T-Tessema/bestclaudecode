@@ -27,7 +27,21 @@ const monitors = new Map<string, import('node-pty').IPty>()
 // trailing partial line across onData calls.
 const lineBuffers = new Map<string, string>()
 
-const ERROR_PATTERN = /\b(error|exception|fail(?:ed|ure)?|fatal|panic|5\d\d)\b/i
+export const ERROR_PATTERN = /\b(error|exception|fail(?:ed|ure)?|fatal|panic|5\d\d)\b/i
+
+/**
+ * node-pty delivers arbitrary byte chunks, not line-delimited text. Given the
+ * buffered trailing partial line from the previous call plus a new chunk,
+ * returns the complete lines found and the new trailing partial to carry
+ * forward. Pulled out of the onData closure below so it's unit-testable
+ * without spawning a real pty.
+ */
+export function splitLines(buffer: string, chunk: string): { lines: string[]; remainder: string } {
+  const combined = buffer + chunk
+  const lines = combined.split('\n')
+  const remainder = lines.pop() ?? ''
+  return { lines, remainder }
+}
 
 function projectRoot(): string {
   return path.resolve((store.get('projectPath') as string | undefined) || repoRoot())
@@ -55,9 +69,8 @@ export function registerMonitorHandlers(): void {
       if (!event.sender.isDestroyed()) {
         event.sender.send(`monitor:data:${id}`, data)
       }
-      const buffered = (lineBuffers.get(id) ?? '') + data
-      const lines = buffered.split('\n')
-      lineBuffers.set(id, lines.pop() ?? '')
+      const { lines, remainder } = splitLines(lineBuffers.get(id) ?? '', data)
+      lineBuffers.set(id, remainder)
       for (const line of lines) {
         if (ERROR_PATTERN.test(line)) {
           const alert = appendAlert(projectRoot(), line, id)

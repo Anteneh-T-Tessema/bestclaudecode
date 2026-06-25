@@ -42,6 +42,18 @@ export function MonitorPanel() {
     window.api.monitor.listAlerts().then(setAlerts).catch(() => {})
   }, [])
 
+  // Deploy → Monitor handoff (GitPanel's "Watch Logs" button) — prefills the
+  // command for the user to review/edit, doesn't auto-start it, consistent
+  // with the human-confirms-before-running pattern used throughout this app.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ command: string }>).detail
+      if (detail?.command) setCommand(detail.command)
+    }
+    window.addEventListener('lakoora:monitor:prefill', handler)
+    return () => window.removeEventListener('lakoora:monitor:prefill', handler)
+  }, [])
+
   const diagnoseWithAi = useCallback(async (recentAlerts: AlertRecord[]) => {
     if (diagnosing || recentAlerts.length === 0) return
     setDiagnosing(true)

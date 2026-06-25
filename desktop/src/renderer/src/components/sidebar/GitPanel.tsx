@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { DiffEditor } from '@monaco-editor/react'
-import { GitBranch, RefreshCw, Plus, GitCommit, Clock, CheckCircle, Minus, AlertCircle, X, ArrowUp, ArrowDown, ChevronRight, FileText, Check, Sparkles, Bookmark, RotateCcw, Trash2, ChevronDown, GitPullRequest, Rocket } from 'lucide-react'
+import { GitBranch, RefreshCw, Plus, GitCommit, Clock, CheckCircle, Minus, AlertCircle, X, ArrowUp, ArrowDown, ChevronRight, FileText, Check, Sparkles, Bookmark, RotateCcw, Trash2, ChevronDown, GitPullRequest, Rocket, Activity } from 'lucide-react'
 import { useSettingsStore } from '../../store/useSettingsStore'
 import { useAppStore } from '../../store/useAppStore'
 import { useChatStore } from '../../store/useChatStore'
@@ -767,6 +767,22 @@ export function GitPanel() {
     } finally {
       setDeployActionId(null)
     }
+  }
+
+  // Deploy → Monitor handoff — provider-aware suggested tail command. No
+  // sensible generic default for an arbitrary npm deploy script, so that
+  // case returns null and the Watch Logs button stays hidden.
+  const watchLogsCommand = (d: DeployRecord): string | null => {
+    if (d.provider === 'vercel' && d.url) return `vercel logs ${d.url} --follow`
+    if (d.provider === 'netlify') return 'netlify logs:deploy'
+    return null
+  }
+
+  const watchLogs = (d: DeployRecord) => {
+    const command = watchLogsCommand(d)
+    if (!command) return
+    window.dispatchEvent(new CustomEvent('lakoora:monitor:prefill', { detail: { command } }))
+    setActiveActivity('monitor')
   }
 
   // Gap 103 — compare any two branches (three-dot diff)
@@ -1710,6 +1726,16 @@ export function GitPanel() {
                             </a>
                           )}
                           <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
+                            {watchLogsCommand(d) && (
+                              <button
+                                type="button"
+                                onClick={() => watchLogs(d)}
+                                title="Watch logs for this deployment in Monitor"
+                                style={{ display: 'flex', alignItems: 'center', padding: 2, background: 'transparent', border: 'none', color: accent.cyan.fg, cursor: 'pointer' }}
+                              >
+                                <Activity size={11} />
+                              </button>
+                            )}
                             {d.target === 'preview' && d.provider !== 'npm' && (
                               <button
                                 type="button"

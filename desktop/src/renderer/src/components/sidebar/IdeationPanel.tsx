@@ -112,7 +112,13 @@ export function IdeationPanel() {
       ].join('\n')
       await window.api.ideation.saveSpec(created.slug, specMarkdown)
 
-      toast.success('Plan created from spec')
+      const sessionId = await window.api.agent.startAutonomous({ planFile, model: activeModel ?? 'claude-sonnet-4-6' })
+      if (sessionId) {
+        toast.success(`Plan created — agent session ${sessionId.slice(0, 8)} started`)
+        setActiveActivity('swarm')
+      } else {
+        toast.success('Plan created from spec — open Task Planner to start it')
+      }
       setSpec(null)
       setIdea('')
     } finally {

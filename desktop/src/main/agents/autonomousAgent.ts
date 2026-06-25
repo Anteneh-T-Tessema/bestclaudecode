@@ -31,7 +31,8 @@ import { publish } from '../sessionRelay'
 import { sendNotification } from '../ipc/notifications.handlers'
 import { loadPolicy, checkCommand, checkPath, checkApproval, globToRegex } from '../policyEngine'
 import { validateGeneratedTs } from '../codeValidator'
-import { detectDeployCommand, runDeploy } from '../deploy'
+import { detectDeployCommand, runDeploy, providerFromCommand } from '../deploy'
+import { appendDeployRecord } from '../deployHistory'
 import * as path from 'path'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -463,9 +464,19 @@ async function attemptDeploy(opts: {
 
   broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: `Running ${deployCmd}…`, status: 'deploying', doneCount, totalCount, branch, prUrl })
 
+  const provider = providerFromCommand(deployCmd)
   try {
-    const { deployUrl } = await runDeploy(worktreePath, deployCmd)
+    const { exitCode, deployUrl } = await runDeploy(worktreePath, deployCmd)
+    // runDeploy never throws on a failing command — it returns a non-zero
+    // exitCode instead — so this branch was previously unreachable and every
+    // failed agent-triggered deploy was broadcast as 'deployed' regardless.
+    if (exitCode !== 0) {
+      broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: '', status: 'error', error: `Deploy command exited with code ${exitCode}`, doneCount, totalCount, branch, prUrl })
+      appendDeployRecord(worktreePath, { id: randomUUID(), ts: Date.now(), provider, deployCmd, target: 'production', exitCode, url: undefined })
+      return
+    }
     broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: '', status: 'deployed', doneCount, totalCount, branch, prUrl, deployUrl })
+    appendDeployRecord(worktreePath, { id: randomUUID(), ts: Date.now(), provider, deployCmd, target: 'production', exitCode, url: deployUrl })
   } catch { /* deploy failed — not fatal, session already succeeded */ }
 }
 
