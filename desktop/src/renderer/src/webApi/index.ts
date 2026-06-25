@@ -154,6 +154,7 @@ export function createWebApi(): API {
         codeAction: (uri, range, diagnostics) => socket.invoke('lsp:python:codeAction', { uri, range, diagnostics }),
         executeCommand: (command, args) => socket.invoke('lsp:python:executeCommand', { command, args }),
         rename: (uri, line, character, newName) => socket.invoke('lsp:python:rename', { uri, line, character, newName }),
+        format: (uri, tabSize, insertSpaces) => socket.invoke('lsp:python:format', { uri, tabSize, insertSpaces }),
         onDiagnostics: (cb) => socket.on('lsp:python:diagnostics', (payload) => cb(payload as { uri: string; diagnostics: unknown[] })),
       },
       ts: {
@@ -165,6 +166,7 @@ export function createWebApi(): API {
         codeAction: (uri, range, diagnostics) => socket.invoke('lsp:ts:codeAction', { uri, range, diagnostics }),
         executeCommand: (command, args) => socket.invoke('lsp:ts:executeCommand', { command, args }),
         rename: (uri, line, character, newName) => socket.invoke('lsp:ts:rename', { uri, line, character, newName }),
+        format: (uri, tabSize, insertSpaces) => socket.invoke('lsp:ts:format', { uri, tabSize, insertSpaces }),
         onDiagnostics: (cb) => socket.on('lsp:ts:diagnostics', (payload) => cb(payload as { uri: string; diagnostics: unknown[] })),
       },
       go: {
@@ -176,6 +178,7 @@ export function createWebApi(): API {
         codeAction: (uri, range, diagnostics) => socket.invoke('lsp:go:codeAction', { uri, range, diagnostics }),
         executeCommand: (command, args) => socket.invoke('lsp:go:executeCommand', { command, args }),
         rename: (uri, line, character, newName) => socket.invoke('lsp:go:rename', { uri, line, character, newName }),
+        format: (uri, tabSize, insertSpaces) => socket.invoke('lsp:go:format', { uri, tabSize, insertSpaces }),
         onDiagnostics: (cb) => socket.on('lsp:go:diagnostics', (payload) => cb(payload as { uri: string; diagnostics: unknown[] })),
       },
       rust: {
@@ -187,6 +190,7 @@ export function createWebApi(): API {
         codeAction: (uri, range, diagnostics) => socket.invoke('lsp:rust:codeAction', { uri, range, diagnostics }),
         executeCommand: (command, args) => socket.invoke('lsp:rust:executeCommand', { command, args }),
         rename: (uri, line, character, newName) => socket.invoke('lsp:rust:rename', { uri, line, character, newName }),
+        format: (uri, tabSize, insertSpaces) => socket.invoke('lsp:rust:format', { uri, tabSize, insertSpaces }),
         onDiagnostics: (cb) => socket.on('lsp:rust:diagnostics', (payload) => cb(payload as { uri: string; diagnostics: unknown[] })),
       },
       java: {
@@ -198,6 +202,7 @@ export function createWebApi(): API {
         codeAction: (uri, range, diagnostics) => socket.invoke('lsp:java:codeAction', { uri, range, diagnostics }),
         executeCommand: (command, args) => socket.invoke('lsp:java:executeCommand', { command, args }),
         rename: (uri, line, character, newName) => socket.invoke('lsp:java:rename', { uri, line, character, newName }),
+        format: (uri, tabSize, insertSpaces) => socket.invoke('lsp:java:format', { uri, tabSize, insertSpaces }),
         onDiagnostics: (cb) => socket.on('lsp:java:diagnostics', (payload) => cb(payload as { uri: string; diagnostics: unknown[] })),
       },
       c: {
@@ -209,6 +214,7 @@ export function createWebApi(): API {
         codeAction: (uri, range, diagnostics) => socket.invoke('lsp:c:codeAction', { uri, range, diagnostics }),
         executeCommand: (command, args) => socket.invoke('lsp:c:executeCommand', { command, args }),
         rename: (uri, line, character, newName) => socket.invoke('lsp:c:rename', { uri, line, character, newName }),
+        format: (uri, tabSize, insertSpaces) => socket.invoke('lsp:c:format', { uri, tabSize, insertSpaces }),
         onDiagnostics: (cb) => socket.on('lsp:c:diagnostics', (payload) => cb(payload as { uri: string; diagnostics: unknown[] })),
       },
     },

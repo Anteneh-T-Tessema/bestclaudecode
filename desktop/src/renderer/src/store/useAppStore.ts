@@ -9,6 +9,7 @@ interface AppStore {
   activeView: ActiveView
   commandPaletteOpen: boolean
   quickOpenOpen: boolean
+  symbolSearchOpen: boolean
   shortcutsOpen: boolean
   sidebarOpen: boolean
   bottomPanelOpen: boolean
@@ -19,6 +20,7 @@ interface AppStore {
   toggleActivity: (id: ActivityId) => void
   setCommandPaletteOpen: (open: boolean) => void
   setQuickOpenOpen: (open: boolean) => void
+  setSymbolSearchOpen: (open: boolean) => void
   setShortcutsOpen: (open: boolean) => void
   toggleSidebar: () => void
   toggleBottomPanel: () => void
@@ -38,6 +40,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   activeView: 'welcome',
   commandPaletteOpen: false,
   quickOpenOpen: false,
+  symbolSearchOpen: false,
   shortcutsOpen: false,
   sidebarOpen: true,
   bottomPanelOpen: true,
@@ -51,6 +54,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
   setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
   setQuickOpenOpen: (open) => set({ quickOpenOpen: open }),
+  setSymbolSearchOpen: (open) => set({ symbolSearchOpen: open }),
   setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   toggleBottomPanel: () => set((s) => ({ bottomPanelOpen: !s.bottomPanelOpen })),

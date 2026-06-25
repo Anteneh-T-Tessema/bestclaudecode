@@ -82,6 +82,21 @@ function lspWorkspaceEditToMonaco(edit: LspWorkspaceEdit, monaco: Monaco): Monac
   }
 }
 
+// Gap 105 — converts the flat TextEdit[] returned by textDocument/formatting
+// into Monaco's single-document edit shape (distinct from the cross-file
+// WorkspaceEdit above, since formatting only ever touches the one document).
+function lspTextEditsToMonaco(edits: LspTextEdit[]): MonacoNS.languages.TextEdit[] {
+  return edits.map((e) => ({
+    range: {
+      startLineNumber: e.range.start.line + 1,
+      startColumn: e.range.start.character + 1,
+      endLineNumber: e.range.end.line + 1,
+      endColumn: e.range.end.character + 1,
+    },
+    text: e.newText,
+  }))
+}
+
 function hoverContentsToMarkdown(contents: LspHoverResult['contents']): string {
   if (!contents) return ''
   if (typeof contents === 'string') return contents
@@ -151,6 +166,7 @@ interface LspClientApi {
   codeAction: (uri: string, range: unknown, diagnostics: unknown[]) => Promise<unknown>
   executeCommand: (command: string, args: unknown[]) => Promise<unknown>
   rename: (uri: string, line: number, character: number, newName: string) => Promise<unknown>
+  format: (uri: string, tabSize: number, insertSpaces: boolean) => Promise<unknown>
   didOpen: (uri: string, text: string) => Promise<void>
   didChange: (uri: string, text: string) => Promise<void>
   onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => () => void
@@ -388,6 +404,19 @@ function registerLspProviders(monaco: Monaco, lspEntry: ReturnType<typeof resolv
         return lspWorkspaceEditToMonaco(result, monaco)
       },
     })
+
+    // Gap 105 — "Format Document" (default ⇧⌥F), backed by textDocument/formatting.
+    monaco.languages.registerDocumentFormattingEditProvider(lang, {
+      async provideDocumentFormattingEdits(model, options) {
+        const result = (await getApi().format(
+          fileToUri(model.uri.path),
+          options.tabSize,
+          options.insertSpaces,
+        )) as LspTextEdit[] | null
+        if (!result?.length) return []
+        return lspTextEditsToMonaco(result)
+      },
+    })
   }
 }
 
@@ -583,12 +612,15 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
         }
       })
 
-      // Cmd+S → save
+      // Cmd+S → format (if enabled) then save
       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, async () => {
         if (!tab) return
         try {
           const model = editor.getModel()
           if (!model) return
+          if (useSettingsStore.getState().formatOnSave) {
+            await editor.getAction('editor.action.formatDocument')?.run()
+          }
           await window.api.fs.writeFile(tab.filePath, model.getValue())
           markSaved(tabId)
           toast.success('Saved')

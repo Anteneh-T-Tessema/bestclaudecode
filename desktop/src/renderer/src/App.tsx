@@ -5,6 +5,7 @@ import { StatusBar } from './layout/StatusBar'
 import { useAppStore } from './store/useAppStore'
 import { CommandPalette } from './components/CommandPalette'
 import { QuickOpen } from './components/QuickOpen'
+import { SymbolSearch } from './components/SymbolSearch'
 import { ToastContainer } from './components/ToastContainer'
 import { KeyboardShortcuts } from './components/KeyboardShortcuts'
 import { ErrorBoundary } from './components/ErrorBoundary'
@@ -47,6 +48,7 @@ export default function App() {
         {!zenMode && <StatusBar />}
         <CommandPalette />
         <QuickOpen />
+        <SymbolSearch />
         <ToastContainer />
         <KeyboardShortcuts />
       </div>

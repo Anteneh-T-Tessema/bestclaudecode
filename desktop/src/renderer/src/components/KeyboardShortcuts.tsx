@@ -10,6 +10,7 @@ const SECTIONS = [
     shortcuts: [
       { keys: ['⌘', 'Shift', 'P'], label: 'Command Palette' },
       { keys: ['⌘', 'P'], label: 'Go to File' },
+      { keys: ['⌘', 'T'], label: 'Go to Symbol in Workspace' },
       { keys: ['⌘', 'B'], label: 'Toggle Sidebar' },
       { keys: ['⌘', '`'], label: 'Toggle Terminal' },
       { keys: ['⌘', '/'], label: 'Keyboard Shortcuts' },
@@ -22,6 +23,7 @@ const SECTIONS = [
       { keys: ['⌘', 'S'], label: 'Save File' },
       { keys: ['⌘', 'K'], label: 'Inline AI Edit (selection)' },
       { keys: ['⌘', 'G'], label: 'Go to Line' },
+      { keys: ['⇧', '⌥', 'F'], label: 'Format Document' },
       { keys: ['⌘', 'F'], label: 'Find in File' },
       { keys: ['⌘', '+'], label: 'Increase Font Size' },
       { keys: ['⌘', '–'], label: 'Decrease Font Size' },
@@ -71,6 +73,7 @@ export function KeyboardShortcuts() {
   const setOpen = useAppStore((s) => s.setShortcutsOpen)
   const setCommandPaletteOpen = useAppStore((s) => s.setCommandPaletteOpen)
   const setQuickOpenOpen = useAppStore((s) => s.setQuickOpenOpen)
+  const setSymbolSearchOpen = useAppStore((s) => s.setSymbolSearchOpen)
   const toggleSidebar = useAppStore((s) => s.toggleSidebar)
   const toggleBottomPanel = useAppStore((s) => s.toggleBottomPanel)
   const toggleZenMode = useAppStore((s) => s.toggleZenMode)
@@ -124,6 +127,9 @@ export function KeyboardShortcuts() {
       } else if (e.key === 'p') {
         e.preventDefault()
         setQuickOpenOpen(true)
+      } else if (e.key === 't') {
+        e.preventDefault()
+        setSymbolSearchOpen(true)
       } else if (e.key === 'b') {
         e.preventDefault()
         toggleSidebar()
@@ -143,7 +149,7 @@ export function KeyboardShortcuts() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [setCommandPaletteOpen, setQuickOpenOpen, toggleSidebar, toggleBottomPanel, setOpen, toggleZenMode, setZenMode, saveFontSize])
+  }, [setCommandPaletteOpen, setQuickOpenOpen, setSymbolSearchOpen, toggleSidebar, toggleBottomPanel, setOpen, toggleZenMode, setZenMode, saveFontSize])
 
   if (!open) return null
 

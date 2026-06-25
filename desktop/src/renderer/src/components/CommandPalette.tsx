@@ -47,6 +47,7 @@ export function CommandPalette() {
   const toggleSidebar = useAppStore((s) => s.toggleSidebar)
   const toggleBottomPanel = useAppStore((s) => s.toggleBottomPanel)
   const setQuickOpenOpen = useAppStore((s) => s.setQuickOpenOpen)
+  const setSymbolSearchOpen = useAppStore((s) => s.setSymbolSearchOpen)
   const setShortcutsOpen = useAppStore((s) => s.setShortcutsOpen)
   const saveSettings = useSettingsStore((s) => s.save)
   const recentFiles = useSettingsStore((s) => s.recentFiles)
@@ -126,6 +127,7 @@ export function CommandPalette() {
 
     { id: 'open-folder', category: 'File', label: 'Open Folder…', icon: <FolderInput size={13} />, action: () => { openFolder(); close() } },
     { id: 'quick-open', category: 'File', label: 'Go to File', icon: <FolderOpen size={13} />, shortcut: '⌘P', action: () => { setQuickOpenOpen(true); close() } },
+    { id: 'symbol-search', category: 'File', label: 'Go to Symbol in Workspace', icon: <Hash size={13} />, shortcut: '⌘T', action: () => { setSymbolSearchOpen(true); close() } },
     { id: 'go-to-line', category: 'File', label: 'Go to Line…', icon: <Hash size={13} />, shortcut: '⌘G', action: () => { openGoToLine(); close() } },
     { id: 'close-tabs', category: 'File', label: 'Close All Tabs', icon: <Trash2 size={13} />, action: () => { closeAllTabs(); close() } },
     { id: 'rebuild-index', category: 'File', label: 'Rebuild Codebase Index', icon: <RefreshCw size={13} />, action: async () => { await window.api.search.buildIndex(); close() } },

@@ -32,6 +32,9 @@ function registerForLang(lang: LangKey): void {
   ipcMain.handle(`lsp:${lang}:rename`, (_event, uri: string, line: number, character: number, newName: string) =>
     client.rename(uri, line, character, newName)
   )
+  ipcMain.handle(`lsp:${lang}:format`, (_event, uri: string, tabSize: number, insertSpaces: boolean) =>
+    client.format(uri, tabSize, insertSpaces)
+  )
 
   client.on('diagnostics', (params: unknown) => {
     for (const win of BrowserWindow.getAllWindows()) {

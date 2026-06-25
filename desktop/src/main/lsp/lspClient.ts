@@ -55,6 +55,7 @@ export class LspClient extends EventEmitter {
             references: {},
             codeAction: { codeActionLiteralSupport: { codeActionKind: { valueSet: ['quickfix', 'refactor'] } } },
             rename: {},
+            formatting: {},
             publishDiagnostics: {},
           },
         },
@@ -176,6 +177,14 @@ export class LspClient extends EventEmitter {
   async rename(uri: string, line: number, character: number, newName: string): Promise<unknown> {
     await this.start()
     return this.request('textDocument/rename', { textDocument: { uri }, position: { line, character }, newName })
+  }
+
+  // Gap 105 — "Format Document", backed by textDocument/formatting.
+  async format(uri: string, tabSize: number, insertSpaces: boolean): Promise<unknown> {
+    await this.start()
+    return this.request('textDocument/formatting', {
+      textDocument: { uri }, options: { tabSize, insertSpaces },
+    })
   }
 
   stop(): void {

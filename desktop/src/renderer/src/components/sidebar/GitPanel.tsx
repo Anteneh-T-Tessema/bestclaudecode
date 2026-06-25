@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { DiffEditor } from '@monaco-editor/react'
-import { GitBranch, RefreshCw, Plus, GitCommit, Clock, CheckCircle, Minus, AlertCircle, X, ArrowUp, ArrowDown, ChevronRight, FileText, Check, Sparkles, Bookmark, RotateCcw, Trash2, ChevronDown } from 'lucide-react'
+import { GitBranch, RefreshCw, Plus, GitCommit, Clock, CheckCircle, Minus, AlertCircle, X, ArrowUp, ArrowDown, ChevronRight, FileText, Check, Sparkles, Bookmark, RotateCcw, Trash2, ChevronDown, GitPullRequest } from 'lucide-react'
 import { useSettingsStore } from '../../store/useSettingsStore'
 import { useAppStore } from '../../store/useAppStore'
 import { useChatStore } from '../../store/useChatStore'
 import { toast } from '../../store/useToastStore'
 import { EmptyState } from '../EmptyState'
 import { PanelHeader, IconButton, accent, border, fg, surface } from '../../design'
+import { parseConflicts, applyResolution, type ConflictHunk } from '../../utils/mergeConflicts'
 
 function languageFromPath(p: string): string {
   const ext = p.split('.').pop()?.toLowerCase() ?? ''
@@ -207,6 +208,10 @@ function BranchDropdown({
   )
 }
 
+// Gap 107 — merge conflicts: git status --porcelain reports unmerged paths
+// with one of these two-letter codes (both sides touched the file).
+const CONFLICT_STATUSES = new Set(['UU', 'AA', 'DD', 'AU', 'UA', 'UD', 'DU'])
+
 function statusLabel(s: string): { label: string; color: string } {
   if (s === 'M' || s === 'MM') return { label: 'M', color: accent.amber.fg }
   if (s === '??' || s === 'A') return { label: '+', color: accent.green.fg }
@@ -333,6 +338,19 @@ export function GitPanel() {
   const [mergeBranch, setMergeBranch] = useState('')
   const [merging, setMerging] = useState(false)
   const [allBranches, setAllBranches] = useState<string[]>([])
+
+  // Gap 107 — merge conflict resolution
+  const [conflictContents, setConflictContents] = useState<Record<string, string>>({})
+  const [expandedConflict, setExpandedConflict] = useState<string | null>(null)
+  const [resolvingFile, setResolvingFile] = useState<string | null>(null)
+
+  // Gap 108 — create PR from the IDE with an AI-generated description
+  const [prOpen, setPrOpen] = useState(false)
+  const [prBase, setPrBase] = useState('')
+  const [prTitle, setPrTitle] = useState('')
+  const [prBody, setPrBody] = useState('')
+  const [prGenerating, setPrGenerating] = useState(false)
+  const [prCreating, setPrCreating] = useState(false)
 
   // Gap 103 — compare any two branches
   const [compareBase, setCompareBase] = useState('')
@@ -587,6 +605,97 @@ export function GitPanel() {
     }
   }
 
+  // Gap 107 — merge conflict resolution
+  const toggleConflictExpand = useCallback(async (path: string, absPath: string) => {
+    if (expandedConflict === path) { setExpandedConflict(null); return }
+    setExpandedConflict(path)
+    if (conflictContents[path] === undefined) {
+      try {
+        const content = await window.api.fs.readFile(absPath)
+        setConflictContents((c) => ({ ...c, [path]: content }))
+      } catch {
+        setConflictContents((c) => ({ ...c, [path]: '' }))
+      }
+    }
+  }, [expandedConflict, conflictContents])
+
+  const resolveHunk = useCallback(async (path: string, absPath: string, hunk: ConflictHunk, choice: 'ours' | 'theirs' | 'both') => {
+    const current = conflictContents[path] ?? await window.api.fs.readFile(absPath)
+    const next = applyResolution(current, hunk, choice)
+    await window.api.fs.writeFile(absPath, next)
+    setConflictContents((c) => ({ ...c, [path]: next }))
+  }, [conflictContents])
+
+  const markConflictResolved = useCallback(async (path: string) => {
+    if (!projectPath) return
+    setResolvingFile(path)
+    try {
+      const result = await window.api.git.add(projectPath, [path])
+      if (result.success) {
+        toast.success(`${path.split('/').pop()} marked as resolved`)
+        setExpandedConflict(null)
+        setConflictContents((c) => { const next = { ...c }; delete next[path]; return next })
+        refresh()
+      } else {
+        toast.error(`Failed to stage ${path}: ${result.error}`)
+      }
+    } finally {
+      setResolvingFile(null)
+    }
+  }, [projectPath, refresh])
+
+  // Gap 108 — create PR from the IDE with an AI-generated description
+  const generatePrDescription = async () => {
+    if (!projectPath || !prBase || !branch || prGenerating) return
+    setPrGenerating(true)
+    try {
+      const diff = await window.api.git.diffBranches(projectPath, prBase, branch)
+      if (!diff.trim()) {
+        toast.error(`No differences between ${prBase} and ${branch}`)
+        return
+      }
+      const streamId = await window.api.ai.streamChat({
+        messages: [{
+          role: 'user',
+          content: `Write a pull request title and description for these changes (diff of "${branch}" against base "${prBase}"):\n\n${diff.slice(0, 12000)}`,
+        }],
+        model: activeModel,
+        systemPrompt: 'You are a pull request writer. Respond with the title on the first line, a blank line, then a concise markdown body (summary + bullet points of notable changes). No commentary outside the PR text itself.',
+      })
+      let text = ''
+      await new Promise<void>((resolve, reject) => {
+        const unChunk = window.api.ai.onChunk(streamId, (d) => { text += d })
+        const unDone = window.api.ai.onDone(streamId, () => { unChunk(); unDone(); unErr(); resolve() })
+        const unErr = window.api.ai.onError(streamId, (e) => { unChunk(); unDone(); unErr(); reject(new Error(e)) })
+      })
+      const [firstLine, ...rest] = text.trim().split('\n')
+      setPrTitle(firstLine.trim())
+      setPrBody(rest.join('\n').trim())
+    } catch (err) {
+      toast.error(`Failed to generate PR description: ${(err as Error).message}`)
+    } finally {
+      setPrGenerating(false)
+    }
+  }
+
+  const createPr = async () => {
+    if (!prBase || !branch || !prTitle.trim() || prCreating) return
+    setPrCreating(true)
+    try {
+      const result = await window.api.github.createPr({ title: prTitle.trim(), body: prBody, base: prBase, head: branch })
+      if (result) {
+        toast.success('Pull request created')
+        setPrOpen(false)
+        setPrTitle('')
+        setPrBody('')
+      } else {
+        toast.error('Failed to create PR — is the `gh` CLI installed and authenticated?')
+      }
+    } finally {
+      setPrCreating(false)
+    }
+  }
+
   // Gap 103 — compare any two branches (three-dot diff)
   const compareBranches = async () => {
     if (!projectPath || !compareBase || !compareHead) return
@@ -700,8 +809,9 @@ export function GitPanel() {
     }
   }, [projectPath])
 
-  const changedFiles = files.filter((f) => !f.staged)
-  const stagedFiles = files.filter((f) => f.staged)
+  const conflictFiles = files.filter((f) => CONFLICT_STATUSES.has(f.status))
+  const changedFiles = files.filter((f) => !f.staged && !CONFLICT_STATUSES.has(f.status))
+  const stagedFiles = files.filter((f) => f.staged && !CONFLICT_STATUSES.has(f.status))
 
   const headerActions = (
     <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -912,6 +1022,102 @@ export function GitPanel() {
               </button>
             )}
           </div>
+
+          {conflictFiles.length > 0 && (
+            <div style={{ flexShrink: 0 }}>
+              <SectionLabel>Merge Conflicts ({conflictFiles.length})</SectionLabel>
+              {conflictFiles.map((f) => {
+                const absPath = f.path.startsWith('/') ? f.path : `${projectPath}/${f.path}`
+                const content = conflictContents[f.path]
+                const hunks = content !== undefined ? parseConflicts(content) : []
+                const isExpanded = expandedConflict === f.path
+                return (
+                  <div key={f.path}>
+                    <div
+                      onClick={() => void toggleConflictExpand(f.path, absPath)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', cursor: 'pointer',
+                      }}
+                    >
+                      {isExpanded ? <ChevronDown style={{ width: 11, height: 11, color: fg[4] }} /> : <ChevronRight style={{ width: 11, height: 11, color: fg[4] }} />}
+                      <AlertCircle style={{ width: 11, height: 11, color: accent.red.fg, flexShrink: 0 }} />
+                      <span style={{ fontSize: 11, color: fg[1], flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {f.path.split('/').pop()}
+                      </span>
+                      <span style={{ fontSize: 9, color: fg[4], fontFamily: 'monospace' }}>{f.status}</span>
+                    </div>
+                    {isExpanded && (
+                      <div style={{ padding: '0 10px 8px 28px' }}>
+                        {content === undefined ? (
+                          <div style={{ fontSize: 10, color: fg[4] }}>Loading…</div>
+                        ) : hunks.length === 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => void markConflictResolved(f.path)}
+                            disabled={resolvingFile === f.path}
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700,
+                              padding: '4px 10px', borderRadius: 4, border: `1px solid ${accent.green.border}`,
+                              background: accent.green.subtle, color: accent.green.fg,
+                              cursor: resolvingFile === f.path ? 'not-allowed' : 'pointer',
+                            }}
+                          >
+                            <Check size={10} /> {resolvingFile === f.path ? 'Staging…' : 'All conflicts resolved — mark as resolved'}
+                          </button>
+                        ) : (
+                          hunks.map((hunk, hi) => (
+                            <div
+                              key={hi}
+                              style={{
+                                marginBottom: 8, border: `1px solid ${border[1]}`, borderRadius: 4, overflow: 'hidden',
+                              }}
+                            >
+                              <pre style={{
+                                margin: 0, padding: '5px 8px', fontSize: 9.5, fontFamily: 'monospace',
+                                background: accent.green.subtle, color: fg[1], whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                                borderBottom: `1px solid ${border[2]}`,
+                              }}>
+                                {hunk.ours || '(empty)'}
+                              </pre>
+                              <pre style={{
+                                margin: 0, padding: '5px 8px', fontSize: 9.5, fontFamily: 'monospace',
+                                background: accent.cyan.subtle, color: fg[1], whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                              }}>
+                                {hunk.theirs || '(empty)'}
+                              </pre>
+                              <div style={{ display: 'flex', gap: 4, padding: '4px 8px', background: surface.raised }}>
+                                <button
+                                  type="button"
+                                  onClick={() => void resolveHunk(f.path, absPath, hunk, 'ours')}
+                                  style={{ flex: 1, fontSize: 9.5, fontWeight: 600, padding: '3px 0', borderRadius: 3, border: `1px solid ${accent.green.border}`, background: 'transparent', color: accent.green.fg, cursor: 'pointer' }}
+                                >
+                                  Accept Current
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void resolveHunk(f.path, absPath, hunk, 'theirs')}
+                                  style={{ flex: 1, fontSize: 9.5, fontWeight: 600, padding: '3px 0', borderRadius: 3, border: `1px solid ${accent.cyan.border}`, background: 'transparent', color: accent.cyan.fg, cursor: 'pointer' }}
+                                >
+                                  Accept Incoming
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void resolveHunk(f.path, absPath, hunk, 'both')}
+                                  style={{ flex: 1, fontSize: 9.5, fontWeight: 600, padding: '3px 0', borderRadius: 3, border: `1px solid ${border[0]}`, background: 'transparent', color: fg[2], cursor: 'pointer' }}
+                                >
+                                  Accept Both
+                                </button>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
 
           {stagedFiles.length > 0 && (
             <div style={{ flexShrink: 0 }}>
@@ -1270,6 +1476,96 @@ export function GitPanel() {
                 >
                   {compareDiff}
                 </pre>
+              )}
+            </div>
+          )}
+
+          {/* Gap 108 — create a PR from the IDE, with an AI-generated title/description */}
+          {allBranches.length > 1 && branch && (
+            <div style={{ flexShrink: 0, borderBottom: `1px solid ${border[1]}` }}>
+              <div
+                onClick={() => {
+                  if (!prOpen && !prBase) {
+                    const guess = allBranches.find((b) => b !== branch && (b === 'main' || b === 'master')) ?? allBranches.find((b) => b !== branch) ?? ''
+                    setPrBase(guess)
+                  }
+                  setPrOpen((o) => !o)
+                }}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', cursor: 'pointer' }}
+              >
+                <GitPullRequest style={{ width: 11, height: 11, color: accent.violet.fg, flexShrink: 0 }} />
+                <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: fg[3], flex: 1 }}>
+                  Create Pull Request
+                </span>
+                <ChevronDown style={{
+                  width: 10, height: 10, color: fg[4],
+                  transform: prOpen ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform 0.12s',
+                }} />
+              </div>
+              {prOpen && (
+                <div style={{ padding: '0 10px 8px' }}>
+                  <select
+                    value={prBase}
+                    onChange={(e) => setPrBase(e.target.value)}
+                    title="Base branch to merge into"
+                    style={{
+                      width: '100%', boxSizing: 'border-box', marginBottom: 5,
+                      background: surface.raised, border: `1px solid ${border[0]}`,
+                      borderRadius: 4, padding: '4px 6px', fontSize: 10.5, color: fg[0], outline: 'none',
+                    }}
+                  >
+                    <option value="">Base…</option>
+                    {allBranches.filter((b) => b !== branch).map((b) => <option key={b} value={b}>{b}</option>)}
+                  </select>
+                  <input
+                    value={prTitle}
+                    onChange={(e) => setPrTitle(e.target.value)}
+                    placeholder="PR title"
+                    style={{
+                      width: '100%', boxSizing: 'border-box', marginBottom: 5,
+                      background: surface.raised, border: `1px solid ${border[0]}`,
+                      borderRadius: 4, padding: '5px 7px', fontSize: 11, color: fg[0], outline: 'none', fontFamily: 'inherit',
+                    }}
+                  />
+                  <textarea
+                    value={prBody}
+                    onChange={(e) => setPrBody(e.target.value)}
+                    placeholder="PR description (markdown)…"
+                    rows={4}
+                    style={{
+                      width: '100%', boxSizing: 'border-box', resize: 'vertical', marginBottom: 6,
+                      background: surface.raised, border: `1px solid ${border[0]}`, borderRadius: 4,
+                      padding: '5px 7px', fontSize: 11, color: fg[0], outline: 'none', fontFamily: 'inherit',
+                    }}
+                  />
+                  <div style={{ display: 'flex', gap: 5 }}>
+                    <button
+                      type="button"
+                      onClick={() => void generatePrDescription()}
+                      disabled={!prBase || prGenerating}
+                      title="Generate title + description from the diff against the base branch"
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, padding: '4px 9px', borderRadius: 4,
+                        border: `1px solid ${accent.violet.border}`, background: accent.violet.subtle, color: accent.violet.fg,
+                        cursor: prBase && !prGenerating ? 'pointer' : 'not-allowed',
+                      }}
+                    >
+                      <Sparkles size={10} /> {prGenerating ? 'Generating…' : 'Generate with AI'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void createPr()}
+                      disabled={!prBase || !prTitle.trim() || prCreating}
+                      style={{
+                        flex: 1, fontSize: 10, fontWeight: 700, padding: '4px 9px', borderRadius: 4,
+                        border: `1px solid ${accent.green.border}`, background: accent.green.subtle, color: accent.green.fg,
+                        cursor: prBase && prTitle.trim() && !prCreating ? 'pointer' : 'not-allowed',
+                      }}
+                    >
+                      {prCreating ? 'Creating…' : `Create PR: ${branch} → ${prBase || '…'}`}
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
           )}

@@ -233,6 +233,8 @@ const api = {
         ipcRenderer.invoke('lsp:python:executeCommand', command, args),
       rename: (uri: string, line: number, character: number, newName: string) =>
         ipcRenderer.invoke('lsp:python:rename', uri, line, character, newName),
+      format: (uri: string, tabSize: number, insertSpaces: boolean) =>
+        ipcRenderer.invoke('lsp:python:format', uri, tabSize, insertSpaces),
       onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => {
         const handler = (_: Electron.IpcRendererEvent, params: { uri: string; diagnostics: unknown[] }) => cb(params)
         ipcRenderer.on('lsp:python:diagnostics', handler)
@@ -254,6 +256,8 @@ const api = {
         ipcRenderer.invoke('lsp:ts:executeCommand', command, args),
       rename: (uri: string, line: number, character: number, newName: string) =>
         ipcRenderer.invoke('lsp:ts:rename', uri, line, character, newName),
+      format: (uri: string, tabSize: number, insertSpaces: boolean) =>
+        ipcRenderer.invoke('lsp:ts:format', uri, tabSize, insertSpaces),
       onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => {
         const handler = (_: Electron.IpcRendererEvent, params: { uri: string; diagnostics: unknown[] }) => cb(params)
         ipcRenderer.on('lsp:ts:diagnostics', handler)
@@ -273,6 +277,8 @@ const api = {
         ipcRenderer.invoke('lsp:go:executeCommand', command, args),
       rename: (uri: string, line: number, character: number, newName: string) =>
         ipcRenderer.invoke('lsp:go:rename', uri, line, character, newName),
+      format: (uri: string, tabSize: number, insertSpaces: boolean) =>
+        ipcRenderer.invoke('lsp:go:format', uri, tabSize, insertSpaces),
       onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => {
         const handler = (_: Electron.IpcRendererEvent, params: { uri: string; diagnostics: unknown[] }) => cb(params)
         ipcRenderer.on('lsp:go:diagnostics', handler)
@@ -292,6 +298,8 @@ const api = {
         ipcRenderer.invoke('lsp:rust:executeCommand', command, args),
       rename: (uri: string, line: number, character: number, newName: string) =>
         ipcRenderer.invoke('lsp:rust:rename', uri, line, character, newName),
+      format: (uri: string, tabSize: number, insertSpaces: boolean) =>
+        ipcRenderer.invoke('lsp:rust:format', uri, tabSize, insertSpaces),
       onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => {
         const handler = (_: Electron.IpcRendererEvent, params: { uri: string; diagnostics: unknown[] }) => cb(params)
         ipcRenderer.on('lsp:rust:diagnostics', handler)
@@ -311,6 +319,8 @@ const api = {
         ipcRenderer.invoke('lsp:java:executeCommand', command, args),
       rename: (uri: string, line: number, character: number, newName: string) =>
         ipcRenderer.invoke('lsp:java:rename', uri, line, character, newName),
+      format: (uri: string, tabSize: number, insertSpaces: boolean) =>
+        ipcRenderer.invoke('lsp:java:format', uri, tabSize, insertSpaces),
       onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => {
         const handler = (_: Electron.IpcRendererEvent, params: { uri: string; diagnostics: unknown[] }) => cb(params)
         ipcRenderer.on('lsp:java:diagnostics', handler)
@@ -330,6 +340,8 @@ const api = {
         ipcRenderer.invoke('lsp:c:executeCommand', command, args),
       rename: (uri: string, line: number, character: number, newName: string) =>
         ipcRenderer.invoke('lsp:c:rename', uri, line, character, newName),
+      format: (uri: string, tabSize: number, insertSpaces: boolean) =>
+        ipcRenderer.invoke('lsp:c:format', uri, tabSize, insertSpaces),
       onDiagnostics: (cb: (params: { uri: string; diagnostics: unknown[] }) => void) => {
         const handler = (_: Electron.IpcRendererEvent, params: { uri: string; diagnostics: unknown[] }) => cb(params)
         ipcRenderer.on('lsp:c:diagnostics', handler)
