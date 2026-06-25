@@ -173,7 +173,7 @@ function StatusRow({ label, ok, detail }: { label: string; ok: boolean; detail?:
 }
 
 // Gap 88 — these three are encrypted via safeStorage (settings:setSecret), not the plain settings:set channel.
-const SECRET_FIELDS = new Set(['anthropicApiKey', 'openaiApiKey', 'googleApiKey'])
+const SECRET_FIELDS = new Set(['anthropicApiKey', 'openaiApiKey', 'googleApiKey', 'linearApiKey', 'jiraApiToken'])
 
 export function SettingsPanel() {
   const [engine, setEngine] = useState<EngineHealth | null>(null)
@@ -191,6 +191,10 @@ export function SettingsPanel() {
   const [openaiKey, setOpenaiKey] = useState('')
   const [googleKey, setGoogleKey] = useState('')
   const [ollamaUrl, setOllamaUrl] = useState('')
+  const [linearApiKey, setLinearApiKey] = useState('')
+  const [jiraApiToken, setJiraApiToken] = useState('')
+  const [jiraEmail, setJiraEmail] = useState('')
+  const [jiraBaseUrl, setJiraBaseUrl] = useState('')
   const [savedField, setSavedField] = useState<string | null>(null)
 
   // .lakoorarules editor
@@ -212,10 +216,14 @@ export function SettingsPanel() {
       window.api.settings.getSecret('anthropicApiKey'),
       window.api.settings.getSecret('openaiApiKey'),
       window.api.settings.getSecret('googleApiKey'),
-    ]).then(([a, o, g]) => {
+      window.api.settings.getSecret('linearApiKey'),
+      window.api.settings.getSecret('jiraApiToken'),
+    ]).then(([a, o, g, lin, jir]) => {
       setAnthropicKey(a)
       setOpenaiKey(o)
       setGoogleKey(g)
+      setLinearApiKey(lin)
+      setJiraApiToken(jir)
     })
   }, [])
 
@@ -226,6 +234,8 @@ export function SettingsPanel() {
       setGlobalRulesDraft(storeGlobalRules)
       globalRulesLoaded.current = true
     }
+    window.api.settings.get('jiraEmail').then((v) => { if (v) setJiraEmail(v as string) }).catch(() => {})
+    window.api.settings.get('jiraBaseUrl').then((v) => { if (v) setJiraBaseUrl(v as string) }).catch(() => {})
   }, [settingsLoaded, storeOllamaUrl, storeGlobalRules])
 
   const saveGlobalRules = async () => {
@@ -269,7 +279,7 @@ export function SettingsPanel() {
   }
 
   const saveKey = useCallback(
-    async (field: 'anthropicApiKey' | 'openaiApiKey' | 'googleApiKey' | 'ollamaUrl', value: string) => {
+    async (field: 'anthropicApiKey' | 'openaiApiKey' | 'googleApiKey' | 'ollamaUrl' | 'linearApiKey' | 'jiraApiToken' | 'jiraEmail' | 'jiraBaseUrl', value: string) => {
       if (SECRET_FIELDS.has(field)) {
         const result = await window.api.settings.setSecret(field, value)
         if (!result.success) { toast.error('Failed to save key'); return }
@@ -368,6 +378,54 @@ export function SettingsPanel() {
               onSave={() => saveKey('ollamaUrl', ollamaUrl)}
               placeholder="http://localhost:11434"
               saved={savedField === 'ollamaUrl'}
+              secret={false}
+            />
+          </div>
+        </div>
+
+        <div>
+          <div style={{
+            fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+            color: fg[3], marginBottom: 8, paddingBottom: 6, borderBottom: `1px solid ${border[1]}`,
+          }}>
+            Integrations
+          </div>
+          <p style={{ fontSize: 10, color: fg[3], margin: '0 0 10px', lineHeight: 1.5 }}>
+            Connect Linear and Jira so @linear and @jira mentions inject issue context into your chat.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <ApiKeyField
+              label="Linear API Key"
+              value={linearApiKey}
+              onChange={setLinearApiKey}
+              onSave={() => saveKey('linearApiKey', linearApiKey)}
+              placeholder="lin_api_…"
+              saved={savedField === 'linearApiKey'}
+            />
+            <ApiKeyField
+              label="Jira API Token"
+              value={jiraApiToken}
+              onChange={setJiraApiToken}
+              onSave={() => saveKey('jiraApiToken', jiraApiToken)}
+              placeholder="ATATT3x…"
+              saved={savedField === 'jiraApiToken'}
+            />
+            <ApiKeyField
+              label="Jira Email"
+              value={jiraEmail}
+              onChange={setJiraEmail}
+              onSave={() => saveKey('jiraEmail', jiraEmail)}
+              placeholder="you@example.com"
+              saved={savedField === 'jiraEmail'}
+              secret={false}
+            />
+            <ApiKeyField
+              label="Jira Base URL"
+              value={jiraBaseUrl}
+              onChange={setJiraBaseUrl}
+              onSave={() => saveKey('jiraBaseUrl', jiraBaseUrl)}
+              placeholder="https://your-org.atlassian.net"
+              saved={savedField === 'jiraBaseUrl'}
               secret={false}
             />
           </div>

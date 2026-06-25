@@ -180,6 +180,34 @@ async function injectGithubContext(content: string): Promise<string> {
   return result
 }
 
+async function injectLinearContext(content: string): Promise<string> {
+  const match = content.match(/@linear\s+([A-Za-z]+-\d+)/)
+  if (!match) return content
+  try {
+    const issue = await window.api.linear.getIssue(match[1])
+    if (!issue) return content
+    const comments = issue.comments.slice(0, 3)
+      .map((c) => `@${c.author}: ${c.body.slice(0, 300)}`).join('\n\n')
+    const block = `<linear_issue key="${issue.key}" url="${issue.url}">\n# ${issue.title}\nStatus: ${issue.status}\n\n${issue.description.slice(0, 1500)}` +
+      (comments ? `\n\n## Comments\n${comments}` : '') + `\n</linear_issue>`
+    return `${block}\n\n${content}`
+  } catch { return content }
+}
+
+async function injectJiraContext(content: string): Promise<string> {
+  const match = content.match(/@jira\s+([A-Za-z]+-\d+)/)
+  if (!match) return content
+  try {
+    const issue = await window.api.jira.getIssue(match[1])
+    if (!issue) return content
+    const comments = issue.comments.slice(0, 3)
+      .map((c) => `@${c.author}: ${c.body.slice(0, 300)}`).join('\n\n')
+    const block = `<jira_issue key="${issue.key}" url="${issue.url}">\n# ${issue.title}\nStatus: ${issue.status}\n\n${issue.description.slice(0, 1500)}` +
+      (comments ? `\n\n## Comments\n${comments}` : '') + `\n</jira_issue>`
+    return `${block}\n\n${content}`
+  } catch { return content }
+}
+
 function extractImportedPackages(content: string, language: string): string[] {
   const pkgs = new Set<string>()
   const addPkg = (raw: string) => {
@@ -360,6 +388,8 @@ const MENTIONS = [
   { tag: '@docs',       desc: 'Package documentation' },
   { tag: '@issue',      desc: 'GitHub issue by number' },
   { tag: '@pr',         desc: 'GitHub pull request by number' },
+  { tag: '@linear',     desc: 'Linear issue (e.g. ENG-123)' },
+  { tag: '@jira',       desc: 'Jira issue (e.g. PROJ-45)' },
   { tag: '@screenshot', desc: 'Describe a screenshot image file' },
 ]
 
@@ -578,6 +608,10 @@ export function ChatInput() {
     // @issue / @pr — inject GitHub item context
     finalContent = await injectGithubContext(finalContent)
 
+    // @linear / @jira — inject external issue tracker context
+    finalContent = await injectLinearContext(finalContent)
+    finalContent = await injectJiraContext(finalContent)
+
     // @docs — inject package documentation context
     finalContent = await injectDocsContext(finalContent)
 
@@ -791,7 +825,7 @@ export function ChatInput() {
     const before = text.slice(0, mentionStartRef.current)
     const after = text.slice(ta.selectionStart)
     // tags like @issue / @pr need a trailing space for the number argument
-    const needsArg = tag === '@issue' || tag === '@pr' || tag === '@codebase' || tag === '@web' || tag === '@docs'
+    const needsArg = tag === '@issue' || tag === '@pr' || tag === '@codebase' || tag === '@web' || tag === '@docs' || tag === '@linear' || tag === '@jira'
     const insert = needsArg ? `${tag} ` : `${tag} `
     const next = before + insert + after
     setText(next)
@@ -1247,7 +1281,7 @@ export function ChatInput() {
       <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
         <ModelSelector />
         <span style={{ fontSize: 10, color: fg[3] }}>
-          Enter · @selection @file @folder @terminal @problems @codebase @web @docs @issue @pr
+          Enter · @selection @file @folder @terminal @problems @codebase @web @docs @issue @pr @linear @jira
         </span>
         {text.length > 0 && (
           <span style={{ fontSize: 10, color: text.length > 4000 ? accent.red.fg : fg[4], marginLeft: 'auto' }}>

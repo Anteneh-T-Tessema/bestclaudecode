@@ -339,6 +339,14 @@ export function createWebApi(): API {
       reviewPr: () => Promise.resolve(notPorted('github.reviewPr', false)),
     },
 
+    linear: {
+      getIssue: () => Promise.resolve(notPorted('linear.getIssue', null)),
+    },
+
+    jira: {
+      getIssue: () => Promise.resolve(notPorted('jira.getIssue', null)),
+    },
+
     agent: {
       createShadow: () => Promise.resolve(notPorted('agent.createShadow', null)),
       getShadowDiff: () => Promise.resolve(notPorted('agent.getShadowDiff', null)),

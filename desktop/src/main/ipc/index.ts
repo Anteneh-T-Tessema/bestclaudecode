@@ -17,6 +17,8 @@ import { registerDapHandlers } from './dap.handlers'
 import { registerMcpHandlers } from './mcp.handlers'
 import { registerPolicyHandlers } from './policy.handlers'
 import { registerDeployHandlers } from './deploy.handlers'
+import { registerLinearHandlers } from './linear.handlers'
+import { registerJiraHandlers } from './jira.handlers'
 
 export function registerAllIPC(): void {
   registerDecisionsHandlers()
@@ -37,6 +39,8 @@ export function registerAllIPC(): void {
   registerMcpHandlers()
   registerPolicyHandlers()
   registerDeployHandlers()
+  registerLinearHandlers()
+  registerJiraHandlers()
 
   ipcMain.on('window:minimize', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)

@@ -517,6 +517,18 @@ const api = {
       ipcRenderer.invoke('github:reviewPr', { number, action, body }),
   },
 
+  // ── Linear ───────────────────────────────────────────────────────────────────
+  linear: {
+    getIssue: (issueId: string): Promise<import('../main/ipc/linear.handlers').ExternalIssue | null> =>
+      ipcRenderer.invoke('linear:getIssue', issueId),
+  },
+
+  // ── Jira ─────────────────────────────────────────────────────────────────────
+  jira: {
+    getIssue: (issueKey: string): Promise<import('../main/ipc/linear.handlers').ExternalIssue | null> =>
+      ipcRenderer.invoke('jira:getIssue', issueKey),
+  },
+
   // ── Agent (shadow workspace + autonomous orchestrator) ────────────────────────
   agent: {
     createShadow: (baseRef?: string): Promise<ShadowInfo | null> =>

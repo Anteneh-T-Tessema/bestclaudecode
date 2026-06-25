@@ -24,6 +24,8 @@ const MUTABLE_KEYS = new Set([
   'formatOnSave', 'inlayHints',
   // Gap 139 loose end — per-project Live Preview URLs.
   'livePreviewUrlsByProject',
+  // Gap 134 — Jira non-secret config fields
+  'jiraEmail', 'jiraBaseUrl',
 ])
 
 interface EngineHealth {
