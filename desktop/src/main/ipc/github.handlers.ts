@@ -1,9 +1,9 @@
 import { ipcMain } from 'electron'
 import { runPythonJson } from '../pythonBridge'
 import { repoRoot } from '../paths'
-import { createPr, listPrs, listIssues, commentOnPr, reviewPr, type GithubListItem } from '../gitOps'
+import { createPr, listPrs, listIssues, commentOnPr, reviewPr, getPrDiff, postPrReview, type GithubListItem, type DraftReviewComment } from '../gitOps'
 
-export type { GithubListItem }
+export type { GithubListItem, DraftReviewComment }
 
 export interface GithubComment {
   author: string
@@ -60,5 +60,16 @@ export function registerGithubHandlers(): void {
     { number, action, body }: { number: number; action: 'approve' | 'request-changes' | 'comment'; body?: string },
   ): Promise<boolean> => {
     return reviewPr(repoRoot(), number, action, body)
+  })
+
+  ipcMain.handle('github:getPrDiff', async (_event, number: number): Promise<string> => {
+    return getPrDiff(repoRoot(), number)
+  })
+
+  ipcMain.handle('github:postReviewComments', async (
+    _event,
+    { number, body, event: evt, comments }: { number: number; body: string; event: 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES'; comments: DraftReviewComment[] },
+  ): Promise<boolean> => {
+    return postPrReview(repoRoot(), number, { body, event: evt, comments })
   })
 }

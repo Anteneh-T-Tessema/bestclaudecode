@@ -515,6 +515,9 @@ const api = {
     commentOnPr: (number: number, body: string): Promise<boolean> => ipcRenderer.invoke('github:commentOnPr', { number, body }),
     reviewPr: (number: number, action: 'approve' | 'request-changes' | 'comment', body?: string): Promise<boolean> =>
       ipcRenderer.invoke('github:reviewPr', { number, action, body }),
+    getPrDiff: (number: number): Promise<string> => ipcRenderer.invoke('github:getPrDiff', number),
+    postReviewComments: (number: number, body: string, event: 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES', comments: import('../main/ipc/github.handlers').DraftReviewComment[]): Promise<boolean> =>
+      ipcRenderer.invoke('github:postReviewComments', { number, body, event, comments }),
   },
 
   // ── Linear ───────────────────────────────────────────────────────────────────

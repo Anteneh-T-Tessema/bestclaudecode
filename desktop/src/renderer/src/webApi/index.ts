@@ -337,6 +337,8 @@ export function createWebApi(): API {
       listIssues: () => Promise.resolve(notPorted('github.listIssues', [])),
       commentOnPr: () => Promise.resolve(notPorted('github.commentOnPr', false)),
       reviewPr: () => Promise.resolve(notPorted('github.reviewPr', false)),
+      getPrDiff: () => Promise.resolve(notPorted('github.getPrDiff', '')),
+      postReviewComments: () => Promise.resolve(notPorted('github.postReviewComments', false)),
     },
 
     linear: {

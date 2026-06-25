@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Github, RefreshCw, GitPullRequest, CircleDot, ExternalLink, Check, MessageSquare, XCircle } from 'lucide-react'
+import { Github, RefreshCw, GitPullRequest, CircleDot, ExternalLink, Check, MessageSquare, XCircle, Bot } from 'lucide-react'
 import { EmptyState } from '../EmptyState'
 import { toast } from '../../store/useToastStore'
 import { PanelHeader, IconButton, accent, border, fg, surface } from '../../design'
+import { useChatStore } from '../../store/useChatStore'
+import { AiPrReviewDraft, type ReviewDraft } from './AiPrReviewDraft'
 
 interface GithubListItem {
   number: number
@@ -34,6 +36,9 @@ function ItemRow({ item, kind, onChanged }: { item: GithubListItem; kind: Kind; 
   const [expanded, setExpanded] = useState(false)
   const [comment, setComment] = useState('')
   const [submitting, setSubmitting] = useState<'approve' | 'request-changes' | 'comment' | null>(null)
+  const [aiReviewLoading, setAiReviewLoading] = useState(false)
+  const [aiReviewDraft, setAiReviewDraft] = useState<ReviewDraft | null>(null)
+  const activeModel = useChatStore((s) => s.activeModel)
 
   const submit = async (action: 'approve' | 'request-changes' | 'comment') => {
     if (action === 'comment' && !comment.trim()) return
@@ -51,6 +56,50 @@ function ItemRow({ item, kind, onChanged }: { item: GithubListItem; kind: Kind; 
       }
     } finally {
       setSubmitting(null)
+    }
+  }
+
+  const generateAiReview = async () => {
+    setAiReviewLoading(true)
+    try {
+      const diff = await window.api.github.getPrDiff(item.number)
+      if (!diff.trim()) { toast.error('No diff available for this PR'); return }
+      const changedFiles = [...diff.matchAll(/diff --git a\/([^ ]+)/g)].map((m) => m[1])
+      const streamId = await window.api.ai.streamChat({
+        messages: [{
+          role: 'user',
+          content: `Review this pull request diff. Respond ONLY with valid JSON matching this schema: {"summary": "overall summary", "comments": [{"path": "file", "line": 1, "body": "issue"}]}. Be specific and actionable. PR #${item.number}: ${item.title}\n\nChanged files: ${changedFiles.join(', ')}\n\n${diff.slice(0, 14000)}`,
+        }],
+        model: activeModel,
+        systemPrompt: 'You are a senior code reviewer. Respond ONLY with valid JSON — no markdown fences, no commentary outside the JSON object.',
+      })
+      let text = ''
+      await new Promise<void>((resolve, reject) => {
+        const unChunk = window.api.ai.onChunk(streamId, (d) => { text += d })
+        const unDone = window.api.ai.onDone(streamId, () => { unChunk(); unDone(); unErr(); resolve() })
+        const unErr = window.api.ai.onError(streamId, (e) => { unChunk(); unDone(); unErr(); reject(new Error(e)) })
+      })
+      try {
+        const parsed = JSON.parse(text.trim()) as ReviewDraft
+        setAiReviewDraft({ summary: parsed.summary ?? '', comments: parsed.comments ?? [] })
+      } catch {
+        setAiReviewDraft({ summary: text.trim(), comments: [] })
+      }
+    } catch (err) {
+      toast.error(`AI review failed: ${(err as Error).message}`)
+    } finally {
+      setAiReviewLoading(false)
+    }
+  }
+
+  const postAiReview = async (draft: ReviewDraft) => {
+    const ok = await window.api.github.postReviewComments(item.number, draft.summary, 'COMMENT', draft.comments)
+    if (ok) {
+      toast.success('Review posted')
+      setAiReviewDraft(null)
+      onChanged()
+    } else {
+      toast.error('Failed to post review — check gh CLI auth')
     }
   }
 
@@ -85,6 +134,20 @@ function ItemRow({ item, kind, onChanged }: { item: GithubListItem; kind: Kind; 
             </div>
           )}
         </div>
+        {kind === 'prs' && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); void generateAiReview() }}
+            disabled={aiReviewLoading}
+            title="Generate AI review"
+            style={{
+              background: 'none', border: 'none', cursor: aiReviewLoading ? 'not-allowed' : 'pointer',
+              color: aiReviewLoading ? fg[4] : accent.violet.fg, display: 'flex', flexShrink: 0, marginTop: 1,
+            }}
+          >
+            <Bot size={12} />
+          </button>
+        )}
         <a
           href={item.url}
           target="_blank"
@@ -96,6 +159,14 @@ function ItemRow({ item, kind, onChanged }: { item: GithubListItem; kind: Kind; 
           <ExternalLink size={12} />
         </a>
       </div>
+
+      {aiReviewDraft && (
+        <AiPrReviewDraft
+          draft={aiReviewDraft}
+          onPost={(d) => void postAiReview(d)}
+          onCancel={() => setAiReviewDraft(null)}
+        />
+      )}
 
       {expanded && kind === 'prs' && (
         <div style={{ padding: '0 12px 10px 33px' }}>

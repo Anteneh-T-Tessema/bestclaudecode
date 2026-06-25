@@ -130,3 +130,39 @@ export async function reviewPr(
     return false
   }
 }
+
+export async function getPrDiff(cwd: string, number: number): Promise<string> {
+  try {
+    const { stdout } = await exec('gh', ['pr', 'diff', String(number)], { cwd })
+    return stdout
+  } catch {
+    return ''
+  }
+}
+
+export interface DraftReviewComment {
+  path: string
+  line: number
+  body: string
+}
+
+export async function postPrReview(
+  cwd: string,
+  number: number,
+  opts: { body: string; event: 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES'; comments: DraftReviewComment[] },
+): Promise<boolean> {
+  try {
+    const { stdout: repoOut } = await exec('gh', ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'], { cwd })
+    const repo = repoOut.trim()
+    const payload = JSON.stringify({
+      body: opts.body,
+      event: opts.event,
+      comments: opts.comments.map((c) => ({ path: c.path, line: c.line, body: c.body, side: 'RIGHT' })),
+    })
+    await exec('gh', ['api', `repos/${repo}/pulls/${number}/reviews`, '--method', 'POST', '--input', '-'],
+      { cwd, input: payload } as Parameters<typeof exec>[2] & { input: string })
+    return true
+  } catch {
+    return false
+  }
+}
