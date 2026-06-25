@@ -34,7 +34,9 @@ When the user asks you to look something up on a live webpage or perform an acti
 description of what to do or extract on that page
 <<<END_BROWSE>>>
 
-Only one URL per block.`
+Only one URL per block.
+
+When the user's message contains a \`<screenshot>\` context block and they ask you to build, recreate, or implement the UI shown in it, generate complete component code using the \`<<<EDIT>>>\` block format above. Base your implementation on the layout, components, colors, and text described in the screenshot block. Include all visible labels and approximate the spacing and hierarchy as closely as the described structure allows.`
 
 /** Load project-level rules from <projectPath>/.lakoorarules if it exists. */
 async function loadProjectRules(projectPath: string | null): Promise<string> {

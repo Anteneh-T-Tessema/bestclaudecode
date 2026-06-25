@@ -207,6 +207,7 @@ interface LspCompletionItem {
   documentation?: string | { value?: string }
   insertText?: string
   insertTextFormat?: number
+  additionalTextEdits?: LspTextEdit[]
 }
 
 interface LspCompletionList {
@@ -584,6 +585,9 @@ function registerLspProviders(monaco: Monaco, lspEntry: ReturnType<typeof resolv
               ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
               : monaco.languages.CompletionItemInsertTextRule.None,
             range,
+            additionalTextEdits: item.additionalTextEdits?.length
+              ? lspTextEditsToMonaco(item.additionalTextEdits)
+              : undefined,
           })),
         }
       },

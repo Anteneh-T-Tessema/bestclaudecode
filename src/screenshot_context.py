@@ -93,7 +93,7 @@ def _call_anthropic(b64: str, media_type: str, model: str, api_key: str) -> str:
 
         payload = {
             "model": model,
-            "max_tokens": 512,
+            "max_tokens": 1024,
             "messages": [
                 {
                     "role": "user",
@@ -109,10 +109,22 @@ def _call_anthropic(b64: str, media_type: str, model: str, api_key: str) -> str:
                         {
                             "type": "text",
                             "text": (
-                                "Describe this screenshot concisely for a software engineer. "
-                                "Focus on: what UI elements or code are visible, any error "
-                                "messages or test output, and what action might be needed. "
-                                "Two to four sentences maximum."
+                                "Analyze this screenshot for a software engineer who may want "
+                                "to build or recreate it as code. Provide a structured description "
+                                "covering:\n"
+                                "1. Layout: overall structure (grid, flex, sidebar+main, etc.), "
+                                "approximate proportions, spacing between elements.\n"
+                                "2. Components: every visible UI element (buttons, inputs, cards, "
+                                "tables, nav bars, modals, icons), their labels/text, and their "
+                                "visual relationships.\n"
+                                "3. Colors & typography: background color, primary/accent colors "
+                                "(use hex if determinable), font sizes and weights, border styles.\n"
+                                "4. State & content: visible data, error messages, loading states, "
+                                "selected/active items, any test output or terminal content.\n"
+                                "5. Interaction hints: which elements appear interactive (hover "
+                                "states, focus rings, cursor changes).\n"
+                                "Be specific and exhaustive — this description will be used to "
+                                "generate matching component code."
                             ),
                         },
                     ],
