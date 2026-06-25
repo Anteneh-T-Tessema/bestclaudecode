@@ -482,6 +482,23 @@ export function ChatInput() {
     if ((!content && images.length === 0) || isStreaming) return
     if (overrideContent === undefined) { setText(''); setPendingImages([]) }
 
+    // /fix-tests <command> — start a standalone test-fix loop; short-circuit chat
+    if (content.startsWith('/fix-tests ')) {
+      const command = content.slice('/fix-tests '.length).trim()
+      if (command) {
+        const id = await window.api.agent.runTestFixLoop({ command, model: activeModel })
+        if (id) {
+          addUserMessage(content, [])
+          const assistantId = startAssistantMessage()
+          appendDelta(assistantId, `Started test-fix loop (session \`${id}\`) — watch the Agent panel for progress.`)
+          finalizeMessage(assistantId)
+        } else {
+          toast.error('Failed to start test-fix loop')
+        }
+        return
+      }
+    }
+
     // @selection — attach currently selected editor text
     let finalContent = content
     const activeTab = getActiveTab()

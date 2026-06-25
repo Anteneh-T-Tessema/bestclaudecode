@@ -3,6 +3,7 @@ import * as os from 'os'
 import {
   startAutonomousSession, stopAutonomousSession, getActiveSession,
   replaySession, resolveApproval, getSessionDiff, exportReportHtml, exportReportPdf,
+  runTestFixLoop,
 } from '../agents/autonomousAgent'
 import {
   readEvents, listSessions, verifyEventLog, computeComplianceSummary,
@@ -28,6 +29,15 @@ export function registerAgentHandlers(): void {
 
   ipcMain.handle('agent:getActiveSession', (): string | null => {
     return getActiveSession()
+  })
+
+  ipcMain.handle('agent:runTestFixLoop', async (_event, opts: { command: string; model: string }): Promise<string | null> => {
+    try {
+      return await runTestFixLoop(opts)
+    } catch (err) {
+      console.error('[agent:runTestFixLoop]', err)
+      return null
+    }
   })
 
   // Gap 54 — persisted event log read-back (audit / history view).

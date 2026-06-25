@@ -912,6 +912,63 @@ export function getActiveSession(): string | null {
   return activeSession?.sessionId ?? null
 }
 
+// ── On-demand test-fix loop (Gap 135 extension) ───────────────────────────────
+// Separate from activeSessions/MAX_CONCURRENT_SESSIONS — a test-fix loop runs
+// on the live working tree and doesn't count against the concurrent session cap.
+
+let testFixSession: { sessionId: string; abort: () => void } | null = null
+
+export async function runTestFixLoop(opts: { command: string; model: string }): Promise<string> {
+  if (testFixSession) {
+    testFixSession.abort()
+    testFixSession = null
+  }
+
+  const sessionId = randomUUID()
+  const controller = new AbortController()
+  testFixSession = { sessionId, abort: () => controller.abort() }
+
+  const planFile = ''
+  const projectPath = (store.get('projectPath') as string | undefined) ?? repoRoot()
+  const policy = loadPolicy(projectPath)
+  const MAX_RETRIES = policy.max_retries
+
+  void (async () => {
+    try {
+      broadcast({ sessionId, planFile, subtaskId: 'test-fix', subtaskDescription: `Running: ${opts.command}`, status: 'running', doneCount: 0, totalCount: MAX_RETRIES })
+      let retryCount = 0
+      while (retryCount <= MAX_RETRIES) {
+        if (controller.signal.aborted) break
+        const result = await runCommand('/bin/sh', ['-c', opts.command], projectPath)
+        if (result.exitCode === 0) {
+          broadcast({ sessionId, planFile, subtaskId: 'test-fix', subtaskDescription: 'All tests pass', status: 'done', doneCount: MAX_RETRIES, totalCount: MAX_RETRIES })
+          return
+        }
+        if (retryCount >= MAX_RETRIES) break
+        const combined = result.stdout + '\n' + result.stderr
+        const summary = parseTestSummary(combined) ?? combined.slice(0, 800)
+        broadcast({ sessionId, planFile, subtaskId: 'test-fix', subtaskDescription: `Attempt ${retryCount + 1}/${MAX_RETRIES} — fixing…`, status: 'retrying', retryCount, maxRetries: MAX_RETRIES, doneCount: retryCount, totalCount: MAX_RETRIES })
+        const response = await streamToString([
+          { role: 'system', content: 'You are an expert software engineer. Fix the failing tests by editing source files only. Use <<<EDIT path>>> ... <<<END_EDIT>>> blocks.' },
+          { role: 'user', content: `Test run failed:\n\`\`\`\n${summary}\n\`\`\`\nFix the failures by proposing file edits.` },
+        ], opts.model, controller.signal)
+        const edits = parseEdits(response)
+        for (const edit of edits) {
+          if (controller.signal.aborted) return
+          try { await applyEdit(edit, projectPath) }
+          catch { /* ignore single-file failure, continue with others */ }
+        }
+        retryCount++
+      }
+      broadcast({ sessionId, planFile, subtaskId: 'test-fix', subtaskDescription: 'Could not fix all failures within retry budget', status: 'blocked', error: `Exhausted ${MAX_RETRIES} retries`, doneCount: MAX_RETRIES, totalCount: MAX_RETRIES })
+    } finally {
+      if (testFixSession?.sessionId === sessionId) testFixSession = null
+    }
+  })()
+
+  return sessionId
+}
+
 // ── Session replay (Gap 51) ───────────────────────────────────────────────────
 
 function broadcastOnly(progress: AgentProgress): void {

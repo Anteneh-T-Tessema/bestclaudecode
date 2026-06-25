@@ -550,6 +550,8 @@ const api = {
       ipcRenderer.invoke('agent:stopAutonomous'),
     getActiveSession: (): Promise<string | null> =>
       ipcRenderer.invoke('agent:getActiveSession'),
+    runTestFixLoop: (opts: { command: string; model: string }): Promise<string | null> =>
+      ipcRenderer.invoke('agent:runTestFixLoop', opts),
     listEventSessions: (): Promise<SessionSummary[]> =>
       ipcRenderer.invoke('agent:listEventSessions'),
     getEventLog: (sessionId: string): Promise<Array<Record<string, unknown>>> =>
