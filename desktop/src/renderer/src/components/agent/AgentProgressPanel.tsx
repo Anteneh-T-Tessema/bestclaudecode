@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { Bot, Square, CheckCircle2, AlertCircle, Loader, CircleDot, Play, GitBranch, GitPullRequest, Rocket, History, ShieldAlert, X, Check, Copy, ExternalLink } from 'lucide-react'
+import { Bot, Square, CheckCircle2, AlertCircle, Loader, CircleDot, Play, GitBranch, GitPullRequest, Rocket, History, ShieldAlert, X, Check, Copy, ExternalLink, MessageSquare } from 'lucide-react'
 import { PanelHeader, accent, border, fg, surface } from '../../design'
 import { toast } from '../../store/useToastStore'
 import { useChatStore } from '../../store/useChatStore'
@@ -127,6 +127,7 @@ function StatusIcon({ status }: { status: AgentProgress['status'] }) {
   if (status === 'push-failed-kept-locally') return <AlertCircle size={11} color={accent.amber.fg} />
   if (status === 'pending-approval') return <ShieldAlert size={11} color={accent.violet.fg} />
   if (status === 'approval-rejected') return <AlertCircle size={11} color={accent.red.fg} />
+  if (status === 'comment') return <MessageSquare size={11} color={accent.cyan.fg} />
   return <CircleDot size={11} color={fg[4]} />
 }
 
@@ -156,6 +157,7 @@ function statusLabel(status: AgentProgress['status'], retryCount?: number, maxRe
       ? `Retrying… (attempt ${retryCount + 1}/${maxRetries})`
       : 'Retrying…'
     case 'done': return 'Done'
+    case 'comment': return 'Comment'
     default: return 'Running'
   }
 }
@@ -184,7 +186,9 @@ function EventRow({ e }: { e: EventEntry }) {
         </div>
         {e.subtaskDescription && (
           <div style={{ fontSize: 10, color: fg[3], marginTop: 1 }}>
-            [{e.subtaskId}] {e.subtaskDescription.slice(0, 80)}{e.subtaskDescription.length > 80 ? '…' : ''}
+            {e.status === 'comment'
+              ? <><strong style={{ color: accent.cyan.fg }}>{e.viewerName ?? 'remote-viewer'}:</strong> {e.subtaskDescription.slice(0, 120)}</>
+              : <>[{e.subtaskId}] {e.subtaskDescription.slice(0, 80)}{e.subtaskDescription.length > 80 ? '…' : ''}</>}
           </div>
         )}
         {e.error && (

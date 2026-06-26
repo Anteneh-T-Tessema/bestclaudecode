@@ -125,4 +125,73 @@ describe('webhookServer collab routes', () => {
     expect(res.status).toBe(200)
     expect(JSON.parse(res.body)).toEqual({ success: false })
   })
+
+  // Remote/mobile dispatch — GET /watch with no session param renders the
+  // launcher form instead of a live view.
+  it('GET /watch with no session param returns the launcher page, not the live view', async () => {
+    const res = await get(port, '/watch?token=test-token-123')
+    expect(res.status).toBe(200)
+    expect(res.body).toContain('<html')
+    expect(res.body).toContain('Start Agent')
+    expect(res.body).toContain("fetch('/session/new'")
+  })
+
+  it('GET /watch with no session param still requires the right token', async () => {
+    const res = await get(port, '/watch?token=wrong')
+    expect(res.status).toBe(401)
+  })
+
+  it('POST /session/new without the right token is rejected', async () => {
+    const res = await post(port, '/session/new', { goal: 'do something', token: 'wrong' })
+    expect(res.status).toBe(401)
+  })
+
+  it('POST /session/new with the right token but no goal returns 400', async () => {
+    const res = await post(port, '/session/new', { goal: '  ', token: 'test-token-123' })
+    expect(res.status).toBe(400)
+  })
+
+  // Lightweight live collaboration — comments
+  it('POST /session/:id/comment without the right token is rejected', async () => {
+    const res = await post(port, '/session/some-id/comment', { text: 'hi', token: 'wrong' })
+    expect(res.status).toBe(401)
+  })
+
+  it('POST /session/:id/comment with the right token but no text returns 400', async () => {
+    const res = await post(port, '/session/some-id/comment', { text: '  ', token: 'test-token-123' })
+    expect(res.status).toBe(400)
+  })
+
+  it('POST /session/:id/comment broadcasts the comment to live SSE subscribers', async () => {
+    const sessionId = 'session-comment-test'
+    const chunks: string[] = []
+    const stream = getSSE(port, `/watch-stream?session=${sessionId}&token=test-token-123&name=Alice`, (c) => chunks.push(c))
+    await new Promise((r) => setTimeout(r, 200))
+
+    const res = await post(port, `/session/${sessionId}/comment`, { text: 'looks good to me', token: 'test-token-123', from: 'Bob' })
+    expect(res.status).toBe(200)
+    expect(JSON.parse(res.body)).toEqual({ success: true })
+
+    await new Promise((r) => setTimeout(r, 200))
+    const combined = chunks.join('')
+    expect(combined).toContain('looks good to me')
+    expect(combined).toContain('"status":"comment"')
+    expect(combined).toContain('"viewerName":"Bob"')
+
+    stream.close()
+  })
+
+  // Lightweight live collaboration — presence
+  it('GET /watch-stream announces the viewer joining as a comment event', async () => {
+    const sessionId = 'session-presence-test'
+    const chunks: string[] = []
+    const stream = getSSE(port, `/watch-stream?session=${sessionId}&token=test-token-123&name=Carol`, (c) => chunks.push(c))
+    await new Promise((r) => setTimeout(r, 200))
+
+    const combined = chunks.join('')
+    expect(combined).toContain('Carol joined the live view')
+    expect(combined).toContain('"status":"comment"')
+
+    stream.close()
+  })
 })

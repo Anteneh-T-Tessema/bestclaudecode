@@ -49,6 +49,8 @@ export interface AgentProgress {
     | 'deploying' | 'deployed' | 'pending-approval' | 'approval-rejected'
     | 'edit-applied' | 'run-executed' | 'browse-executed'
     | 'stealing' | 'spawned-child'
+    /** Team Collaboration — a remote viewer left a comment, or joined/left the live view. */
+    | 'comment'
   output?: string
   error?: string
   doneCount: number
@@ -75,6 +77,8 @@ export interface AgentProgress {
   approverRole?: string
   /** Swarm — set on a child session's earliest events if it was spawned by another session. */
   parentSessionId?: string
+  /** Team Collaboration — name of the remote viewer who sent a 'comment' event, or joined/left. */
+  viewerName?: string
 }
 
 interface Subtask {

@@ -28,7 +28,7 @@ import { store, getSecret } from './store'
 import { repoRoot } from './paths'
 import { runPythonJson } from './pythonBridge'
 import { getPrDiff, postPrReview } from './gitOps'
-import { startAutonomousSession, getActiveSessions, streamToString, resolveApproval } from './agents/autonomousAgent'
+import { startAutonomousSession, getActiveSessions, streamToString, resolveApproval, broadcast } from './agents/autonomousAgent'
 import { readEvents } from './agentEventLog'
 import { subscribe } from './sessionRelay'
 import { renderWatchPage } from './collabViewer'
@@ -74,23 +74,36 @@ function sendJson(res: http.ServerResponse, status: number, payload: unknown): v
   res.end(JSON.stringify(payload))
 }
 
+/**
+ * Creates a new plan from a freeform goal and starts an agent session for it
+ * — the one piece of logic shared by the Slack slash command and the
+ * Team Collaboration "start a new session" form (POST /session/new), so a
+ * phone/browser viewer dispatches an agent through the exact same path
+ * Slack already does, not a second one.
+ */
+async function createSessionFromGoal(goal: string): Promise<{ sessionId: string } | { error: string }> {
+  const result = await runPythonJson(['-m', 'src.task_planner', '--new', goal, '--save'])
+  if (!result.ok) return { error: `Failed to create plan: ${result.error}` }
+
+  const planFile = `plans/${(result.stats as { slug: string }).slug}.json`
+  const model = (store.get('activeModel') as string | undefined) ?? 'claude-sonnet-4-6'
+  try {
+    const sessionId = await startAutonomousSession({ planFile, model })
+    return { sessionId }
+  } catch (err) {
+    return { error: `Could not start agent: ${err}` }
+  }
+}
+
 /** `text` from a Slack slash command becomes the goal for a brand-new plan + agent session. */
 async function handleSlackCommand(body: string): Promise<{ status: number; payload: unknown }> {
   const params = new URLSearchParams(body)
   const text = params.get('text')?.trim() ?? ''
   if (!text) return { status: 200, payload: { text: 'Usage: /meshflow <goal for the agent>' } }
 
-  const result = await runPythonJson(['-m', 'src.task_planner', '--new', text, '--save'])
-  if (!result.ok) return { status: 200, payload: { text: `Failed to create plan: ${result.error}` } }
-
-  const planFile = `plans/${(result.stats as { slug: string }).slug}.json`
-  const model = (store.get('activeModel') as string | undefined) ?? 'claude-sonnet-4-6'
-  try {
-    const sessionId = await startAutonomousSession({ planFile, model })
-    return { status: 200, payload: { text: `Started Meshflow agent session \`${sessionId.slice(0, 8)}\` for: ${text}` } }
-  } catch (err) {
-    return { status: 200, payload: { text: `Could not start agent: ${err}` } }
-  }
+  const result = await createSessionFromGoal(text)
+  if ('error' in result) return { status: 200, payload: { text: result.error } }
+  return { status: 200, payload: { text: `Started Meshflow agent session \`${result.sessionId.slice(0, 8)}\` for: ${text}` } }
 }
 
 /** On `pull_request` `opened`, generates an AI review draft and posts it as a GitHub PR review. */
@@ -193,12 +206,16 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     // instead of) the webhook header auth below since browsers can't set
     // custom headers from a plain link click.
     if (req.method === 'GET' && url.pathname === '/watch') {
-      const sessionId = url.searchParams.get('session') ?? ''
+      const sessionId = url.searchParams.get('session')
       const token = url.searchParams.get('token')
-      if (!sessionId || !isCollabAuthorized(token)) {
+      if (!isCollabAuthorized(token)) {
         sendJson(res, 401, { error: 'unauthorized' })
         return
       }
+      // Remote/mobile dispatch — no session param means "launcher mode": a
+      // single bookmarked /watch?token=... URL renders a "start a new
+      // session" form instead of a live view, since a phone browser has
+      // nowhere else to type a goal into.
       res.writeHead(200, { 'Content-Type': 'text/html' })
       res.end(renderWatchPage(sessionId, token ?? ''))
       return
@@ -207,6 +224,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     if (req.method === 'GET' && url.pathname === '/watch-stream') {
       const sessionId = url.searchParams.get('session') ?? ''
       const token = url.searchParams.get('token')
+      const viewerName = url.searchParams.get('name')?.trim() || 'remote-viewer'
       if (!sessionId || !isCollabAuthorized(token)) {
         sendJson(res, 401, { error: 'unauthorized' })
         return
@@ -222,7 +240,67 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       const unsubscribe = subscribe(sessionId, (event) => {
         res.write(`data: ${JSON.stringify(event)}\n\n`)
       })
-      req.on('close', unsubscribe)
+      // Lightweight presence — announce join/leave as comment events so
+      // every other viewer (and the local Electron app) sees who's watching,
+      // without a separate presence channel or protocol.
+      broadcast({ sessionId, planFile: '', subtaskId: '', subtaskDescription: `${viewerName} joined the live view`, status: 'comment', viewerName, doneCount: 0, totalCount: 0 })
+      req.on('close', () => {
+        unsubscribe()
+        broadcast({ sessionId, planFile: '', subtaskId: '', subtaskDescription: `${viewerName} left the live view`, status: 'comment', viewerName, doneCount: 0, totalCount: 0 })
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url.pathname === '/session/new') {
+      const body = await readBody(req)
+      let parsedBody: { goal?: string; token?: string }
+      try {
+        parsedBody = JSON.parse(body)
+      } catch {
+        sendJson(res, 400, { error: 'invalid JSON body' })
+        return
+      }
+      if (!isCollabAuthorized(parsedBody.token ?? null)) {
+        sendJson(res, 401, { error: 'unauthorized' })
+        return
+      }
+      const goal = parsedBody.goal?.trim() ?? ''
+      if (!goal) {
+        sendJson(res, 400, { error: 'goal is required' })
+        return
+      }
+      const result = await createSessionFromGoal(goal)
+      if ('error' in result) {
+        sendJson(res, 200, { error: result.error })
+        return
+      }
+      sendJson(res, 200, { sessionId: result.sessionId })
+      return
+    }
+
+    const commentMatch = req.method === 'POST' && url.pathname.match(/^\/session\/([^/]+)\/comment$/)
+    if (commentMatch) {
+      const sessionId = commentMatch[1]
+      const body = await readBody(req)
+      let parsedBody: { text?: string; token?: string; from?: string }
+      try {
+        parsedBody = JSON.parse(body)
+      } catch {
+        sendJson(res, 400, { error: 'invalid JSON body' })
+        return
+      }
+      if (!isCollabAuthorized(parsedBody.token ?? null)) {
+        sendJson(res, 401, { error: 'unauthorized' })
+        return
+      }
+      const text = parsedBody.text?.trim() ?? ''
+      if (!text) {
+        sendJson(res, 400, { error: 'text is required' })
+        return
+      }
+      const viewerName = parsedBody.from?.trim() || 'remote-viewer'
+      broadcast({ sessionId, planFile: '', subtaskId: '', subtaskDescription: text, status: 'comment', viewerName, doneCount: 0, totalCount: 0 })
+      sendJson(res, 200, { success: true })
       return
     }
 

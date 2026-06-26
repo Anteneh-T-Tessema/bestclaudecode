@@ -230,19 +230,24 @@ claim this codebase doesn't back yet.
   host; isolation today is filesystem-level (git worktree) only, not
   container/VM-level. No code change proposed here — this needs a deliberate
   infra decision (Docker vs. cloud VM, billing model) before it's built.
-- **Remote/mobile session dispatch** — `webhookServer.ts` already accepts a
-  Slack slash command to start a session and `sessionRelay.ts` already has an
-  SSE viewer with approve/reject, but there's no "start a new session" form on
-  that viewer page yet — dispatching from a phone browser (not just Slack)
-  isn't wired up.
-- **Live multi-user collaboration** — `sessionRelay.ts`'s SSE channel is
-  watch-only; there's no cursor presence, inline comments, or concurrent
-  editing (would need a CRDT like Yjs for the latter). Lovable's real-time
-  multi-user editing has no equivalent here yet.
+- **Concurrent collaborative editing** — `webhookServer.ts`'s comment/presence
+  relay (below) covers watch-and-discuss, but there's still no CRDT (e.g. Yjs)
+  for two people editing the same file at once. Lovable's real-time multi-user
+  *editing* has no equivalent here yet — only watch + comment + approve.
 
 **Closed this session, previously listed as thin spots:**
 
-- Multi-agent swarm coordination (role-gated parallel sessions on one plan)
-  and generative zero-to-one scaffolding (prompt → component task through the
-  existing reviewed pipeline) — both implemented per their specs above, not
-  v0/Lovable-grade yet but no longer a 50–138 line stub.
+- **Multi-agent swarm coordination** and **generative zero-to-one
+  scaffolding** — implemented per their specs above, not v0/Lovable-grade yet
+  but no longer a 50–138 line stub.
+- **Remote/mobile session dispatch** — `GET /watch` with no `session` query
+  param now renders a "start a new agent session" form
+  (`collabViewer.ts:renderLauncherPage()`) instead of requiring an existing
+  session id, reusing the same `createSessionFromGoal()` path the Slack slash
+  command goes through. A bookmarked `/watch?token=...` URL on a phone is now
+  a working session launcher, not just a viewer.
+- **Lightweight live collaboration** — `POST /session/:id/comment` broadcasts
+  a comment to every viewer (web and the local Electron app, via the same
+  `broadcast()` that already pushes agent events) and `GET /watch-stream`
+  announces join/leave as the same event shape, so presence needs no separate
+  channel. Concurrent editing is still out of scope — see thin spots above.
