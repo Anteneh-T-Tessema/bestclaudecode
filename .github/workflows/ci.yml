@@ -34,6 +34,15 @@ jobs:
     defaults:
       run:
         working-directory: desktop
+    env:
+      # Job-wide, not just the final test step — `electron --version` below
+      # also launches the real binary and hits the same setuid sandbox
+      # check. CI containers commonly lack the unprivileged user namespace /
+      # setuid sandbox helper permissions Electron's sandbox needs — Electron
+      # honors this env var natively, so the app itself never needs a
+      # --no-sandbox code change that would also weaken it for every real
+      # user on every platform.
+      ELECTRON_DISABLE_SANDBOX: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -58,10 +67,3 @@ jobs:
           sudo apt-get install -y xvfb libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6 xauth libasound2t64 libgbm1
       - name: Run e2e suite against a real Electron + CDP session
         run: xvfb-run --auto-servernum --server-args="-screen 0 1280x800x24" npm run test:e2e
-        env:
-          # CI containers commonly lack the unprivileged user namespace /
-          # setuid sandbox helper permissions Electron's sandbox needs —
-          # Electron honors this env var natively, so the app itself never
-          # needs a --no-sandbox code change that would also weaken it for
-          # every real user on every platform.
-          ELECTRON_DISABLE_SANDBOX: "1"
