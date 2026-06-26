@@ -7,7 +7,7 @@ import { repoRoot } from '../paths'
 import { runCommand } from '../pythonBridge'
 import { detectDeployCommand, runDeploy, runPreviewDeploy, promoteDeploy, rollbackDeploy, providerFromCommand } from '../deploy'
 import { appendDeployRecord, listDeployRecords, type DeployRecord } from '../deployHistory'
-import { broadcast, getActiveSessions, streamToString } from '../agents/autonomousAgent'
+import { broadcast, getActiveSessions, streamToString, runDeployFixLoop } from '../agents/autonomousAgent'
 
 // Gap 140 — manual, user-triggered deploy, distinct from the autonomous
 // agent's automatic end-of-session deploy (autonomousAgent.ts's
@@ -33,6 +33,7 @@ export function registerDeployHandlers(): void {
 
       const targetPath = projectRoot()
       const sessionId = `manual-deploy-${Date.now()}`
+      const model = opts?.model || (store.get('activeModel') as string) || 'claude-sonnet-4-6'
       const deployCmd = await detectDeployCommand(targetPath)
       if (!deployCmd) {
         return { success: false, error: 'No deploy configuration found (no package.json "deploy" script, vercel.json, .vercel, netlify.toml, .netlify, cdk.json, or k8s/kubernetes directory)' }
@@ -103,7 +104,6 @@ export function registerDeployHandlers(): void {
 
       if (diff) {
         try {
-          const model = opts?.model || (store.get('activeModel') as string) || 'claude-sonnet-4-6'
           const reviewResponse = await streamToString([
             {
               role: 'system',
@@ -144,15 +144,27 @@ export function registerDeployHandlers(): void {
           : await runDeploy(targetPath, deployCmd)
         
         if (exitCode !== 0) {
-          const error = stderr || stdout || `Deploy command exited with code ${exitCode}`
+          const initialError = stderr || stdout || `Deploy command exited with code ${exitCode}`
           broadcast({
             sessionId, planFile: '', subtaskId: 'deploy-run', subtaskDescription: '',
-            status: 'error', error, doneCount: 2, totalCount: 2,
+            status: 'error', error: initialError, doneCount: 2, totalCount: 2,
           })
           appendDeployRecord(targetPath, { id: randomUUID(), ts: Date.now(), provider, deployCmd, target, exitCode, url: undefined })
-          return { success: false, error }
+
+          // Deploy self-healing — diagnose the failure with AI, apply fixes,
+          // retry within a bounded budget before reporting failure.
+          const healed = await runDeployFixLoop({ sessionId, targetPath, deployCmd, provider, target, model, initialError })
+          if (healed.success) {
+            broadcast({
+              sessionId, planFile: '', subtaskId: 'deploy-run', subtaskDescription: '',
+              status: 'deployed', doneCount: 2, totalCount: 2, deployUrl: healed.deployUrl,
+            })
+            appendDeployRecord(targetPath, { id: randomUUID(), ts: Date.now(), provider, deployCmd, target, exitCode: 0, url: healed.deployUrl, selfHealed: true })
+            return { success: true, deployUrl: healed.deployUrl }
+          }
+          return { success: false, error: healed.error }
         }
-        
+
         broadcast({
           sessionId, planFile: '', subtaskId: 'deploy-run', subtaskDescription: '',
           status: 'deployed', doneCount: 2, totalCount: 2, deployUrl,
@@ -180,6 +192,7 @@ export function registerDeployHandlers(): void {
 
     const targetPath = projectRoot()
     const sessionId = `manual-deploy-${Date.now()}`
+    const model = (store.get('activeModel') as string) || 'claude-sonnet-4-6'
     const deployCmd = await detectDeployCommand(targetPath)
     if (!deployCmd) {
       return { success: false, error: 'No deploy configuration found (no package.json "deploy" script, vercel.json, or netlify.toml)' }
@@ -216,13 +229,25 @@ export function registerDeployHandlers(): void {
         ? await runPreviewDeploy(targetPath, provider as 'vercel' | 'netlify')
         : await runDeploy(targetPath, deployCmd)
       if (exitCode !== 0) {
-        const error = stderr || stdout || `Deploy command exited with code ${exitCode}`
+        const initialError = stderr || stdout || `Deploy command exited with code ${exitCode}`
         broadcast({
           sessionId, planFile: '', subtaskId: '', subtaskDescription: '',
-          status: 'error', error, doneCount: 0, totalCount: 0,
+          status: 'error', error: initialError, doneCount: 0, totalCount: 0,
         })
         appendDeployRecord(targetPath, { id: randomUUID(), ts: Date.now(), provider, deployCmd, target, exitCode, url: undefined })
-        return { success: false, error }
+
+        // Deploy self-healing — diagnose the failure with AI, apply fixes,
+        // retry within a bounded budget before reporting failure.
+        const healed = await runDeployFixLoop({ sessionId, targetPath, deployCmd, provider, target, model, initialError })
+        if (healed.success) {
+          broadcast({
+            sessionId, planFile: '', subtaskId: '', subtaskDescription: '',
+            status: 'deployed', doneCount: 0, totalCount: 0, deployUrl: healed.deployUrl,
+          })
+          appendDeployRecord(targetPath, { id: randomUUID(), ts: Date.now(), provider, deployCmd, target, exitCode: 0, url: healed.deployUrl, selfHealed: true })
+          return { success: true, deployUrl: healed.deployUrl }
+        }
+        return { success: false, error: healed.error }
       }
       broadcast({
         sessionId, planFile: '', subtaskId: '', subtaskDescription: '',

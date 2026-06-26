@@ -50,4 +50,10 @@ describe('deployHistory', () => {
   it('never throws even if the directory is unwritable', () => {
     expect(() => appendDeployRecord('/nonexistent/deeply/nested/path', record())).not.toThrow()
   })
+
+  it('preserves selfHealed when a deploy succeeded only after auto-fix', () => {
+    appendDeployRecord(projectPath, record({ id: 'id-1', selfHealed: true }))
+    const [latest] = listDeployRecords(projectPath)
+    expect(latest.selfHealed).toBe(true)
+  })
 })

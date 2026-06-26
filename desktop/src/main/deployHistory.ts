@@ -25,6 +25,8 @@ export interface DeployRecord {
   promotedFromId?: string
   /** Set on a record produced by rolling back to a past deployment. */
   rolledBackFromId?: string
+  /** Set when this deploy succeeded only after the AI auto-fix loop edited files and retried. */
+  selfHealed?: boolean
   hash: string
 }
 
