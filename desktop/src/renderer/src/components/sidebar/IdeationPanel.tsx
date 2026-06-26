@@ -31,6 +31,10 @@ function labelStyle(): React.CSSProperties {
   return { fontSize: 10, color: fg[3], display: 'block', marginBottom: 4, fontWeight: 600 }
 }
 
+function helperTextStyle(): React.CSSProperties {
+  return { fontSize: 9, color: fg[4], display: 'block', marginBottom: 6, lineHeight: 1.35 }
+}
+
 async function streamToText(streamId: string): Promise<string> {
   let text = ''
   await new Promise<void>((resolve, reject) => {
@@ -249,6 +253,7 @@ export function IdeationPanel() {
         </div>
         <div style={{ borderBottom: `1px solid ${border[1]}`, paddingBottom: 12 }}>
           <label style={labelStyle()}>Generate component</label>
+          <span style={helperTextStyle()}>One prompt → one ready-to-build component, matching this project's existing design. For a multi-step feature, use "Rough idea" below instead.</span>
           <textarea
             value={componentPrompt}
             onChange={(e) => setComponentPrompt(e.target.value)}
@@ -274,6 +279,7 @@ export function IdeationPanel() {
 
         <div>
           <label style={labelStyle()}>Rough idea</label>
+          <span style={helperTextStyle()}>For anything bigger than one component — drafts a full spec (problem, scope, subtasks) you can review and edit before it becomes a plan.</span>
           <textarea
             value={idea}
             onChange={(e) => setIdea(e.target.value)}

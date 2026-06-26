@@ -85,6 +85,20 @@ test.describe('Ideation panel — non-AI behavior', () => {
       await closeApp(app)
     }
   })
+
+  // Clarity fix — Generate Component and Rough idea/Draft Spec render as two
+  // near-identical "type something, click button" boxes stacked with no
+  // explanation of how they differ; helper copy under each label disambiguates.
+  test('Generate Component and Rough idea show distinguishing helper text', async () => {
+    const { app, window } = await launchApp()
+    try {
+      await window.locator('[data-testid="activity-ideation"]').click()
+      await expect(window.getByText(/one ready-to-build component/i)).toBeVisible({ timeout: 5_000 })
+      await expect(window.getByText(/drafts a full spec/i)).toBeVisible()
+    } finally {
+      await closeApp(app)
+    }
+  })
 })
 
 test.describe('Monitor panel — real end-to-end pty pipeline (no AI involved)', () => {
