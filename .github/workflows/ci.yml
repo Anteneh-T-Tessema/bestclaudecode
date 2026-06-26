@@ -48,6 +48,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Create the .venv the app shells out to at runtime
+        # paths.ts's venvPython() hardcodes <repoRoot>/.venv/bin/python3 —
+        # several features (the @codebase mention's BM25 search, decision-log
+        # writes from RunProposalCard) shell out to it via runPythonJson(),
+        # and those modules are deliberately stdlib-only, so creating the
+        # venv (no pip installs) is enough. Without this, those features
+        # don't error — runPythonJson just returns {ok: false}, so the
+        # affected UI features silently render their no-op/empty state,
+        # which is exactly how codebase-context.spec.ts and log-run.spec.ts
+        # failed: not a crash, just a missing <codebase_context> block /
+        # missing audit-log entry.
+        working-directory: .
+        run: python3 -m venv .venv
       - run: npm ci
       - name: Force Electron's binary download
         # Newer Electron versions don't auto-download via an npm postinstall
