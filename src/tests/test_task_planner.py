@@ -44,6 +44,18 @@ def test_subtask_defaults():
     s = Subtask.from_dict({"id": "01", "description": "task"})
     assert s.depends_on == []
     assert s.done is False
+    assert s.depends_on_role == []
+
+
+def test_subtask_depends_on_role_roundtrip():
+    s = Subtask(id="02", description="security review", depends_on_role=["backend", "frontend"])
+    s2 = Subtask.from_dict(s.to_dict())
+    assert s2.depends_on_role == ["backend", "frontend"]
+
+
+def test_subtask_depends_on_role_omitted_when_empty():
+    s = Subtask(id="01", description="task")
+    assert "depends_on_role" not in s.to_dict()
 
 
 # --- TaskPlan ---------------------------------------------------------------

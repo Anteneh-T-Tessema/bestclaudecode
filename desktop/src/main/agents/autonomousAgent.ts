@@ -25,13 +25,13 @@ import { runChatContext } from '../chatContext'
 import { queryAgentMemory } from '../agentMemory'
 import { resolveModel } from '../modelRouter'
 import { createWorktree, commitAll, push, createPr, removeWorktree, runGit } from '../gitOps'
-import { appendEvent, readEvents } from '../agentEventLog'
+import { appendEvent, readEvents, listSessions } from '../agentEventLog'
 import { setHandoff } from '../agentHandoffStore'
 import { publish } from '../sessionRelay'
 import { sendNotification } from '../ipc/notifications.handlers'
 import { loadPolicy, checkCommand, checkPath, checkApproval, globToRegex } from '../policyEngine'
 import { validateGeneratedTs } from '../codeValidator'
-import { detectDeployCommand, runDeploy, runPreviewDeploy, providerFromCommand } from '../deploy'
+import { detectDeployCommand, runDeploy, runPreviewDeploy, providerFromCommand, type DeployProvider } from '../deploy'
 import { appendDeployRecord } from '../deployHistory'
 import * as path from 'path'
 import { scanSandboxFiles } from '../sandboxScanner'
@@ -83,6 +83,8 @@ interface Subtask {
   depends_on: string[]
   done: boolean
   role?: string
+  /** Swarm — roles (not subtask ids) that must have >=1 done subtask before this one is claimable. */
+  depends_on_role?: string[]
 }
 
 interface TaskPlanDetail {
@@ -152,6 +154,8 @@ const activeSessions = new Map<string, {
   /** Worktree (or live projectPath fallback) this session's edits land in — set once isolation is set up, used by work-stealing to apply stolen edits to the *owning* session's tree. */
   worktreePath: string
   branch: string
+  /** Swarm — role this session was started with, if any. Unset = generalist, claims any subtask (today's behavior). */
+  role?: string
 }>()
 
 // ── Swarm: cross-session subtask claims + per-plan-file write lock ───────────
@@ -497,8 +501,9 @@ async function attemptDeploy(opts: {
   branch: string
   prUrl: string
   worktreePath: string
+  model: string
 }): Promise<void> {
-  const { sessionId, planFile, doneCount, totalCount, branch, prUrl, worktreePath } = opts
+  const { sessionId, planFile, doneCount, totalCount, branch, prUrl, worktreePath, model } = opts
 
   const deployCmd = await detectDeployCommand(worktreePath)
   if (!deployCmd) return
@@ -512,8 +517,19 @@ async function attemptDeploy(opts: {
     // exitCode instead — so this branch was previously unreachable and every
     // failed agent-triggered deploy was broadcast as 'deployed' regardless.
     if (exitCode !== 0) {
-      broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: '', status: 'error', error: `Deploy command exited with code ${exitCode}`, doneCount, totalCount, branch, prUrl })
+      const initialError = `Deploy command exited with code ${exitCode}`
+      broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: '', status: 'error', error: initialError, doneCount, totalCount, branch, prUrl })
       appendDeployRecord(worktreePath, { id: randomUUID(), ts: Date.now(), provider, deployCmd, target: 'production', exitCode, url: undefined })
+
+      // Deploy self-healing — diagnose the failure with AI, apply fixes, retry
+      // within a bounded budget before giving up on this session's deploy.
+      const healed = await runDeployFixLoop({ sessionId, targetPath: worktreePath, deployCmd, provider, target: 'production', model, initialError })
+      if (healed.success) {
+        broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: '', status: 'deployed', doneCount, totalCount, branch, prUrl, deployUrl: healed.deployUrl })
+        appendDeployRecord(worktreePath, { id: randomUUID(), ts: Date.now(), provider, deployCmd, target: 'production', exitCode: 0, url: healed.deployUrl, selfHealed: true })
+      } else {
+        broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: '', status: 'error', error: healed.error, doneCount, totalCount, branch, prUrl })
+      }
       return
     }
     broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: '', status: 'deployed', doneCount, totalCount, branch, prUrl, deployUrl })
@@ -532,6 +548,7 @@ async function attemptDeploy(opts: {
  */
 async function writeVerificationReport(opts: {
   sessionId: string
+  planFile: string
   projectPath: string
   plan: TaskPlanDetail
   branch: string
@@ -539,7 +556,7 @@ async function writeVerificationReport(opts: {
   totalCount: number
   prUrl: string | null
 }): Promise<void> {
-  const { sessionId, projectPath, plan, branch, doneCount, totalCount, prUrl } = opts
+  const { sessionId, planFile, projectPath, plan, branch, doneCount, totalCount, prUrl } = opts
   const events = readEvents(sessionId)
   const blocked = events.filter((e) => e.status === 'blocked')
   const errors = events.filter((e) => e.status === 'error')
@@ -558,6 +575,36 @@ async function writeVerificationReport(opts: {
     lines.push(`- [${s.done ? 'x' : ' '}] [${s.id}] ${s.description}`)
   }
   lines.push('')
+
+  // Swarm — when sibling sessions are working this same plan under different
+  // roles, fold a one-line status per sibling into this report so a human
+  // reviews one combined document instead of opening N per-role reports.
+  const siblings = listSessions()
+    .filter((s) => s.id !== sessionId)
+    .map((s) => {
+      const sibEvents = readEvents(s.id)
+      if (!sibEvents.some((e) => e.planFile === planFile)) return null
+      const last = sibEvents[sibEvents.length - 1]
+      const role = sibEvents.find((e) => typeof e.role === 'string' && e.role)?.role as string | undefined
+      return {
+        id: s.id,
+        role,
+        status: (last?.status as string | undefined) ?? 'unknown',
+        doneCount: last?.doneCount as number | undefined,
+        totalCount: last?.totalCount as number | undefined,
+      }
+    })
+    .filter((s): s is NonNullable<typeof s> => s !== null)
+
+  if (siblings.length > 0) {
+    lines.push('## Swarm — other roles on this plan')
+    lines.push('')
+    for (const sib of siblings) {
+      lines.push(`- [${sib.role ?? 'unassigned'}] session ${sib.id.slice(0, 8)} — ${sib.status} (${sib.doneCount ?? '?'}/${sib.totalCount ?? '?'})`)
+    }
+    lines.push('')
+  }
+
   lines.push('## Policy Evaluations')
   lines.push('')
   lines.push(blocked.length === 0
@@ -651,8 +698,9 @@ async function finalizeSession(opts: {
   worktreePath: string
   branch: string
   doneCount: number
+  model: string
 }): Promise<void> {
-  const { sessionId, planFile, plan, projectPath, worktreePath, branch, doneCount } = opts
+  const { sessionId, planFile, plan, projectPath, worktreePath, branch, doneCount, model } = opts
   const totalCount = plan.subtasks.length
 
   broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: 'Committing changes…', status: 'finalizing', doneCount, totalCount, branch })
@@ -660,7 +708,7 @@ async function finalizeSession(opts: {
   const { committed } = await commitAll(worktreePath, `Agent: ${plan.goal}`)
   if (!committed) {
     await removeWorktree(projectPath, worktreePath).catch(() => {})
-    await writeVerificationReport({ sessionId, projectPath, plan, branch, doneCount, totalCount, prUrl: null })
+    await writeVerificationReport({ sessionId, planFile, projectPath, plan, branch, doneCount, totalCount, prUrl: null })
     broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: '', status: 'finished', doneCount, totalCount })
     return
   }
@@ -698,7 +746,7 @@ async function finalizeSession(opts: {
 
   if (promoted) {
     await removeWorktree(projectPath, worktreePath, true).catch(() => {})
-    await writeVerificationReport({ sessionId, projectPath, plan, branch, doneCount, totalCount, prUrl: null })
+    await writeVerificationReport({ sessionId, planFile, projectPath, plan, branch, doneCount, totalCount, prUrl: null })
     sendNotification(`[Meshflow] Agent session ${sessionId.slice(0, 8)} finished — changes promoted directly.`)
     broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: '', status: 'finished', doneCount, totalCount, branch })
     return
@@ -709,7 +757,7 @@ async function finalizeSession(opts: {
   try {
     await push(worktreePath, branch)
   } catch (err) {
-    await writeVerificationReport({ sessionId, projectPath, plan, branch, doneCount, totalCount, prUrl: null })
+    await writeVerificationReport({ sessionId, planFile, projectPath, plan, branch, doneCount, totalCount, prUrl: null })
     broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: `Branch ${branch} exists locally only (push failed: ${err})`, status: 'push-failed-kept-locally', doneCount, totalCount, branch })
     return
   }
@@ -742,7 +790,7 @@ async function finalizeSession(opts: {
   })
 
   if (!prUrl) {
-    await writeVerificationReport({ sessionId, projectPath, plan, branch, doneCount, totalCount, prUrl: null })
+    await writeVerificationReport({ sessionId, planFile, projectPath, plan, branch, doneCount, totalCount, prUrl: null })
     broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: `Branch ${branch} pushed but PR creation failed (no gh or not authenticated)`, status: 'push-failed-kept-locally', doneCount, totalCount, branch })
     return
   }
@@ -750,12 +798,12 @@ async function finalizeSession(opts: {
   broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: '', status: 'pr-opened', doneCount, totalCount, branch, prUrl })
 
   // Attempt deployment (before cleanup — deploy runs against the worktree state)
-  await attemptDeploy({ sessionId, planFile, doneCount, totalCount, branch, prUrl, worktreePath })
+  await attemptDeploy({ sessionId, planFile, doneCount, totalCount, branch, prUrl, worktreePath, model })
 
   // Cleanup only on full success (pushed + PR opened)
   await removeWorktree(projectPath, worktreePath, true).catch(() => {})
 
-  await writeVerificationReport({ sessionId, projectPath, plan, branch, doneCount, totalCount, prUrl })
+  await writeVerificationReport({ sessionId, planFile, projectPath, plan, branch, doneCount, totalCount, prUrl })
 
   sendNotification(`[Meshflow] Agent session ${sessionId.slice(0, 8)} finished — ${doneCount}/${totalCount} subtasks${prUrl ? `. PR: ${prUrl}` : ''}`)
   broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: '', status: 'finished', doneCount, totalCount, branch, prUrl })
@@ -803,6 +851,37 @@ function classifySubtaskRole(description: string): string {
   return ''
 }
 
+/** A subtask's effective role: its explicit `role` field, falling back to auto-classification from its description. */
+function effectiveRoleOf(subtask: Subtask): string {
+  return subtask.role || classifySubtaskRole(subtask.description)
+}
+
+/**
+ * True unless the subtask declares `depends_on_role` and at least one of
+ * those roles has zero completed subtasks yet in the plan. This is a role-level
+ * gate, distinct from `depends_on` (specific subtask ids) — it lets a
+ * role-assigned agent (e.g. security-review) wait on "has anyone finished
+ * backend work" without needing to know which subtask id will carry it.
+ */
+function roleGateSatisfied(plan: TaskPlanDetail, subtask: Subtask): boolean {
+  if (!subtask.depends_on_role?.length) return true
+  return subtask.depends_on_role.every((role) =>
+    plan.subtasks.some((s) => s.done && effectiveRoleOf(s) === role),
+  )
+}
+
+/** Distinct effective roles present among a plan's subtasks, in first-seen order. Empty/unclassifiable subtasks are excluded. */
+export async function getPlanRoles(planFile: string): Promise<string[]> {
+  const plan = await loadPlan(planFile)
+  if (!plan) return []
+  const seen = new Set<string>()
+  for (const s of plan.subtasks) {
+    const role = effectiveRoleOf(s)
+    if (role) seen.add(role)
+  }
+  return [...seen]
+}
+
 const ROLE_PREAMBLES: Record<string, string> = {
   frontend: 'You are specialised as a FRONTEND agent. Focus on React components, CSS-in-JS, accessibility, and responsive layout. Prefer small single-responsibility components. Do not change backend API contracts.',
   backend: 'You are specialised as a BACKEND agent. Focus on API design, database schemas, error handling, and performance. Do not touch frontend components unless explicitly required.',
@@ -832,6 +911,11 @@ async function claimStealableSubtask(
   doneCount: number
   totalCount: number
 } | null> {
+  // Swarm — a role-having helper only steals subtasks matching its own role,
+  // so specialization is preserved even while idle-helping a sibling plan; a
+  // roleless helper steals any unclaimed subtask, same as before roles existed.
+  const ownRole = activeSessions.get(ownSessionId)?.role
+
   for (const [otherSessionId, session] of activeSessions) {
     // Skip ourselves, sessions on our own plan, and sessions still mid-setup
     // (worktreePath is only populated once isolation finishes — see startAutonomousSession).
@@ -842,8 +926,10 @@ async function claimStealableSubtask(
     const totalCount = plan.subtasks.length
     for (const subtask of plan.subtasks) {
       if (subtask.done) continue
+      if (ownRole && effectiveRoleOf(subtask) !== ownRole) continue
       const depsUnmet = subtask.depends_on.some((depId) => !plan.subtasks.find((s) => s.id === depId)?.done)
       if (depsUnmet) continue
+      if (!roleGateSatisfied(plan, subtask)) continue
       if (!tryClaimSubtask(session.planFile, subtask.id)) continue
       return { owningSessionId: otherSessionId, planFile: session.planFile, targetPath: session.worktreePath, branch: session.branch, subtask, doneCount, totalCount }
     }
@@ -880,7 +966,7 @@ async function runStolenSubtask(opts: {
       status: 'stealing', doneCount: helperDoneCount, totalCount: helperTotalCount, branch: helperBranch || undefined,
     })
 
-    const effectiveRole = subtask.role || classifySubtaskRole(subtask.description)
+    const effectiveRole = effectiveRoleOf(subtask)
     const rolePreamble = effectiveRole ? (ROLE_PREAMBLES[effectiveRole] ?? '') : ''
     const systemPrompt = rolePreamble
       ? `${AGENT_SYSTEM_PROMPT}\n\n# Agent Role: ${effectiveRole}\n${rolePreamble}`
@@ -939,7 +1025,7 @@ async function runStolenSubtask(opts: {
       broadcast({ sessionId: owningSessionId, planFile: targetPlanFile, subtaskId: subtask.id, subtaskDescription: subtask.description, status: 'browse-executed', browseUrl: browse.url, doneCount, totalCount })
     }
 
-    for (const [, key, value] of response.matchAll(HANDOFF_RE)) setHandoff(key, value.trim())
+    for (const [, key, value] of response.matchAll(HANDOFF_RE)) setHandoff(key, value.trim(), effectiveRole || null)
 
     await withPlanLock(targetPlanFile, () => markDone(targetPlanFile, subtask.id))
     broadcast({
@@ -994,15 +1080,17 @@ export async function startAutonomousSession(opts: {
   model: string
   /** Swarm — set when this session was spawned by another via a <<<SPAWN>>> block. */
   parentSessionId?: string
+  /** Swarm — role this session claims subtasks for. Unset = generalist, claims any subtask (pre-swarm behavior). */
+  role?: string
 }): Promise<string> {
   if (activeSessions.size >= MAX_CONCURRENT_SESSIONS)
     throw new Error(`Max ${MAX_CONCURRENT_SESSIONS} concurrent sessions — stop one first`)
 
   const sessionId = randomUUID()
   const controller = new AbortController()
-  activeSessions.set(sessionId, { sessionId, abort: () => controller.abort(), planFile: opts.planFile, worktreePath: '', branch: '' })
+  activeSessions.set(sessionId, { sessionId, abort: () => controller.abort(), planFile: opts.planFile, worktreePath: '', branch: '', role: opts.role })
 
-  const { planFile, model, parentSessionId } = opts
+  const { planFile, model, parentSessionId, role } = opts
   const projectPath = (store.get('projectPath') as string | undefined) ?? repoRoot()
 
   void (async () => {
@@ -1073,7 +1161,7 @@ export async function startAutonomousSession(opts: {
 
       // Record the resolved worktree/branch so other sessions can find this one
       // when work-stealing — must happen after isolation is set up above.
-      activeSessions.set(sessionId, { sessionId, abort: () => controller.abort(), planFile, worktreePath: activePath, branch: agentBranch })
+      activeSessions.set(sessionId, { sessionId, abort: () => controller.abort(), planFile, worktreePath: activePath, branch: agentBranch, role })
 
       let retryContext: string | null = null
       // Gap 142 — bounded retry budget per subtask. retryCount tracks completed
@@ -1103,7 +1191,19 @@ export async function startAutonomousSession(opts: {
         const doneCount = plan.subtasks.filter((s) => s.done).length
         const totalCount = plan.subtasks.length
 
-        if (pending.length === 0) {
+        // Swarm — a role-having session only ever claims subtasks matching its
+        // own role (further gated by depends_on_role), and finishes once its
+        // *own* role's subtasks are all done — even if sibling roles on the
+        // same plan still have pending work, since that's their session's job,
+        // not this one's. A roleless session keeps today's behavior: it sees
+        // the whole plan and finishes only once every subtask is done.
+        const myRoleSubtasks = role ? plan.subtasks.filter((s) => effectiveRoleOf(s) === role) : plan.subtasks
+        const myRoleFullyDone = myRoleSubtasks.every((s) => s.done)
+        const claimable = role
+          ? pending.filter((s) => effectiveRoleOf(s) === role && roleGateSatisfied(plan, s))
+          : pending.filter((s) => roleGateSatisfied(plan, s))
+
+        if (myRoleFullyDone) {
           // Gap: dynamic rebalancing — before finalizing, see if a sibling
           // session still has unclaimed pending work this idle session can help with.
           const stolen = await claimStealableSubtask(sessionId, planFile)
@@ -1119,23 +1219,26 @@ export async function startAutonomousSession(opts: {
             continue
           }
           if (worktreePath) {
-            await finalizeSession({ sessionId, planFile, plan, projectPath, worktreePath, branch: agentBranch, doneCount })
+            await finalizeSession({ sessionId, planFile, plan, projectPath, worktreePath, branch: agentBranch, doneCount, model })
           } else {
-            await writeVerificationReport({ sessionId, projectPath, plan, branch: agentBranch, doneCount, totalCount, prUrl: null })
+            await writeVerificationReport({ sessionId, planFile, projectPath, plan, branch: agentBranch, doneCount, totalCount, prUrl: null })
             broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: '', status: 'finished', doneCount, totalCount })
           }
           break
         }
 
         // Skip subtasks a work-stealing helper has already claimed elsewhere —
-        // re-claiming our own in-flight subtask across a retry is a no-op.
-        const subtask = pending.find((s) => s.id === currentSubtaskId) ?? pending.find((s) => tryClaimSubtask(planFile, s.id))
+        // re-claiming our own in-flight subtask across a retry is a no-op. If
+        // none of our role's claimable subtasks are available yet (e.g. all
+        // gated on a role that hasn't finished), wait and re-check rather than
+        // finalizing early.
+        const subtask = pending.find((s) => s.id === currentSubtaskId) ?? claimable.find((s) => tryClaimSubtask(planFile, s.id))
         if (!subtask) {
           await new Promise((resolve) => setTimeout(resolve, 1500))
           continue
         }
         currentSubtaskId = subtask.id
-        const effectiveRole = subtask.role || classifySubtaskRole(subtask.description)
+        const effectiveRole = effectiveRoleOf(subtask)
         const isRetry = retryContext !== null
 
         broadcast({
@@ -1363,7 +1466,7 @@ export async function startAutonomousSession(opts: {
 
         // Extract handoff values from the response and store them for cross-agent access
         for (const [, key, value] of response.matchAll(HANDOFF_RE)) {
-          setHandoff(key, value.trim())
+          setHandoff(key, value.trim(), effectiveRole || null)
         }
 
         // Delegate independent sub-goals to brand-new child sessions (fire-and-forget).
@@ -1477,6 +1580,64 @@ export async function runTestFixLoop(opts: { command: string; model: string }): 
   })()
 
   return sessionId
+}
+
+// ── Deploy self-healing ───────────────────────────────────────────────────────
+// Mirrors runTestFixLoop's diagnose-edit-retry shape, but bounded and
+// awaited by the caller (manual deploy IPC handlers, and the autonomous
+// agent's own end-of-session deploy below) rather than fire-and-forget,
+// since both callers need the final {success, deployUrl, error} to return
+// to their own caller — not just a progress stream.
+
+export async function runDeployFixLoop(opts: {
+  sessionId: string
+  targetPath: string
+  deployCmd: string
+  provider: DeployProvider
+  target: 'preview' | 'production'
+  model: string
+  initialError: string
+}): Promise<{ success: boolean; deployUrl?: string; error?: string }> {
+  const { sessionId, targetPath, deployCmd, provider, target, model, initialError } = opts
+  const policy = loadPolicy(targetPath)
+  const MAX_RETRIES = policy.max_retries
+  let lastError = initialError
+
+  for (let retryCount = 0; retryCount < MAX_RETRIES; retryCount++) {
+    broadcast({
+      sessionId, planFile: '', subtaskId: 'deploy-fix',
+      subtaskDescription: `Attempt ${retryCount + 1}/${MAX_RETRIES} — diagnosing deploy failure…`,
+      status: 'retrying', retryCount, maxRetries: MAX_RETRIES, doneCount: retryCount, totalCount: MAX_RETRIES,
+    })
+
+    const response = await streamToString([
+      { role: 'system', content: 'You are an expert software engineer. A deployment command failed. Fix the underlying issue by editing source files only — do not change the deploy command itself. Use <<<EDIT path>>> ... <<<END_EDIT>>> blocks.' },
+      { role: 'user', content: `Deploy command \`${deployCmd}\` failed:\n\`\`\`\n${lastError.slice(0, 2000)}\n\`\`\`\nFix the failure by proposing file edits.` },
+    ], model, new AbortController().signal)
+
+    const edits = parseEdits(response)
+    if (edits.length === 0) break // nothing to apply — retrying the same command would just fail the same way
+
+    for (const edit of edits) {
+      if (detectSecret(edit.content)) continue
+      if (checkPath(policy, edit.path)) continue
+      try { await applyEdit(edit, targetPath) } catch { /* ignore single-file failure, continue with others */ }
+    }
+
+    broadcast({
+      sessionId, planFile: '', subtaskId: 'deploy-fix', subtaskDescription: `Retrying ${deployCmd}…`,
+      status: 'deploying', doneCount: retryCount + 1, totalCount: MAX_RETRIES,
+    })
+
+    const { exitCode, stderr, stdout, deployUrl } = target === 'preview'
+      ? await runPreviewDeploy(targetPath, provider as 'vercel' | 'netlify')
+      : await runDeploy(targetPath, deployCmd)
+
+    if (exitCode === 0) return { success: true, deployUrl }
+    lastError = stderr || stdout || `Deploy command exited with code ${exitCode}`
+  }
+
+  return { success: false, error: `Auto-fix exhausted ${MAX_RETRIES} attempt(s) — last error: ${lastError}` }
 }
 
 // ── Session replay (Gap 51) ───────────────────────────────────────────────────

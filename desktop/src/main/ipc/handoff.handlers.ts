@@ -10,7 +10,7 @@ export function registerHandoffHandlers(): void {
     return getHandoff(key)
   })
 
-  ipcMain.handle('handoff:list', (): Array<{ key: string; preview: string }> => {
+  ipcMain.handle('handoff:list', (): Array<{ key: string; preview: string; writtenByRole: string | null; ts: number }> => {
     return listHandoffs()
   })
 

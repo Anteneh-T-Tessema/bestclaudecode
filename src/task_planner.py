@@ -65,6 +65,12 @@ class Subtask:
     depends_on: list[str] = field(default_factory=list)
     done: bool = False
     role: str = ""
+    # Swarm coordination — roles (not subtask ids) that must have at least one
+    # completed subtask before this one is claimable, e.g. a security-review
+    # subtask declaring depends_on_role=["backend"]. Distinct from depends_on
+    # (specific subtask ids) since a role-assigned agent only knows the roles
+    # it's waiting on, not which ids will end up carrying them.
+    depends_on_role: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         d: dict = {
@@ -75,6 +81,8 @@ class Subtask:
         }
         if self.role:
             d["role"] = self.role
+        if self.depends_on_role:
+            d["depends_on_role"] = self.depends_on_role
         return d
 
     @classmethod
@@ -85,6 +93,7 @@ class Subtask:
             depends_on=d.get("depends_on", []),
             done=d.get("done", False),
             role=d.get("role", ""),
+            depends_on_role=d.get("depends_on_role", []),
         )
 
 

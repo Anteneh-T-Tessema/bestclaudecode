@@ -3,7 +3,7 @@ import * as os from 'os'
 import {
   startAutonomousSession, stopAutonomousSession, getActiveSessions,
   replaySession, resolveApproval, getSessionDiff, exportReportHtml, exportReportPdf,
-  runTestFixLoop,
+  runTestFixLoop, getPlanRoles,
 } from '../agents/autonomousAgent'
 import { mergeBranch } from '../gitOps'
 import { store } from '../store'
@@ -16,7 +16,7 @@ import {
 export function registerAgentHandlers(): void {
   ipcMain.handle(
     'agent:startAutonomous',
-    async (_event, opts: { planFile: string; model: string }): Promise<string | null> => {
+    async (_event, opts: { planFile: string; model: string; role?: string }): Promise<string | null> => {
       try {
         return await startAutonomousSession(opts)
       } catch (err) {
@@ -25,6 +25,17 @@ export function registerAgentHandlers(): void {
       }
     },
   )
+
+  // Swarm coordination — distinct effective roles among a plan's subtasks, so
+  // the renderer can launch one role-scoped session per role instead of a
+  // single generalist session.
+  ipcMain.handle('agent:planRoles', async (_event, planFile: string): Promise<string[]> => {
+    try {
+      return await getPlanRoles(planFile)
+    } catch {
+      return []
+    }
+  })
 
   ipcMain.handle('agent:stopAutonomous', (_event, sessionId: string): boolean => {
     return stopAutonomousSession(sessionId)
