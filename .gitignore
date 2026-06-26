@@ -15,3 +15,5 @@ desktop/e2e-report/
 plans/
 .lakoora-worktrees/
 .lakoora/
+.meshflow-worktrees/
+.meshflow/

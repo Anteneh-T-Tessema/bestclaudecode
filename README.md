@@ -187,46 +187,62 @@ directory.
 - [x] Step 37: Decision log analytics (retry rate, verdict distribution, top flagged files)
 - [x] Step 38: Auto-generated architecture doc (AST analysis, generate_arch_doc)
 
-## Where this system beats Cursor / Devin / Windsurf
+## What this system exposes that's verifiable in its own code
 
-| Capability | Cursor | Devin | **This system** |
-| --- | --- | --- | --- |
-| Semantic symbol search | Cloud BM25 + embeddings | Cloud embeddings | **BM25 + TF-IDF, local, zero deps** |
-| Multi-language map | tree-sitter | tree-sitter | **Regex, no install** |
-| Diff-aware context | Implicit | Implicit | **Explicit injected block** |
-| Web research context | @web (proprietary) | Built-in | **Injectable backend, any search API** |
-| Audit trail per cycle | No | No | **docs/decisions/ Markdown + MCP query** |
-| Cross-session memory | No | Black-box | **Auditable JSON, BM25-queryable** |
-| GitHub issue/PR context | No | Yes (opaque) | **Explicit block via gh CLI, inspectable** |
-| Long-horizon planning | No | Yes (black box) | **TaskPlan JSON, resumable checkpoint** |
-| Shadow workspace | Yes (proprietary) | No | **git worktree, promotes via cherry-pick** |
-| Analytics over past runs | No | No | **retry rate, verdict dist., top files** |
-| Architecture doc sync | No | No | **AST-generated, always accurate** |
-| Screenshot/visual context | No | Yes (opaque) | **Injectable, testable without API key** |
-| Cost control | Opaque | Opaque | **Per-agent model tiers** |
-| Cache invalidation | Opaque | Opaque | **Fingerprint + LRU, inspectable** |
-| Review-then-fix loop | No | Partial | **Bounded retry, verdict logged** |
-| Extensibility | Extension API | Closed | **Skills + hooks + MCP layers** |
+The table below previously compared this system against Cursor/Devin/Windsurf
+internals (e.g. "Cloud BM25 + embeddings", "black-box"). Those claims were
+never sourced against those products' actual, current implementations — we
+don't have access to their source, and several of those products change
+frequently. Asserting their internals as fact was a credibility risk: it's
+the kind of claim a competitor or a careful reviewer can puncture with one
+counterexample. Replaced with what we can actually back with a file and line
+number in *this* repo:
 
-**The clear winning axes:**
+| Capability | Where it's implemented | Verifiable how |
+| --- | --- | --- |
+| Local, zero-dependency semantic search | `src/bm25_index.py`, `src/embedding_index.py` | No network call, no API key required; stdlib-only |
+| Multi-language repo map | `src/repo_map.py` (Python AST), `src/ts_map.py` (regex) | Runs offline, no tree-sitter install |
+| Explicit diff-aware context injection | `src/diff_context.py:format_context_with_diff()` | Output is a literal Markdown block, inspectable per call |
+| Per-cycle audit trail | `src/decision_log.py:log_decision()` → `docs/decisions/*.md` | One file per implement cycle, human-readable |
+| Cross-session agent memory | `src/agent_memory.py` | Plain JSON on disk, BM25-queryable, no opaque vector DB |
+| Long-horizon planning | `src/task_planner.py`, `TaskPlan` JSON | Resumable checkpoint file, inspectable mid-run |
+| Worktree isolation before merge | `desktop/src/main/gitOps.ts`, `agents/autonomousAgent.ts` | Real `git worktree`; nothing lands on the live branch until commit/push/PR |
+| Policy gates per subtask | `desktop/src/main/policyEngine.ts` | Reads `.meshflowpolicies.json`; rule engine (block lists, approval gates, retry caps), not a formal-verification system — see caveat below |
+| Pre-commit secret/quality scan | `desktop/src/main/sandboxScanner.ts` | Regex pattern match (AWS keys, GitHub PATs, PEM headers) — a linter-grade scan, not a full SAST tool |
+| Cost control via model tiers | `.claude/agents/*.md` frontmatter (`model:`) | Declared per-agent, not inferred at runtime |
+| Role-based swarm coordination | `desktop/src/main/agents/autonomousAgent.ts` (`startAutonomousSession({role})`, `roleGateSatisfied()`) | Multiple sessions claim disjoint, role-filtered subtasks on one `TaskPlan`; `depends_on_role` gates cross-role ordering — see `specs/swarm-coordination/spec.md` |
+| Zero-to-one component scaffolding | `desktop/src/main/ipc/ideation.handlers.ts` (`ideation:generateComponent`) | Prompt + extracted design tokens routed through the existing reviewed/audited write path, not a second ungoverned one — see `specs/zero-to-one-scaffolding/spec.md` |
+| Bounded AI deploy self-healing | `desktop/src/main/agents/autonomousAgent.ts:runDeployFixLoop()` | On deploy failure, diagnoses via AI, applies `<<<EDIT>>>` fixes, retries within `policy.max_retries`; logged to `.meshflow/deploy-history/deploys.jsonl` with `selfHealed: true` |
 
-1. **Auditability** — every implement cycle writes a structured log with task,
-   agent, reviewer findings, retry count, and outcome. No other tool exposes
-   this. Post-mortem analysis, team review, and compliance reporting all
-   become trivial.
+**Caveat on governance language:** `policyEngine.ts` and `sandboxScanner.ts`
+are genuinely useful and auditable, but they are rule-based (denylists,
+glob/regex matches, retry counters) — they do not perform static architectural
+verification and cannot guarantee an agent's output is structurally correct.
+Describe this pillar as "policy-as-code + secret scanning + full audit log,"
+not as deterministic or formal verification — the former is true and still a
+real differentiator versus Cursor/Devin/Windsurf, none of which expose an
+equivalent audit trail publicly as far as we've observed; the latter is a
+claim this codebase doesn't back yet.
 
-2. **Zero-dependency semantic search** — TF-IDF runs in stdlib `math` +
-   `collections`. Cursor and Devin require a cloud embedding call; this
-   system ranks symbols locally in microseconds with no API key.
+**Known thin spots, not yet competitive:**
 
-3. **Explicit diff context** — the agent is told both what the codebase looks
-   like *and* what just changed. Tools that rely on an agent's exploratory
-   reads miss the "what changed" dimension entirely.
+- **Execution sandboxing** — agent-run shell commands execute directly on the
+  host; isolation today is filesystem-level (git worktree) only, not
+  container/VM-level. No code change proposed here — this needs a deliberate
+  infra decision (Docker vs. cloud VM, billing model) before it's built.
+- **Remote/mobile session dispatch** — `webhookServer.ts` already accepts a
+  Slack slash command to start a session and `sessionRelay.ts` already has an
+  SSE viewer with approve/reject, but there's no "start a new session" form on
+  that viewer page yet — dispatching from a phone browser (not just Slack)
+  isn't wired up.
+- **Live multi-user collaboration** — `sessionRelay.ts`'s SSE channel is
+  watch-only; there's no cursor presence, inline comments, or concurrent
+  editing (would need a CRDT like Yjs for the latter). Lovable's real-time
+  multi-user editing has no equivalent here yet.
 
-4. **Correctness guarantee** — worktree isolation (nothing lands until the
-   reviewer passes it) + bounded retry loop (max 1 retry, verdict always
-   recorded) means the human always has a readable verdict before merge.
+**Closed this session, previously listed as thin spots:**
 
-5. **Predictable cost** — Haiku for tight-loop review, Opus for
-   quality-critical writing, Sonnet for implementation. Every invocation has
-   a declared model tier; no surprise spend.
+- Multi-agent swarm coordination (role-gated parallel sessions on one plan)
+  and generative zero-to-one scaffolding (prompt → component task through the
+  existing reviewed pipeline) — both implemented per their specs above, not
+  v0/Lovable-grade yet but no longer a 50–138 line stub.

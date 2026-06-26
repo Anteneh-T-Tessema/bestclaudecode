@@ -136,7 +136,14 @@ def test_build_ts_map_combines_multiple_files(tmp_path):
     _write(tmp_path, "b.ts", "export class Beta {}\n")
     result = build_ts_map(tmp_path)
     assert "function alpha()" in result
-    assert "class Beta:" in result
+    # Asserts on "class Beta" without the trailing punctuation rather than a
+    # specific backend's exact format: build_ts_map() tries the optional
+    # Node AST parser first (which renders "class Beta:") and falls back to
+    # the zero-dependency regex parser (which renders "class Beta()") when
+    # the Node script or its `typescript` package isn't available — both are
+    # valid outputs of this function, and this test is about multi-file
+    # combination, not which backend ran.
+    assert "class Beta" in result
 
 
 def test_format_context_include_ts(tmp_path):
