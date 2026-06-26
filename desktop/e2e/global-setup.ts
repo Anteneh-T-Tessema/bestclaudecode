@@ -116,6 +116,22 @@ export default async function globalSetup() {
 
   fs.writeFileSync(PORT_FILE, `${proc.pid}:${CDP_PORT}`, 'utf-8')
 
-  await waitForCDP(CDP_PORT)
+  // Buffered, not streamed live — stays silent on the happy path (no extra
+  // noise in every local run) but prints everything electron-vite/Electron
+  // said if CDP never comes up, since that's otherwise a completely opaque
+  // "not ready after 30000ms" with zero clue why (e.g. a missing shared
+  // library on a fresh CI image, or the build itself failing).
+  const outputLines: string[] = []
+  proc.stdout?.on('data', (chunk: Buffer) => outputLines.push(chunk.toString()))
+  proc.stderr?.on('data', (chunk: Buffer) => outputLines.push(chunk.toString()))
+
+  try {
+    await waitForCDP(CDP_PORT)
+  } catch (err) {
+    console.error('--- electron-vite preview output (CDP never came up) ---')
+    console.error(outputLines.join(''))
+    console.error('--- end electron-vite preview output ---')
+    throw err
+  }
   await new Promise((r) => setTimeout(r, 1500))
 }
