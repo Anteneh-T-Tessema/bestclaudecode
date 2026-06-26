@@ -20,6 +20,8 @@ if (process.env.MESHFLOW_E2E_USER_DATA_DIR) {
 import { createWindow } from './window'
 import { registerAllIPC } from './ipc'
 
+app.setName('Meshflow')
+
 app.whenReady().then(() => {
   app.setAppUserModelId('com.meshflow.desktop')
 
