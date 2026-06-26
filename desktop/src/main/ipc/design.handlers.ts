@@ -41,42 +41,53 @@ function findThemeFiles(root: string): string[] {
   return candidates.slice(0, 6)
 }
 
-export function registerDesignHandlers(): void {
-  ipcMain.handle('design:extract', async (_event, projectPath: string): Promise<DesignTokens | null> => {
-    if (!projectPath) return null
-    try {
-      // Tailwind config
-      let tailwindConfig: string | null = null
-      for (const name of ['tailwind.config.ts', 'tailwind.config.js', 'tailwind.config.mjs']) {
-        const p = path.join(projectPath, name)
+/**
+ * Reads a project's existing Tailwind config / CSS custom properties /
+ * theme files off disk. Exported (not just used inside the IPC handler) so
+ * other main-process callers — e.g. ideation.handlers.ts's component
+ * generator — can reuse the same extraction directly rather than going
+ * through a second IPC round-trip.
+ */
+export async function extractDesignTokens(projectPath: string): Promise<DesignTokens | null> {
+  if (!projectPath) return null
+  try {
+    // Tailwind config
+    let tailwindConfig: string | null = null
+    for (const name of ['tailwind.config.ts', 'tailwind.config.js', 'tailwind.config.mjs']) {
+      const p = path.join(projectPath, name)
+      if (fs.existsSync(p)) {
+        tailwindConfig = fs.readFileSync(p, 'utf-8').slice(0, 3000)
+        break
+      }
+    }
+
+    // CSS custom properties from global stylesheets
+    const cssVars: Record<string, string> = {}
+    for (const name of ['globals.css', 'global.css', 'index.css', 'variables.css', 'styles.css']) {
+      for (const dir of ['src', 'styles', 'app', '.']) {
+        const p = path.join(projectPath, dir, name)
         if (fs.existsSync(p)) {
-          tailwindConfig = fs.readFileSync(p, 'utf-8').slice(0, 3000)
+          Object.assign(cssVars, extractCssVars(fs.readFileSync(p, 'utf-8')))
           break
         }
       }
-
-      // CSS custom properties from global stylesheets
-      const cssVars: Record<string, string> = {}
-      for (const name of ['globals.css', 'global.css', 'index.css', 'variables.css', 'styles.css']) {
-        for (const dir of ['src', 'styles', 'app', '.']) {
-          const p = path.join(projectPath, dir, name)
-          if (fs.existsSync(p)) {
-            Object.assign(cssVars, extractCssVars(fs.readFileSync(p, 'utf-8')))
-            break
-          }
-        }
-      }
-
-      // Theme/token files
-      const themeFilePaths = findThemeFiles(projectPath)
-      const themeFiles = themeFilePaths.map((f) => ({
-        file: path.relative(projectPath, f),
-        excerpt: fs.readFileSync(f, 'utf-8').slice(0, 800),
-      }))
-
-      return { tailwindConfig, cssVars, themeFiles }
-    } catch {
-      return null
     }
-  })
+
+    // Theme/token files
+    const themeFilePaths = findThemeFiles(projectPath)
+    const themeFiles = themeFilePaths.map((f) => ({
+      file: path.relative(projectPath, f),
+      excerpt: fs.readFileSync(f, 'utf-8').slice(0, 800),
+    }))
+
+    return { tailwindConfig, cssVars, themeFiles }
+  } catch {
+    return null
+  }
+}
+
+export function registerDesignHandlers(): void {
+  ipcMain.handle('design:extract', async (_event, projectPath: string): Promise<DesignTokens | null> =>
+    extractDesignTokens(projectPath),
+  )
 }

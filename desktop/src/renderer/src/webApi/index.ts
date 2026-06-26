@@ -162,6 +162,7 @@ export function createWebApi(): API {
       saveSpec: () => Promise.resolve(notPorted('ideation.saveSpec', null)),
       listSpecs: () => Promise.resolve(notPorted('ideation.listSpecs', [])),
       readSpec: () => Promise.resolve(notPorted('ideation.readSpec', null)),
+      generateComponent: () => Promise.resolve(notPorted('ideation.generateComponent', null)),
     },
 
     lsp: {
@@ -393,7 +394,7 @@ export function createWebApi(): API {
     handoff: {
       set: () => Promise.resolve(notPorted('handoff.set', undefined)),
       get: () => Promise.resolve(notPorted('handoff.get', null)),
-      list: () => Promise.resolve(notPorted('handoff.list', [] as Array<{ key: string; preview: string }>)),
+      list: () => Promise.resolve(notPorted('handoff.list', [] as Array<{ key: string; preview: string; writtenByRole: string | null; ts: number }>)),
       clear: () => Promise.resolve(notPorted('handoff.clear', false)),
     },
 
@@ -414,6 +415,7 @@ export function createWebApi(): API {
       promoteShadow: () => Promise.resolve(notPorted('agent.promoteShadow', false)),
       discardShadow: () => Promise.resolve(notPorted('agent.discardShadow', false)),
       startAutonomous: () => Promise.resolve(notPorted('agent.startAutonomous', null)),
+      planRoles: () => Promise.resolve(notPorted('agent.planRoles', [] as string[])),
       stopAutonomous: () => Promise.resolve(notPorted('agent.stopAutonomous', false)),
       runTestFixLoop: () => Promise.resolve(notPorted('agent.runTestFixLoop', null)),
       getActiveSessions: () => Promise.resolve(notPorted('agent.getActiveSessions', [] as string[])),

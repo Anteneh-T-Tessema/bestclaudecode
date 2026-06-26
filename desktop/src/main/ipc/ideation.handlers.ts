@@ -3,6 +3,7 @@ import { promises as fs } from 'fs'
 import * as path from 'path'
 import { store } from '../store'
 import { repoRoot } from '../paths'
+import { extractDesignTokens, type DesignTokens } from './design.handlers'
 
 // Specs are project-scoped (<projectPath>/.meshflow/specs/<slug>.md), distinct
 // from plans which always live under <repoRoot>/plans/ regardless of which
@@ -14,6 +15,31 @@ import { repoRoot } from '../paths'
 function specsDir(): string {
   const projectPath = (store.get('projectPath') as string | undefined) || repoRoot()
   return path.join(projectPath, '.meshflow', 'specs')
+}
+
+/**
+ * Formats a task description for the *existing* coding-agent pipeline —
+ * this is the entire "generation" step. No component code is produced here;
+ * the prompt + extracted design tokens are just assembled into the same
+ * shape of task description a human would type into Task Planner, so the
+ * actual write goes through the existing worktree-isolation + review +
+ * decision-log path rather than a second, ungoverned generation path.
+ */
+export function buildComponentTask(prompt: string, tokens: DesignTokens | null): string {
+  const lines = [`Generate a React component for: ${prompt.trim()}`]
+  if (tokens && (tokens.tailwindConfig || Object.keys(tokens.cssVars).length || tokens.themeFiles.length)) {
+    lines.push('', 'Match this project\'s existing design tokens:')
+    if (tokens.tailwindConfig) lines.push('', 'Tailwind config:', '```', tokens.tailwindConfig, '```')
+    if (Object.keys(tokens.cssVars).length) {
+      lines.push('', 'CSS custom properties:', ...Object.entries(tokens.cssVars).map(([k, v]) => `- ${k}: ${v}`))
+    }
+    for (const theme of tokens.themeFiles) {
+      lines.push('', `Theme file (${theme.file}):`, '```', theme.excerpt, '```')
+    }
+  } else {
+    lines.push('', 'No existing design tokens were found in this project — use sensible defaults.')
+  }
+  return lines.join('\n')
 }
 
 export function registerIdeationHandlers(): void {
@@ -52,5 +78,19 @@ export function registerIdeationHandlers(): void {
     } catch {
       return null
     }
+  })
+
+  // Zero-to-one scaffolding, first slice: builds a task description (prompt +
+  // extracted design tokens) for the *existing* coding-agent pipeline. The
+  // renderer hands the returned string straight to the same agent-invocation
+  // plumbing /implement-equivalent runs already use — no new write path.
+  ipcMain.handle('ideation:generateComponent', async (
+    _event,
+    projectPath: string,
+    prompt: string,
+  ): Promise<{ taskDescription: string } | null> => {
+    if (!prompt.trim()) return null
+    const tokens = await extractDesignTokens(projectPath)
+    return { taskDescription: buildComponentTask(prompt, tokens) }
   })
 }

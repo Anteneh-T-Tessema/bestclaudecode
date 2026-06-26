@@ -258,6 +258,10 @@ const api = {
     listSpecs: (): Promise<Array<{ slug: string; path: string; mtime: number }>> =>
       ipcRenderer.invoke('ideation:listSpecs'),
     readSpec: (slug: string): Promise<string | null> => ipcRenderer.invoke('ideation:readSpec', slug),
+    // Zero-to-one scaffolding, first slice — builds a task description (prompt
+    // + extracted design tokens) for the existing coding-agent pipeline.
+    generateComponent: (projectPath: string, prompt: string): Promise<{ taskDescription: string } | null> =>
+      ipcRenderer.invoke('ideation:generateComponent', projectPath, prompt),
   },
 
   // ── LSP (subprocess bridge → pyright-langserver + typescript-language-server)
@@ -616,7 +620,8 @@ const api = {
   handoff: {
     set: (key: string, value: string): Promise<void> => ipcRenderer.invoke('handoff:set', key, value),
     get: (key: string): Promise<string | null> => ipcRenderer.invoke('handoff:get', key),
-    list: (): Promise<Array<{ key: string; preview: string }>> => ipcRenderer.invoke('handoff:list'),
+    list: (): Promise<Array<{ key: string; preview: string; writtenByRole: string | null; ts: number }>> =>
+      ipcRenderer.invoke('handoff:list'),
     clear: (key: string): Promise<boolean> => ipcRenderer.invoke('handoff:clear', key),
   },
 
@@ -644,8 +649,10 @@ const api = {
       ipcRenderer.invoke('agent:promoteShadow', shadowId),
     discardShadow: (shadowId: string): Promise<boolean> =>
       ipcRenderer.invoke('agent:discardShadow', shadowId),
-    startAutonomous: (opts: { planFile: string; model: string }): Promise<string | null> =>
+    startAutonomous: (opts: { planFile: string; model: string; role?: string }): Promise<string | null> =>
       ipcRenderer.invoke('agent:startAutonomous', opts),
+    // Swarm coordination — distinct effective roles among a plan's subtasks.
+    planRoles: (planFile: string): Promise<string[]> => ipcRenderer.invoke('agent:planRoles', planFile),
     stopAutonomous: (sessionId: string): Promise<boolean> =>
       ipcRenderer.invoke('agent:stopAutonomous', sessionId),
     getActiveSessions: (): Promise<string[]> =>

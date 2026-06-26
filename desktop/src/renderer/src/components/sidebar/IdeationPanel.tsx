@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Lightbulb, Sparkles, Plus, Trash2, ListTodo, RefreshCw } from 'lucide-react'
+import { Lightbulb, Sparkles, Plus, Trash2, ListTodo, RefreshCw, Wand2 } from 'lucide-react'
 import { toast } from '../../store/useToastStore'
 import { useChatStore, MODELS } from '../../store/useChatStore'
 import { useAppStore } from '../../store/useAppStore'
@@ -61,9 +61,45 @@ export function IdeationPanel() {
   const [refineText, setRefineText] = useState('')
   const [refining, setRefining] = useState(false)
   const [iteration, setIteration] = useState(0)
+  const [componentPrompt, setComponentPrompt] = useState('')
+  const [generatingComponent, setGeneratingComponent] = useState(false)
   const activeModel = useChatStore((s) => s.activeModel)
   const setActiveModel = useChatStore((s) => s.setActiveModel)
   const setActiveActivity = useAppStore((s) => s.setActiveActivity)
+
+  // Zero-to-one scaffolding, first slice: builds a task description (prompt +
+  // the project's existing design tokens) and hands it to the same
+  // create-plan -> revise -> startAutonomous plumbing generatePlan() below
+  // already uses — one component-scoped task, not a second write path.
+  const generateComponent = async () => {
+    if (!componentPrompt.trim() || generatingComponent) return
+    setGeneratingComponent(true)
+    try {
+      const projectPath = (window.api.settings.get('projectPath') as unknown as string) ?? ''
+      const result = await window.api.ideation.generateComponent(projectPath, componentPrompt.trim())
+      if (!result) { toast.error('Component generation failed'); return }
+
+      const goal = `Component: ${componentPrompt.trim()}`.slice(0, 80)
+      const created = await window.api.taskPlanner.create(goal)
+      if (!created) { toast.error('Failed to create plan'); return }
+      const planFile = `plans/${created.slug}.json`
+      const revised = await window.api.taskPlanner.revise(planFile, [
+        { id: '01', description: result.taskDescription, depends_on: [], done: false },
+      ])
+      if (!revised) { toast.error('Plan created but failed to apply component task'); return }
+
+      const sessionId = await window.api.agent.startAutonomous({ planFile, model: activeModel ?? 'claude-sonnet-4-6' })
+      if (sessionId) {
+        toast.success(`Component task started — agent session ${sessionId.slice(0, 8)}`)
+        setActiveActivity('swarm')
+      } else {
+        toast.success('Component task created — open Task Planner to start it')
+      }
+      setComponentPrompt('')
+    } finally {
+      setGeneratingComponent(false)
+    }
+  }
 
   const draftSpec = async () => {
     if (!idea.trim() || drafting) return
@@ -156,9 +192,24 @@ export function IdeationPanel() {
       ].join('\n')
       await window.api.ideation.saveSpec(created.slug, specMarkdown)
 
-      const sessionId = await window.api.agent.startAutonomous({ planFile, model: activeModel ?? 'claude-sonnet-4-6' })
-      if (sessionId) {
-        toast.success(`Plan created — agent session ${sessionId.slice(0, 8)} started`)
+      // Swarm coordination — AI-drafted subtasks (unlike skeleton-plan
+      // placeholders) usually classify into distinct roles (frontend/backend/
+      // test/...) from their description alone. When more than one role is
+      // present, launch one role-scoped session per role against the same
+      // plan instead of a single generalist session, so e.g. frontend and
+      // backend work actually proceed in parallel under their own agents.
+      const model = activeModel ?? 'claude-sonnet-4-6'
+      const roles = await window.api.agent.planRoles(planFile)
+      const sessionIds = roles.length > 1
+        ? (await Promise.all(roles.map((role) => window.api.agent.startAutonomous({ planFile, model, role })))).filter((id): id is string => !!id)
+        : [await window.api.agent.startAutonomous({ planFile, model })].filter((id): id is string => !!id)
+
+      if (sessionIds.length > 0) {
+        toast.success(
+          roles.length > 1
+            ? `Plan created — ${sessionIds.length} role-scoped agents started (${roles.join(', ')})`
+            : `Plan created — agent session ${sessionIds[0].slice(0, 8)} started`,
+        )
         setActiveActivity('swarm')
       } else {
         toast.success('Plan created from spec — open Task Planner to start it')
@@ -196,6 +247,31 @@ export function IdeationPanel() {
             ))}
           </select>
         </div>
+        <div style={{ borderBottom: `1px solid ${border[1]}`, paddingBottom: 12 }}>
+          <label style={labelStyle()}>Generate component</label>
+          <textarea
+            value={componentPrompt}
+            onChange={(e) => setComponentPrompt(e.target.value)}
+            rows={2}
+            placeholder="e.g. A pricing card with three tiers"
+            style={fieldStyle()}
+          />
+          <button
+            type="button"
+            onClick={() => void generateComponent()}
+            disabled={!componentPrompt.trim() || generatingComponent}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 5, marginTop: 6,
+              fontSize: 10.5, fontWeight: 700, padding: '5px 10px', borderRadius: 4,
+              border: `1px solid ${accent.cyan.border}`, background: accent.cyan.subtle, color: accent.cyan.fg,
+              cursor: !componentPrompt.trim() || generatingComponent ? 'not-allowed' : 'pointer',
+              opacity: !componentPrompt.trim() || generatingComponent ? 0.5 : 1,
+            }}
+          >
+            <Wand2 size={11} /> {generatingComponent ? 'Generating…' : 'Generate Component'}
+          </button>
+        </div>
+
         <div>
           <label style={labelStyle()}>Rough idea</label>
           <textarea
