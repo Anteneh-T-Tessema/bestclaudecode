@@ -67,6 +67,24 @@ test.describe('Ideation panel — non-AI behavior', () => {
       await closeApp(app)
     }
   })
+
+  // Zero-to-one scaffolding — the "Generate component" box is a separate
+  // control from Draft Spec/Generate Plan above, with its own prompt field
+  // and disabled-until-typed button.
+  test('Generate Component box renders and is disabled until a prompt is typed', async () => {
+    const { app, window } = await launchApp()
+    try {
+      await window.locator('[data-testid="activity-ideation"]').click()
+      const generateButton = window.locator('button:has-text("Generate Component")')
+      await expect(generateButton).toBeVisible({ timeout: 5_000 })
+      await expect(generateButton).toBeDisabled()
+
+      await window.getByPlaceholder(/pricing card with three tiers/i).fill('A footer with social links')
+      await expect(generateButton).toBeEnabled()
+    } finally {
+      await closeApp(app)
+    }
+  })
 })
 
 test.describe('Monitor panel — real end-to-end pty pipeline (no AI involved)', () => {
