@@ -22,7 +22,14 @@ function killStaleProcessOnPort(port: number): void {
   }
 }
 
-async function waitForCDP(port: number, timeout = 30_000): Promise<void> {
+// 90s, not 30s — the wait window starts the instant electron-vite preview is
+// spawned, and the full main/preload/renderer rebuild it does on every
+// invocation happens *inside* that window before Electron even starts.
+// Locally that build takes ~9s, leaving headroom; on CI's slower/shared
+// CPUs it took ~25s, leaving only ~5s for Electron's own (also slower,
+// first-cold-start, no warm caches) startup — comfortably exceeding 30s
+// total even though Electron itself wasn't actually broken.
+async function waitForCDP(port: number, timeout = 90_000): Promise<void> {
   const deadline = Date.now() + timeout
   while (Date.now() < deadline) {
     try {
