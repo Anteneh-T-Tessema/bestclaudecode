@@ -196,6 +196,7 @@ export function SettingsPanel() {
   const storeCustomModelName = useSettingsStore((s) => s.customModelName)
   const storeCustomModelProvider = useSettingsStore((s) => s.customModelProvider)
   const useSandboxExec = useSettingsStore((s) => s.useSandboxExec)
+  const dockerSandboxImage = useSettingsStore((s) => s.dockerSandboxImage)
   const storeUseLocalEmbeddings = useSettingsStore((s) => s.useLocalEmbeddings)
   const storeLocalEmbeddingModel = useSettingsStore((s) => s.localEmbeddingModel)
 
@@ -863,11 +864,12 @@ export function SettingsPanel() {
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <label style={{ fontSize: 10, color: fg[1], fontWeight: 600 }}>Local Command Sandbox (Darwin OS Isolation)</label>
+              <label style={{ fontSize: 10, color: fg[1], fontWeight: 600 }}>Command Sandbox</label>
               <select
+                data-testid="sandbox-mode-select"
                 value={useSandboxExec}
                 onChange={async (e) => {
-                  await saveSettings({ useSandboxExec: e.target.value as 'never' | 'no-network' | 'restrict-write' })
+                  await saveSettings({ useSandboxExec: e.target.value as 'never' | 'no-network' | 'restrict-write' | 'docker' })
                   toast.success('Sandbox execution mode updated')
                 }}
                 style={{
@@ -876,13 +878,34 @@ export function SettingsPanel() {
                 }}
               >
                 <option value="never">Disabled (Run natively on host)</option>
-                <option value="restrict-write">Restrict Writes (Block writes outside project)</option>
-                <option value="no-network">Isolated Sandbox (No Network & Restrict Writes)</option>
+                <option value="restrict-write">Restrict Writes — macOS only (Block writes outside project)</option>
+                <option value="no-network">Isolated Sandbox — macOS only (No Network & Restrict Writes)</option>
+                <option value="docker">Docker Container (Recommended) — full filesystem/process isolation</option>
               </select>
               <span style={{ fontSize: 9, color: fg[3], lineHeight: 1.3 }}>
-                Enforces native kernel-level sandboxing (via macOS sandbox-exec) for agent-run terminal commands.
+                {useSandboxExec === 'docker'
+                  ? 'Runs each agent command in a disposable container that can only see the project directory — no access to your home folder, SSH keys, or other repos. Requires Docker to be installed and running; commands fail clearly (not silently unsandboxed) if it isn’t.'
+                  : 'Restrict Writes / Isolated Sandbox use macOS’s native sandbox-exec (ambient permission restriction on this same host process) and are unavailable on other platforms. Docker is the cross-platform, stronger-isolation option.'}
               </span>
             </div>
+
+            {useSandboxExec === 'docker' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <label style={{ fontSize: 10, color: fg[1], fontWeight: 600 }}>Docker Sandbox Image</label>
+                <input
+                  value={dockerSandboxImage}
+                  onChange={(e) => void saveSettings({ dockerSandboxImage: e.target.value })}
+                  placeholder="node:22-bookworm"
+                  style={{
+                    width: '100%', boxSizing: 'border-box', background: surface.raised, border: `1px solid ${border[0]}`,
+                    borderRadius: 4, padding: '5px 8px', fontSize: 11, color: fg[0], outline: 'none', fontFamily: 'monospace',
+                  }}
+                />
+                <span style={{ fontSize: 9, color: fg[3], lineHeight: 1.3 }}>
+                  Pulled automatically on first use. Pick an image with the tools your agent's commands need (npm/pytest/git, etc.) — commands that need a tool missing from the image will fail with a normal non-zero exit, same as a missing tool on the host.
+                </span>
+              </div>
+            )}
           </div>
         </div>
 

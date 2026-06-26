@@ -24,8 +24,20 @@ export function runCommand(bin: string, args: string[], cwd?: string): Promise<C
     let finalBin = bin
     let finalArgs = args
     let tempProfilePath: string | null = null
+    const usingDocker = useSandboxExec === 'docker'
 
-    if (process.platform === 'darwin' && useSandboxExec && useSandboxExec !== 'never') {
+    if (usingDocker) {
+      // Cross-platform, process+filesystem-level isolation — the workspace
+      // dir is the *only* host path the container can see, and the container
+      // is removed on exit. This is the meaningful tier above sandbox-exec
+      // (macOS-only, ambient-permission restriction on the same host
+      // process): the command runs in a different filesystem/process
+      // namespace entirely, not just a more restricted view of this one.
+      const workspace = cwd ?? repoRoot()
+      const image = (store.get('dockerSandboxImage') as string) || 'node:22-bookworm'
+      finalBin = 'docker'
+      finalArgs = ['run', '--rm', '-v', `${workspace}:${workspace}`, '-w', workspace, image, bin, ...args]
+    } else if (process.platform === 'darwin' && useSandboxExec && useSandboxExec !== 'never') {
       const workspace = cwd ?? repoRoot()
       if (useSandboxExec === 'no-network') {
         finalArgs = ['-n', 'no-network', bin, ...args]
@@ -69,11 +81,18 @@ export function runCommand(bin: string, args: string[], cwd?: string): Promise<C
       resolve({ stdout, stderr, exitCode: code ?? -1 })
     })
     
-    child.on('error', (err) => {
+    child.on('error', (err: NodeJS.ErrnoException) => {
       if (tempProfilePath) {
         fs.unlink(tempProfilePath, () => {})
       }
-      resolve({ stdout, stderr: err.message, exitCode: -1 })
+      // Docker sandbox requested but unavailable — fail the command outright
+      // rather than silently re-running it unsandboxed. A missing/unreachable
+      // Docker is a configuration problem the user needs to see and fix, not
+      // a reason to quietly drop the isolation guarantee.
+      const message = usingDocker && err.code === 'ENOENT'
+        ? 'Docker sandbox is enabled (Settings → Sandboxing) but the `docker` command was not found. Install Docker or switch the sandbox mode.'
+        : err.message
+      resolve({ stdout, stderr: message, exitCode: -1 })
     })
   })
 }

@@ -32,6 +32,15 @@ const MUTABLE_KEYS = new Set([
   'useLocalEmbeddings', 'localEmbeddingModel',
   // Ollama chat model selection and custom model name
   'ollamaModel', 'customModelName', 'customModelProvider',
+  // Command sandboxing mode + Docker image — was missing entirely, so the
+  // Settings dropdown's "success" toast was lying: settings:set threw on an
+  // unlisted key and useSettingsStore.save() silently swallows that error,
+  // so the choice never actually reached disk via the UI.
+  'useSandboxExec', 'dockerSandboxImage',
+  // Same bug, same fix — these 4 governance/approval-gate toggles are read
+  // throughout autonomousAgent.ts and deploy.handlers.ts but had no IPC
+  // handler at all to ever persist a change made via Settings.
+  'hitlSandboxPromote', 'hitlCommandRun', 'hitlFileEdit', 'hitlDeployment',
 ])
 
 interface EngineHealth {

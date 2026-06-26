@@ -30,7 +30,8 @@ interface StoreSchema {
   hitlDeployment: 'always' | 'confirm'
   customModelName: string
   customModelProvider: 'anthropic' | 'openai' | 'google' | 'ollama'
-  useSandboxExec: 'never' | 'no-network' | 'restrict-write'
+  useSandboxExec: 'never' | 'no-network' | 'restrict-write' | 'docker'
+  dockerSandboxImage: string
   useLocalEmbeddings: boolean
   localEmbeddingModel: string
   [key: string]: unknown
@@ -65,6 +66,7 @@ const DEFAULTS: StoreSchema = {
   customModelName: '',
   customModelProvider: 'anthropic',
   useSandboxExec: 'never',
+  dockerSandboxImage: 'node:22-bookworm',
   useLocalEmbeddings: false,
   localEmbeddingModel: 'nomic-embed-text',
 }

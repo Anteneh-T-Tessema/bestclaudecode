@@ -31,7 +31,8 @@ interface SettingsStore {
   hitlDeployment: 'always' | 'confirm'
   customModelName: string
   customModelProvider: 'anthropic' | 'openai' | 'google' | 'ollama'
-  useSandboxExec: 'never' | 'no-network' | 'restrict-write'
+  useSandboxExec: 'never' | 'no-network' | 'restrict-write' | 'docker'
+  dockerSandboxImage: string
   useLocalEmbeddings: boolean
   localEmbeddingModel: string
   loaded: boolean
@@ -72,7 +73,8 @@ const DEFAULTS = {
   hitlDeployment: 'confirm' as 'always' | 'confirm',
   customModelName: '',
   customModelProvider: 'anthropic' as 'anthropic' | 'openai' | 'google' | 'ollama',
-  useSandboxExec: 'never' as 'never' | 'no-network' | 'restrict-write',
+  useSandboxExec: 'never' as 'never' | 'no-network' | 'restrict-write' | 'docker',
+  dockerSandboxImage: 'node:22-bookworm',
   useLocalEmbeddings: false,
   localEmbeddingModel: 'nomic-embed-text',
 }
