@@ -45,6 +45,7 @@ from src.vector_index import (
     persistent_search,
     related_decisions,
 )
+from src.vector_store import is_available as _vector_store_available
 
 _DEFAULT_MAX_SNIPPETS = 5
 _SNIPPET_CONTEXT_LINES = 4
@@ -91,10 +92,14 @@ def _search_hits(repo_map: str, query: str, root: Path, max_snippets: int) -> li
     persistent_search()'s doc_count is the cheap, pragmatic signal for "does a
     persistent index exist": 0 means there's nothing built yet (or it's empty),
     so callers fall back to hybrid_search() rather than getting zero results.
+    Skips straight to hybrid_search() when qdrant-client isn't installed at
+    all, since persistent_search() raises ModuleNotFoundError before it ever
+    gets a chance to report doc_count.
     """
-    doc_count, hits = persistent_search(query, top_k=max_snippets, local_path=_local_index_path(root))
-    if doc_count > 0:
-        return hits
+    if _vector_store_available():
+        doc_count, hits = persistent_search(query, top_k=max_snippets, local_path=_local_index_path(root))
+        if doc_count > 0:
+            return hits
     return hybrid_search(repo_map, query, top_k=max_snippets)
 
 
