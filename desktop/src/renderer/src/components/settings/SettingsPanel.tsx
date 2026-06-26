@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { Settings, Circle, Eye, EyeOff, Check, FolderOpen, Save } from 'lucide-react'
 import { PanelHeader, Button, accent, border, fg, surface } from '../../design'
 import { useSettingsStore } from '../../store/useSettingsStore'
+import { useChatStore } from '../../store/useChatStore'
 import { toast } from '../../store/useToastStore'
 import { ModelSelector } from '../chat/ModelSelector'
 import { McpServersSection } from './McpServersSection'
@@ -173,7 +174,7 @@ function StatusRow({ label, ok, detail }: { label: string; ok: boolean; detail?:
 }
 
 // Gap 88 — these three are encrypted via safeStorage (settings:setSecret), not the plain settings:set channel.
-const SECRET_FIELDS = new Set(['anthropicApiKey', 'openaiApiKey', 'googleApiKey', 'linearApiKey', 'jiraApiToken', 'slackWebhookUrl', 'webhookSecret'])
+const SECRET_FIELDS = new Set(['anthropicApiKey', 'openaiApiKey', 'googleApiKey', 'groqApiKey', 'openrouterApiKey', 'linearApiKey', 'jiraApiToken', 'slackWebhookUrl', 'webhookSecret'])
 
 export function SettingsPanel() {
   const [engine, setEngine] = useState<EngineHealth | null>(null)
@@ -187,10 +188,31 @@ export function SettingsPanel() {
   const storeGlobalRules = useSettingsStore((s) => s.globalRules)
   const saveSettings = useSettingsStore((s) => s.save)
 
+  const activeModel = useChatStore((s) => s.activeModel)
+  const hitlSandboxPromote = useSettingsStore((s) => s.hitlSandboxPromote)
+  const hitlCommandRun = useSettingsStore((s) => s.hitlCommandRun)
+  const hitlFileEdit = useSettingsStore((s) => s.hitlFileEdit)
+  const hitlDeployment = useSettingsStore((s) => s.hitlDeployment)
+  const storeCustomModelName = useSettingsStore((s) => s.customModelName)
+  const storeCustomModelProvider = useSettingsStore((s) => s.customModelProvider)
+  const useSandboxExec = useSettingsStore((s) => s.useSandboxExec)
+  const storeUseLocalEmbeddings = useSettingsStore((s) => s.useLocalEmbeddings)
+  const storeLocalEmbeddingModel = useSettingsStore((s) => s.localEmbeddingModel)
+
+  const [customModelName, setCustomModelName] = useState('')
+  const [customModelProvider, setCustomModelProvider] = useState<'anthropic' | 'openai' | 'google' | 'ollama'>('anthropic')
+
+  const [useLocalEmbeddings, setUseLocalEmbeddings] = useState(false)
+  const [localEmbeddingModel, setLocalEmbeddingModel] = useState('nomic-embed-text')
+
   const [anthropicKey, setAnthropicKey] = useState('')
   const [openaiKey, setOpenaiKey] = useState('')
   const [googleKey, setGoogleKey] = useState('')
+  const [groqKey, setGroqKey] = useState('')
+  const [openrouterKey, setOpenrouterKey] = useState('')
   const [ollamaUrl, setOllamaUrl] = useState('')
+  const [ollamaModel, setOllamaModel] = useState('llama3.2')
+  const [ollamaModels, setOllamaModels] = useState<string[]>([])
   const [linearApiKey, setLinearApiKey] = useState('')
   const [jiraApiToken, setJiraApiToken] = useState('')
   const [jiraEmail, setJiraEmail] = useState('')
@@ -202,7 +224,7 @@ export function SettingsPanel() {
   const [webhookBusy, setWebhookBusy] = useState(false)
   const [savedField, setSavedField] = useState<string | null>(null)
 
-  // .lakoorarules editor
+  // .meshflowrules editor
   const [rules, setRules] = useState('')
   const [rulesSaving, setRulesSaving] = useState(false)
   const [rulesSaved, setRulesSaved] = useState(false)
@@ -221,33 +243,44 @@ export function SettingsPanel() {
       window.api.settings.getSecret('anthropicApiKey'),
       window.api.settings.getSecret('openaiApiKey'),
       window.api.settings.getSecret('googleApiKey'),
+      window.api.settings.getSecret('groqApiKey'),
+      window.api.settings.getSecret('openrouterApiKey'),
       window.api.settings.getSecret('linearApiKey'),
       window.api.settings.getSecret('jiraApiToken'),
       window.api.settings.getSecret('slackWebhookUrl'),
       window.api.settings.getSecret('webhookSecret'),
-    ]).then(([a, o, g, lin, jir, slack, webhookSec]) => {
+    ]).then(([a, o, g, groq, or_, lin, jir, slack, webhookSec]) => {
       setAnthropicKey(a)
       setOpenaiKey(o)
       setGoogleKey(g)
+      setGroqKey(groq)
+      setOpenrouterKey(or_)
       setLinearApiKey(lin)
       setJiraApiToken(jir)
       setSlackWebhookUrl(slack)
       setWebhookSecret(webhookSec)
     })
     window.api.settings.get('webhookPort').then((v) => { if (v) setWebhookPort(String(v)) }).catch(() => {})
+    window.api.settings.get('ollamaModel').then((v) => { if (v) setOllamaModel(v as string) }).catch(() => {})
     window.api.webhook.status().then(setWebhookStatus).catch(() => {})
+    // Pre-populate Ollama model list if Ollama is running locally
+    window.api.ai.listOllamaModels().then((models) => { if (models.length) setOllamaModels(models) }).catch(() => {})
   }, [])
 
   useEffect(() => {
     if (!settingsLoaded) return
     setOllamaUrl(storeOllamaUrl)
+    setUseLocalEmbeddings(storeUseLocalEmbeddings)
+    setLocalEmbeddingModel(storeLocalEmbeddingModel)
     if (!globalRulesLoaded.current) {
       setGlobalRulesDraft(storeGlobalRules)
       globalRulesLoaded.current = true
     }
+    setCustomModelName(storeCustomModelName)
+    setCustomModelProvider(storeCustomModelProvider)
     window.api.settings.get('jiraEmail').then((v) => { if (v) setJiraEmail(v as string) }).catch(() => {})
     window.api.settings.get('jiraBaseUrl').then((v) => { if (v) setJiraBaseUrl(v as string) }).catch(() => {})
-  }, [settingsLoaded, storeOllamaUrl, storeGlobalRules])
+  }, [settingsLoaded, storeOllamaUrl, storeGlobalRules, storeCustomModelName, storeCustomModelProvider, storeUseLocalEmbeddings, storeLocalEmbeddingModel])
 
   const saveGlobalRules = async () => {
     setGlobalRulesSaving(true)
@@ -265,7 +298,7 @@ export function SettingsPanel() {
   useEffect(() => {
     if (!projectPath || rulesLoadedFor.current === projectPath) return
     rulesLoadedFor.current = projectPath
-    window.api.fs.readFile(`${projectPath}/.lakoorarules`)
+    window.api.fs.readFile(`${projectPath}/.meshflowrules`)
       .then((content) => setRules(content ?? ''))
       .catch(() => setRules(''))
   }, [projectPath])
@@ -274,11 +307,11 @@ export function SettingsPanel() {
     if (!projectPath) return
     setRulesSaving(true)
     try {
-      await window.api.fs.writeFile(`${projectPath}/.lakoorarules`, rules)
+      await window.api.fs.writeFile(`${projectPath}/.meshflowrules`, rules)
       setRulesSaved(true)
       setTimeout(() => setRulesSaved(false), 1500)
     } catch {
-      toast.error('Failed to save .lakoorarules')
+      toast.error('Failed to save .meshflowrules')
     } finally {
       setRulesSaving(false)
     }
@@ -290,7 +323,7 @@ export function SettingsPanel() {
   }
 
   const saveKey = useCallback(
-    async (field: 'anthropicApiKey' | 'openaiApiKey' | 'googleApiKey' | 'ollamaUrl' | 'linearApiKey' | 'jiraApiToken' | 'jiraEmail' | 'jiraBaseUrl' | 'slackWebhookUrl' | 'webhookSecret' | 'webhookPort', value: string) => {
+    async (field: 'anthropicApiKey' | 'openaiApiKey' | 'googleApiKey' | 'groqApiKey' | 'openrouterApiKey' | 'ollamaUrl' | 'ollamaModel' | 'linearApiKey' | 'jiraApiToken' | 'jiraEmail' | 'jiraBaseUrl' | 'slackWebhookUrl' | 'webhookSecret' | 'webhookPort' | 'customModelName' | 'customModelProvider' | 'localEmbeddingModel', value: string) => {
       if (SECRET_FIELDS.has(field)) {
         const result = await window.api.settings.setSecret(field, value)
         if (!result.success) { toast.error('Failed to save key'); return }
@@ -405,6 +438,24 @@ export function SettingsPanel() {
               saved={savedField === 'googleApiKey'}
             />
             <ApiKeyField
+              label="Groq API Key"
+              value={groqKey}
+              onChange={setGroqKey}
+              onSave={() => saveKey('groqApiKey', groqKey)}
+              onValidate={() => window.api.settings.validateKey('groq', groqKey)}
+              placeholder="gsk_…"
+              saved={savedField === 'groqApiKey'}
+            />
+            <ApiKeyField
+              label="OpenRouter API Key"
+              value={openrouterKey}
+              onChange={setOpenrouterKey}
+              onSave={() => saveKey('openrouterApiKey', openrouterKey)}
+              onValidate={() => window.api.settings.validateKey('openrouter', openrouterKey)}
+              placeholder="sk-or-…"
+              saved={savedField === 'openrouterApiKey'}
+            />
+            <ApiKeyField
               label="Ollama URL"
               value={ollamaUrl}
               onChange={setOllamaUrl}
@@ -413,6 +464,51 @@ export function SettingsPanel() {
               saved={savedField === 'ollamaUrl'}
               secret={false}
             />
+            {/* Ollama model selector — populated by listing /api/tags */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={{ fontSize: 10, color: fg[2], fontWeight: 600 }}>Ollama Model</span>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {ollamaModels.length > 0 ? (
+                  <select
+                    value={ollamaModel}
+                    onChange={(e) => { setOllamaModel(e.target.value); void saveKey('ollamaModel', e.target.value) }}
+                    style={{
+                      flex: 1, background: surface.raised, border: `1px solid ${border[0]}`,
+                      borderRadius: 4, padding: '4px 7px', fontSize: 11, color: fg[1],
+                      outline: 'none', cursor: 'pointer',
+                    }}
+                  >
+                    {ollamaModels.map((m) => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                ) : (
+                  <input
+                    value={ollamaModel}
+                    onChange={(e) => setOllamaModel(e.target.value)}
+                    onBlur={() => void saveKey('ollamaModel', ollamaModel)}
+                    placeholder="llama3.2"
+                    style={{
+                      flex: 1, background: surface.raised, border: `1px solid ${border[0]}`,
+                      borderRadius: 4, padding: '4px 7px', fontSize: 11, color: fg[1],
+                      outline: 'none', fontFamily: 'monospace',
+                    }}
+                  />
+                )}
+                <button
+                  type="button"
+                  onClick={() => window.api.ai.listOllamaModels().then((ms) => { if (ms.length) setOllamaModels(ms) }).catch(() => {})}
+                  style={{
+                    fontSize: 10, padding: '4px 8px', borderRadius: 4,
+                    background: surface.raised, border: `1px solid ${border[0]}`,
+                    color: fg[2], cursor: 'pointer',
+                  }}
+                >
+                  Refresh
+                </button>
+              </div>
+              <span style={{ fontSize: 9, color: fg[4] }}>
+                {ollamaModels.length > 0 ? `${ollamaModels.length} models found` : 'Start Ollama to auto-detect models, or type a name manually'}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -493,7 +589,7 @@ export function SettingsPanel() {
           </div>
           <p style={{ fontSize: 10, color: fg[3], margin: '0 0 10px', lineHeight: 1.5 }}>
             Accept inbound Slack slash commands (POST /webhook/slack) and GitHub PR-opened
-            events (POST /webhook/github) to trigger Lakoora agents. GET /health for status.
+            events (POST /webhook/github) to trigger Meshflow agents. GET /health for status.
           </p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <ApiKeyField
@@ -506,7 +602,7 @@ export function SettingsPanel() {
               secret={false}
             />
             <ApiKeyField
-              label="Shared Secret (optional, sent as X-Lakoora-Secret)"
+              label="Shared Secret (optional, sent as X-Meshflow-Secret)"
               value={webhookSecret}
               onChange={setWebhookSecret}
               onSave={() => saveKey('webhookSecret', webhookSecret)}
@@ -530,12 +626,264 @@ export function SettingsPanel() {
             fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
             color: fg[3], marginBottom: 8, paddingBottom: 6, borderBottom: `1px solid ${border[1]}`,
           }}>
+            APM Webhooks
+          </div>
+          <p style={{ fontSize: 10, color: fg[3], margin: '0 0 10px', lineHeight: 1.5 }}>
+            Configure Sentry/Datadog to POST alerts to these URLs. Matching errors auto-trigger the self-healing agent.
+            Requires the webhook server to be running (see Webhooks section above).
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {[
+              { label: 'Sentry Webhook URL', path: '/webhook/sentry' },
+              { label: 'Datadog Webhook URL', path: '/webhook/datadog' },
+            ].map(({ label, path }) => (
+              <div key={path} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <label style={{ fontSize: 10, color: fg[2], fontWeight: 600 }}>{label}</label>
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  background: surface.raised, border: `1px solid ${border[0]}`,
+                  borderRadius: 4, padding: '5px 8px',
+                }}>
+                  <span style={{ fontSize: 10, color: fg[1], fontFamily: 'monospace', flex: 1, userSelect: 'all' }}>
+                    {webhookStatus?.running
+                      ? `http://localhost:${webhookStatus.port}${path}`
+                      : `http://localhost:7391${path} (server stopped)`}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const port = webhookStatus?.port ?? 7391
+                      navigator.clipboard.writeText(`http://localhost:${port}${path}`)
+                    }}
+                    style={{
+                      background: 'transparent', border: 'none', cursor: 'pointer',
+                      color: fg[4], fontSize: 10, padding: '1px 4px',
+                    }}
+                    title="Copy URL"
+                  >
+                    Copy
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <div style={{
+            fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+            color: fg[3], marginBottom: 8, paddingBottom: 6, borderBottom: `1px solid ${border[1]}`,
+          }}>
             Active Model
           </div>
           <p style={{ fontSize: 10, color: fg[3], margin: '0 0 10px', lineHeight: 1.5 }}>
             The model used for AI Chat, inline edit (Cmd+K), and ghost-text completion. Persisted across restarts.
           </p>
-          <ModelSelector />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <ModelSelector />
+            {activeModel === 'custom' && (
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+                marginTop: 4,
+                padding: 10,
+                borderRadius: 6,
+                background: surface.surface,
+                border: `1px solid ${border[0]}`
+              }}>
+                <div style={{ fontSize: 10, fontWeight: 600, color: fg[1] }}>Custom Model Configuration</div>
+                
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label style={{ fontSize: 9, color: fg[2], fontWeight: 600 }}>Custom Model ID / Name</label>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <input
+                      type="text"
+                      value={customModelName}
+                      onChange={(e) => setCustomModelName(e.target.value)}
+                      placeholder="e.g. gemini-2.5-pro, deepseek-coder"
+                      style={{
+                        flex: 1,
+                        background: surface.raised,
+                        border: `1px solid ${border[0]}`,
+                        borderRadius: 4,
+                        padding: '5px 8px',
+                        fontSize: 11,
+                        color: fg[0],
+                        outline: 'none'
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => saveKey('customModelName', customModelName)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '0 12px',
+                        fontSize: 10,
+                        fontWeight: 600,
+                        borderRadius: 4,
+                        border: `1px solid ${savedField === 'customModelName' ? accent.green.border : border[0]}`,
+                        background: savedField === 'customModelName' ? accent.green.subtle : surface.raised,
+                        color: savedField === 'customModelName' ? accent.green.fg : fg[2],
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {savedField === 'customModelName' ? 'Saved' : 'Save'}
+                    </button>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label style={{ fontSize: 9, color: fg[2], fontWeight: 600 }}>Custom Model Provider</label>
+                  <select
+                    value={customModelProvider}
+                    onChange={(e) => {
+                      const prov = e.target.value as 'anthropic' | 'openai' | 'google' | 'ollama'
+                      setCustomModelProvider(prov)
+                      void saveKey('customModelProvider', prov)
+                    }}
+                    style={{
+                      width: '100%',
+                      background: surface.raised,
+                      border: `1px solid ${border[0]}`,
+                      borderRadius: 4,
+                      padding: '5px 8px',
+                      fontSize: 11,
+                      color: fg[0],
+                      outline: 'none'
+                    }}
+                  >
+                    <option value="anthropic">Anthropic</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="google">Google Gemini</option>
+                    <option value="ollama">Ollama (Local)</option>
+                  </select>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div>
+          <div style={{
+            fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+            color: fg[3], marginBottom: 8, paddingBottom: 6, borderBottom: `1px solid ${border[1]}`,
+          }}>
+            Governance & HITL Safety Controls
+          </div>
+          <p style={{ fontSize: 10, color: fg[3], margin: '0 0 10px', lineHeight: 1.5 }}>
+            Configure constraints and approval gates for the autonomous agent's actions across SDLC phases.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 10, color: fg[1], fontWeight: 600 }}>Worktree Changes (File Mutations)</label>
+              <select
+                value={hitlFileEdit}
+                onChange={async (e) => {
+                  await saveSettings({ hitlFileEdit: e.target.value as 'sandbox' | 'always' })
+                  toast.success('Worktree isolation setting updated')
+                }}
+                style={{
+                  width: '100%', background: surface.raised, border: `1px solid ${border[0]}`,
+                  borderRadius: 4, padding: '5px 8px', fontSize: 11, color: fg[0], outline: 'none'
+                }}
+              >
+                <option value="sandbox">Isolate in Sandboxed Worktree (Recommended)</option>
+                <option value="always">Apply directly to Codebase</option>
+              </select>
+              <span style={{ fontSize: 9, color: fg[3], lineHeight: 1.3 }}>
+                Isolates file changes in a separate worktree branch for safe execution and review, or mutates the workspace files immediately.
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 10, color: fg[1], fontWeight: 600 }}>Automation Level (Sandbox Promotion)</label>
+              <select
+                value={hitlSandboxPromote}
+                onChange={async (e) => {
+                  await saveSettings({ hitlSandboxPromote: e.target.value as 'review' | 'always' })
+                  toast.success('Sandbox promotion setting updated')
+                }}
+                style={{
+                  width: '100%', background: surface.raised, border: `1px solid ${border[0]}`,
+                  borderRadius: 4, padding: '5px 8px', fontSize: 11, color: fg[0], outline: 'none'
+                }}
+              >
+                <option value="review">Interactive Diff Review (Recommended)</option>
+                <option value="always">Zero-Click Auto-Promote on green tests</option>
+              </select>
+              <span style={{ fontSize: 9, color: fg[3], lineHeight: 1.3 }}>
+                Determines whether sandboxed branch modifications are merged automatically on success, or left for manual review.
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 10, color: fg[1], fontWeight: 600 }}>Tool Runs (Command Execution)</label>
+              <select
+                value={hitlCommandRun}
+                onChange={async (e) => {
+                  await saveSettings({ hitlCommandRun: e.target.value as 'policy' | 'always' | 'never' })
+                  toast.success('Command run policy updated')
+                }}
+                style={{
+                  width: '100%', background: surface.raised, border: `1px solid ${border[0]}`,
+                  borderRadius: 4, padding: '5px 8px', fontSize: 11, color: fg[0], outline: 'none'
+                }}
+              >
+                <option value="policy">Rule-based Policies (Recommended)</option>
+                <option value="always">Always Auto-Run commands</option>
+                <option value="never">Prompt for Every Command</option>
+              </select>
+              <span style={{ fontSize: 9, color: fg[3], lineHeight: 1.3 }}>
+                Governs whether command execution requires user confirmation, follows safety rules, or prompts for every action.
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 10, color: fg[1], fontWeight: 600 }}>Deploy Gate (Deployment releases)</label>
+              <select
+                value={hitlDeployment}
+                onChange={async (e) => {
+                  await saveSettings({ hitlDeployment: e.target.value as 'confirm' | 'always' })
+                  toast.success('Deploy gate updated')
+                }}
+                style={{
+                  width: '100%', background: surface.raised, border: `1px solid ${border[0]}`,
+                  borderRadius: 4, padding: '5px 8px', fontSize: 11, color: fg[0], outline: 'none'
+                }}
+              >
+                <option value="confirm">Confirm before release (Recommended)</option>
+                <option value="always">Immediate Deploy</option>
+              </select>
+              <span style={{ fontSize: 9, color: fg[3], lineHeight: 1.3 }}>
+                Requires native prompt validation before code is packaged and pushed, or allows instant headless deployment.
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 10, color: fg[1], fontWeight: 600 }}>Local Command Sandbox (Darwin OS Isolation)</label>
+              <select
+                value={useSandboxExec}
+                onChange={async (e) => {
+                  await saveSettings({ useSandboxExec: e.target.value as 'never' | 'no-network' | 'restrict-write' })
+                  toast.success('Sandbox execution mode updated')
+                }}
+                style={{
+                  width: '100%', background: surface.raised, border: `1px solid ${border[0]}`,
+                  borderRadius: 4, padding: '5px 8px', fontSize: 11, color: fg[0], outline: 'none'
+                }}
+              >
+                <option value="never">Disabled (Run natively on host)</option>
+                <option value="restrict-write">Restrict Writes (Block writes outside project)</option>
+                <option value="no-network">Isolated Sandbox (No Network & Restrict Writes)</option>
+              </select>
+              <span style={{ fontSize: 9, color: fg[3], lineHeight: 1.3 }}>
+                Enforces native kernel-level sandboxing (via macOS sandbox-exec) for agent-run terminal commands.
+              </span>
+            </div>
+          </div>
         </div>
 
         <div>
@@ -546,7 +894,7 @@ export function SettingsPanel() {
             Global Rules
           </div>
           <p style={{ fontSize: 10, color: fg[3], margin: '0 0 8px', lineHeight: 1.5 }}>
-            Rules injected into every AI chat across all projects, before any project-level .lakoorarules. Use this for personal conventions you want everywhere (e.g. tone, preferred libraries, output format).
+            Rules injected into every AI chat across all projects, before any project-level .meshflowrules. Use this for personal conventions you want everywhere (e.g. tone, preferred libraries, output format).
           </p>
           <div style={{ position: 'relative' }}>
             <textarea
@@ -602,7 +950,7 @@ export function SettingsPanel() {
             fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
             color: fg[3], marginBottom: 8, paddingBottom: 6, borderBottom: `1px solid ${border[1]}`,
           }}>
-            Project Rules (.lakoorarules)
+            Project Rules (.meshflowrules)
           </div>
           <p style={{ fontSize: 10, color: fg[3], margin: '0 0 8px', lineHeight: 1.5 }}>
             Rules injected as system context into every AI chat. Use plain text or Markdown to describe coding conventions, naming rules, or domain constraints.
@@ -638,7 +986,7 @@ export function SettingsPanel() {
               type="button"
               onClick={saveRules}
               disabled={!projectPath || rulesSaving}
-              title="Save .lakoorarules (⌘S)"
+              title="Save .meshflowrules (⌘S)"
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -734,6 +1082,81 @@ export function SettingsPanel() {
           )}
         </div>
 
+        <div>
+          <div style={{
+            fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+            color: fg[3], marginBottom: 8, paddingBottom: 6, borderBottom: `1px solid ${border[1]}`,
+          }}>
+            Local Embeddings (Ollama)
+          </div>
+          <p style={{ fontSize: 10, color: fg[3], margin: '0 0 10px', lineHeight: 1.5 }}>
+            Configure local, offline-first embeddings using Ollama rather than Voyage AI or hashing fallbacks.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 9, color: fg[2], fontWeight: 600 }}>Embedding Provider</label>
+              <select
+                value={useLocalEmbeddings ? 'ollama' : 'default'}
+                onChange={async (e) => {
+                  const val = e.target.value === 'ollama'
+                  await saveSettings({ useLocalEmbeddings: val })
+                  toast.success(`Embeddings switched to ${val ? 'Ollama' : 'Voyage AI / Hash'}`)
+                }}
+                style={{
+                  width: '100%', background: surface.raised, border: `1px solid ${border[0]}`,
+                  borderRadius: 4, padding: '5px 8px', fontSize: 11, color: fg[0], outline: 'none'
+                }}
+              >
+                <option value="default">Voyage AI / Deterministic Hash Fallback</option>
+                <option value="ollama">Ollama (Local Offline-First)</option>
+              </select>
+            </div>
+
+            {useLocalEmbeddings && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <label style={{ fontSize: 9, color: fg[2], fontWeight: 600 }}>Local Embedding Model</label>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input
+                    type="text"
+                    value={localEmbeddingModel}
+                    onChange={(e) => setLocalEmbeddingModel(e.target.value)}
+                    placeholder="e.g. nomic-embed-text"
+                    style={{
+                      flex: 1,
+                      background: surface.raised,
+                      border: `1px solid ${border[0]}`,
+                      borderRadius: 4,
+                      padding: '5px 8px',
+                      fontSize: 11,
+                      color: fg[0],
+                      outline: 'none'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => saveKey('localEmbeddingModel', localEmbeddingModel)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: '0 12px',
+                      fontSize: 10,
+                      fontWeight: 600,
+                      borderRadius: 4,
+                      border: `1px solid ${savedField === 'localEmbeddingModel' ? accent.green.border : border[0]}`,
+                      background: savedField === 'localEmbeddingModel' ? accent.green.subtle : surface.raised,
+                      color: savedField === 'localEmbeddingModel' ? accent.green.fg : fg[2],
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {savedField === 'localEmbeddingModel' ? 'Saved' : 'Save'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
         <PolicySection />
 
         <CacheSection />
@@ -812,7 +1235,7 @@ export function SettingsPanel() {
             </button>
           </div>
           <div style={{ fontSize: 9, color: fg[4], textAlign: 'center' }}>
-            Lakoora v0.1.0 · Phase A
+            Meshflow v0.1.0 · Phase A
           </div>
         </div>
       </div>

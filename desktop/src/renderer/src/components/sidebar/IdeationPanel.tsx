@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Lightbulb, Sparkles, Plus, Trash2, ListTodo } from 'lucide-react'
+import { Lightbulb, Sparkles, Plus, Trash2, ListTodo, RefreshCw } from 'lucide-react'
 import { toast } from '../../store/useToastStore'
 import { useChatStore } from '../../store/useChatStore'
 import { useAppStore } from '../../store/useAppStore'
@@ -15,6 +15,10 @@ interface Spec {
   subtasks: DraftSubtask[]
 }
 
+const SPEC_SYSTEM_PROMPT = 'You are a product-minded engineering planner. Given a rough idea, respond ONLY with valid JSON matching this schema: {"goal": "one-line goal", "problem": "what problem this solves", "scope": "what is in/out of scope", "openQuestions": ["..."], "subtasks": [{"description": "specific, actionable implementation step"}]}. Produce 3-8 specific, concrete subtasks — not generic placeholders. No markdown fences, no commentary outside the JSON object.'
+
+const REFINE_SYSTEM_PROMPT = 'You are a product-minded engineering planner. You are given an existing spec as JSON and user feedback. Revise the spec to incorporate the feedback precisely. Keep what is already good. Respond ONLY with valid JSON matching this schema: {"goal": "one-line goal", "problem": "what problem this solves", "scope": "what is in/out of scope", "openQuestions": ["..."], "subtasks": [{"description": "specific, actionable implementation step"}]}. No markdown fences, no commentary outside the JSON object.'
+
 function fieldStyle(): React.CSSProperties {
   return {
     width: '100%', boxSizing: 'border-box', resize: 'vertical',
@@ -27,11 +31,36 @@ function labelStyle(): React.CSSProperties {
   return { fontSize: 10, color: fg[3], display: 'block', marginBottom: 4, fontWeight: 600 }
 }
 
+async function streamToText(streamId: string): Promise<string> {
+  let text = ''
+  await new Promise<void>((resolve, reject) => {
+    const unChunk = window.api.ai.onChunk(streamId, (d) => { text += d })
+    const unDone = window.api.ai.onDone(streamId, () => { unChunk(); unDone(); unErr(); resolve() })
+    const unErr = window.api.ai.onError(streamId, (e) => { unChunk(); unDone(); unErr(); reject(new Error(e)) })
+  })
+  return text
+}
+
+function parseSpec(text: string, fallbackGoal: string): Spec {
+  const jsonMatch = text.match(/\{[\s\S]*\}/)
+  const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : text) as Partial<Spec>
+  return {
+    goal: parsed.goal ?? fallbackGoal,
+    problem: parsed.problem ?? '',
+    scope: parsed.scope ?? '',
+    openQuestions: parsed.openQuestions ?? [],
+    subtasks: parsed.subtasks?.length ? parsed.subtasks : [{ description: '' }],
+  }
+}
+
 export function IdeationPanel() {
   const [idea, setIdea] = useState('')
   const [drafting, setDrafting] = useState(false)
   const [spec, setSpec] = useState<Spec | null>(null)
   const [creating, setCreating] = useState(false)
+  const [refineText, setRefineText] = useState('')
+  const [refining, setRefining] = useState(false)
+  const [iteration, setIteration] = useState(0)
   const activeModel = useChatStore((s) => s.activeModel)
   const setActiveActivity = useAppStore((s) => s.setActiveActivity)
 
@@ -39,31 +68,45 @@ export function IdeationPanel() {
     if (!idea.trim() || drafting) return
     setDrafting(true)
     setSpec(null)
+    setIteration(0)
     try {
       const streamId = await window.api.ai.streamChat({
         messages: [{ role: 'user', content: idea.trim() }],
         model: activeModel,
-        systemPrompt: 'You are a product-minded engineering planner. Given a rough idea, respond ONLY with valid JSON matching this schema: {"goal": "one-line goal", "problem": "what problem this solves", "scope": "what is in/out of scope", "openQuestions": ["..."], "subtasks": [{"description": "specific, actionable implementation step"}]}. Produce 3-8 specific, concrete subtasks — not generic placeholders. No markdown fences, no commentary outside the JSON object.',
+        systemPrompt: SPEC_SYSTEM_PROMPT,
       })
-      let text = ''
-      await new Promise<void>((resolve, reject) => {
-        const unChunk = window.api.ai.onChunk(streamId, (d) => { text += d })
-        const unDone = window.api.ai.onDone(streamId, () => { unChunk(); unDone(); unErr(); resolve() })
-        const unErr = window.api.ai.onError(streamId, (e) => { unChunk(); unDone(); unErr(); reject(new Error(e)) })
-      })
-      const jsonMatch = text.match(/\{[\s\S]*\}/)
-      const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : text) as Partial<Spec>
-      setSpec({
-        goal: parsed.goal ?? idea.trim(),
-        problem: parsed.problem ?? '',
-        scope: parsed.scope ?? '',
-        openQuestions: parsed.openQuestions ?? [],
-        subtasks: parsed.subtasks?.length ? parsed.subtasks : [{ description: '' }],
-      })
+      const text = await streamToText(streamId)
+      setSpec(parseSpec(text, idea.trim()))
     } catch (err) {
       toast.error(`Draft failed: ${(err as Error).message}`)
     } finally {
       setDrafting(false)
+    }
+  }
+
+  const refineSpec = async () => {
+    if (!spec || !refineText.trim() || refining) return
+    setRefining(true)
+    try {
+      const currentSpecJson = JSON.stringify(spec, null, 2)
+      const streamId = await window.api.ai.streamChat({
+        messages: [
+          {
+            role: 'user',
+            content: `Current spec:\n\`\`\`json\n${currentSpecJson}\n\`\`\`\n\nFeedback: ${refineText.trim()}`,
+          },
+        ],
+        model: activeModel,
+        systemPrompt: REFINE_SYSTEM_PROMPT,
+      })
+      const text = await streamToText(streamId)
+      setSpec(parseSpec(text, spec.goal))
+      setIteration((n) => n + 1)
+      setRefineText('')
+    } catch (err) {
+      toast.error(`Refinement failed: ${(err as Error).message}`)
+    } finally {
+      setRefining(false)
     }
   }
 
@@ -218,6 +261,45 @@ export function IdeationPanel() {
                   <Plus size={11} /> Add subtask
                 </button>
               </div>
+            </div>
+
+            {/* Refinement / iteration */}
+            <div style={{ borderTop: `1px solid ${border[1]}`, paddingTop: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                <label style={{ ...labelStyle(), marginBottom: 0 }}>Refine spec</label>
+                {iteration > 0 && (
+                  <span style={{
+                    fontSize: 9, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase',
+                    color: accent.amber.fg, background: accent.amber.subtle, border: `1px solid ${accent.amber.border}`,
+                    borderRadius: 3, padding: '1px 5px',
+                  }}>
+                    Round {iteration}
+                  </span>
+                )}
+              </div>
+              <textarea
+                value={refineText}
+                onChange={(e) => setRefineText(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void refineSpec() } }}
+                rows={2}
+                placeholder="e.g. Make subtasks more concrete, remove UI tasks, focus on backend only…"
+                style={fieldStyle()}
+              />
+              <button
+                type="button"
+                onClick={() => void refineSpec()}
+                disabled={!refineText.trim() || refining}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 5, marginTop: 6,
+                  fontSize: 10.5, fontWeight: 700, padding: '5px 10px', borderRadius: 4,
+                  border: `1px solid ${accent.amber.border}`, background: accent.amber.subtle, color: accent.amber.fg,
+                  cursor: !refineText.trim() || refining ? 'not-allowed' : 'pointer',
+                  opacity: !refineText.trim() || refining ? 0.5 : 1,
+                }}
+              >
+                <RefreshCw size={11} style={{ animation: refining ? 'spin 1s linear infinite' : 'none' }} />
+                {refining ? 'Refining…' : 'Refine'}
+              </button>
             </div>
 
             <div style={{ display: 'flex', gap: 8 }}>

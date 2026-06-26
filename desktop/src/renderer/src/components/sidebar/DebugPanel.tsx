@@ -335,7 +335,7 @@ export function DebugPanel() {
         // Navigate editor to the stopped line
         const top = frames[0]
         if (top?.source?.path && top.line) {
-          window.dispatchEvent(new CustomEvent('lakoora:goToLine', {
+          window.dispatchEvent(new CustomEvent('meshflow:goToLine', {
             detail: { line: top.line, filePath: top.source.path },
           }))
         }

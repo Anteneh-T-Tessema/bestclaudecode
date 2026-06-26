@@ -24,12 +24,14 @@ interface CommitFile { status: string; path: string; oldPath?: string }
 interface DeployRecord {
   id: string
   ts: number
-  provider: 'vercel' | 'netlify' | 'npm'
+  provider: 'vercel' | 'netlify' | 'npm' | 'cdk' | 'kubernetes'
+  deployCmd: string
   target: 'preview' | 'production'
   url?: string
   exitCode: number
   promotedFromId?: string
   rolledBackFromId?: string
+  hash?: string
 }
 
 function BranchDropdown({
@@ -722,8 +724,8 @@ export function GitPanel() {
     window.api.deploy.history().then(setDeployHistory).catch(() => setDeployHistory([]))
   }, [projectPath])
 
-  const deployProvider: 'vercel' | 'netlify' | 'npm' | null = deployCmd
-    ? deployCmd.startsWith('vercel') ? 'vercel' : deployCmd.startsWith('netlify') ? 'netlify' : 'npm'
+  const deployProvider: 'vercel' | 'netlify' | 'npm' | 'cdk' | 'kubernetes' | null = deployCmd
+    ? deployCmd.startsWith('vercel') ? 'vercel' : deployCmd.startsWith('netlify') ? 'netlify' : deployCmd.startsWith('cdk') ? 'cdk' : deployCmd.startsWith('kubectl') ? 'kubernetes' : 'npm'
     : null
 
   const refreshDeployHistory = () => {
@@ -781,7 +783,7 @@ export function GitPanel() {
   const watchLogs = (d: DeployRecord) => {
     const command = watchLogsCommand(d)
     if (!command) return
-    window.dispatchEvent(new CustomEvent('lakoora:monitor:prefill', { detail: { command } }))
+    window.dispatchEvent(new CustomEvent('meshflow:monitor:prefill', { detail: { command } }))
     setActiveActivity('monitor')
   }
 
@@ -1945,7 +1947,7 @@ export function GitPanel() {
                   original={diffData?.original ?? ''}
                   modified={diffData?.modified ?? ''}
                   language={languageFromPath(diffFile.path)}
-                  theme="lakoora-dark"
+                  theme="meshflow-dark"
                   options={{
                     readOnly: true,
                     renderSideBySide: false,

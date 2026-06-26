@@ -19,21 +19,39 @@ export interface ChatSession {
 
 export const MODELS = [
   { id: 'auto', label: 'Auto', provider: 'auto' },
+  // Anthropic
   { id: 'claude-fable-5', label: 'Claude Fable 5', provider: 'anthropic' },
   { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', provider: 'anthropic' },
   { id: 'claude-opus-4-8', label: 'Claude Opus 4.8', provider: 'anthropic' },
   { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', provider: 'anthropic' },
+  // OpenAI
   { id: 'gpt-4o', label: 'GPT-4o', provider: 'openai' },
   { id: 'gpt-4o-mini', label: 'GPT-4o Mini', provider: 'openai' },
   { id: 'o1', label: 'o1', provider: 'openai' },
+  // Google
   { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash', provider: 'google' },
   { id: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro', provider: 'google' },
+  // Groq (fast open-model inference)
+  { id: 'groq/llama-3.3-70b-versatile', label: 'Llama 3.3 70B (Groq)', provider: 'groq' },
+  { id: 'groq/llama-3.1-8b-instant', label: 'Llama 3.1 8B Instant (Groq)', provider: 'groq' },
+  { id: 'groq/mixtral-8x7b-32768', label: 'Mixtral 8x7B (Groq)', provider: 'groq' },
+  { id: 'groq/gemma2-9b-it', label: 'Gemma 2 9B (Groq)', provider: 'groq' },
+  { id: 'groq/deepseek-r1-distill-llama-70b', label: 'DeepSeek R1 70B (Groq)', provider: 'groq' },
+  // OpenRouter (100+ models, one key)
+  { id: 'openrouter/meta-llama/llama-3.3-70b-instruct', label: 'Llama 3.3 70B (OpenRouter)', provider: 'openrouter' },
+  { id: 'openrouter/anthropic/claude-sonnet-4-6', label: 'Claude Sonnet 4.6 (OpenRouter)', provider: 'openrouter' },
+  { id: 'openrouter/deepseek/deepseek-r1', label: 'DeepSeek R1 (OpenRouter)', provider: 'openrouter' },
+  { id: 'openrouter/mistralai/mistral-large', label: 'Mistral Large (OpenRouter)', provider: 'openrouter' },
+  // Ollama (local)
+  { id: 'ollama', label: 'Ollama (local — pick model in Settings)', provider: 'ollama' },
+  // Custom
+  { id: 'custom', label: 'Custom Model', provider: 'custom' },
 ] as const
 
 export type ModelId = (typeof MODELS)[number]['id']
 
-const SESSIONS_KEY = 'lakoora:chat:sessions'
-const LEGACY_KEY = 'lakoora:chat:messages'
+const SESSIONS_KEY = 'meshflow:chat:sessions'
+const LEGACY_KEY = 'meshflow:chat:messages'
 
 function makeSession(messages: ChatMessage[] = []): ChatSession {
   return {
@@ -127,7 +145,7 @@ export const useChatStore = create<ChatStore>((set) => ({
     set((s) => {
       const sessions = [...s.sessions, session]
       persist(sessions, session.id)
-      return { sessions, activeSessionId: session.id }
+      return { sessions, activeSessionId: session.id, isStreaming: false, streamingId: null, activeStreamId: null }
     })
     return session.id
   },

@@ -11,7 +11,7 @@ import { ModelSelector } from './ModelSelector'
 import { MessageModelPicker } from './MessageModelPicker'
 import { extractSymbols } from '../sidebar/OutlinePanel'
 
-const BASE_SYSTEM_PROMPT = `You are an expert AI coding agent for the Lakoora IDE. Help the user understand, write, debug, and improve their code. Be concise and accurate.
+const BASE_SYSTEM_PROMPT = `You are an expert AI coding agent for the Meshflow IDE. Help the user understand, write, debug, and improve their code. Be concise and accurate.
 
 When the user asks you to make a change to a specific file, propose it using this exact format so the IDE can render a one-click review/apply card:
 
@@ -39,12 +39,12 @@ Only one URL per block.
 
 When the user's message contains a \`<screenshot>\` context block and they ask you to build, recreate, or implement the UI shown in it, generate complete component code using the \`<<<EDIT>>>\` block format above. Base your implementation on the layout, components, colors, and text described in the screenshot block. Include all visible labels and approximate the spacing and hierarchy as closely as the described structure allows.`
 
-/** Load project-level rules from <projectPath>/.lakoorarules if it exists. */
+/** Load project-level rules from <projectPath>/.meshflowrules if it exists. */
 async function loadProjectRules(projectPath: string | null): Promise<string> {
   if (!projectPath) return ''
   try {
-    const rules = await window.api.fs.readFile(`${projectPath}/.lakoorarules`)
-    return rules ? `\n\n# Project Rules (.lakoorarules)\n${rules.trim()}` : ''
+    const rules = await window.api.fs.readFile(`${projectPath}/.meshflowrules`)
+    return rules ? `\n\n# Project Rules (.meshflowrules)\n${rules.trim()}` : ''
   } catch {
     return ''
   }
@@ -277,6 +277,28 @@ async function injectDocsContext(content: string): Promise<string> {
   }
 }
 
+/** Gap 4 — @symbol <name>: inject vector-search context for a named symbol. */
+async function injectSymbolContext(content: string): Promise<string> {
+  if (!content.includes('@symbol')) return content
+  const match = content.match(/@symbol\s+(\S+)/)
+  const symbol = match ? match[1].trim() : ''
+  if (!symbol) return content.replace(/@symbol\s*/g, '').trim()
+
+  try {
+    const resp = await window.api.search.vector(symbol, false)
+    const hits = resp?.results?.filter((r) => r.line.includes(symbol)).slice(0, 3) ?? []
+    if (!hits.length) return content.replace(match![0], `(symbol \`${symbol}\` not found)`)
+    const blocks = hits.map((r) => {
+      const loc = `${r.file}${r.lineNumber ? `:${r.lineNumber}` : ''}`
+      return `// ${loc}\n${r.snippet ?? r.line}`
+    })
+    const contextBlock = `<symbol_context name="${symbol}">\n${blocks.join('\n\n---\n\n')}\n</symbol_context>`
+    return `${contextBlock}\n\n${content.replace(match![0], '').trim()}`
+  } catch {
+    return content
+  }
+}
+
 /** Gap 77 — @depends <file>: inject what a file imports (its dependencies). */
 async function injectDependsContext(content: string): Promise<string> {
   if (!content.includes('@depends')) return content
@@ -458,6 +480,7 @@ const MENTIONS = [
   { tag: '@analyze',   desc: 'Run data analysis on a file (CSV/JSON/XLSX)' },
   { tag: '@design',    desc: 'Inject project design tokens (Tailwind config, CSS vars, theme files)' },
   { tag: '@handoff',   desc: 'Inject cross-agent handoff value by key (e.g. @handoff:schema)' },
+  { tag: '@symbol',    desc: 'Inject vector-search context for a named function or class' },
 ]
 
 export function ChatInput() {
@@ -601,7 +624,7 @@ export function ChatInput() {
           : ''
         const scaffoldPrompt = `${tokenBlock}\n\nScaffold a React component named \`${componentName}\`${desc ? ` — ${desc}` : ''}. Use the design tokens above to match the project's visual style. Produce a complete, working component using the \`<<<EDIT>>>\` block format.`
         addUserMessage(content, [])
-        window.dispatchEvent(new CustomEvent('lakoora:scaffold:generated', { detail: { componentName } }))
+        window.dispatchEvent(new CustomEvent('meshflow:scaffold:generated', { detail: { componentName } }))
         await send(scaffoldPrompt)
         return
       }
@@ -622,6 +645,42 @@ export function ChatInput() {
         }
         return
       }
+    }
+
+    // /deploy — pre-flight tests & AI review, then release deployment
+    if (content === '/deploy' || content.startsWith('/deploy ')) {
+      addUserMessage(content, [])
+      const assistantId = startAssistantMessage()
+      appendDelta(assistantId, `🔍 Detecting deploy configuration...`)
+      
+      try {
+        const deployCmd = await window.api.deploy.detect()
+        if (!deployCmd) {
+          appendDelta(assistantId, `\n\n❌ No deploy configuration found (no package.json "deploy" script, vercel.json, .vercel, netlify.toml, .netlify, cdk.json, or k8s/kubernetes directory).`)
+          finalizeMessage(assistantId)
+          return
+        }
+
+        appendDelta(assistantId, `\nDetected deploy target: \`${deployCmd}\`\n\n🧪 Running pre-flight unit tests...`)
+        
+        const res = await window.api.deploy.runWithChecks({ model: activeModel })
+        if (!res.success) {
+          appendDelta(assistantId, `\n\n❌ **Deployment Failed / Blocked**:\n${res.error}`)
+          if (res.findings && res.findings.length > 0) {
+            const detail = res.findings.map(f => `- **[${f.severity}]** \`${f.file}\`: ${f.message}`).join('\n')
+            appendDelta(assistantId, `\n\n**Reviewer Findings**:\n${detail}`)
+          }
+          finalizeMessage(assistantId)
+          return
+        }
+
+        appendDelta(assistantId, `\n\n🚀 **Deployment Successful**!\nURL: [${res.deployUrl}](${res.deployUrl})`)
+      } catch (err) {
+        appendDelta(assistantId, `\n\n❌ **Deployment Error**: ${(err as Error).message}`)
+      } finally {
+        finalizeMessage(assistantId)
+      }
+      return
     }
 
     // @selection — attach currently selected editor text
@@ -767,14 +826,16 @@ export function ChatInput() {
       (img) => setPendingImages((prev) => [...prev, img]),
     )
 
+    // @symbol — inject vector-search context for a named symbol
+    finalContent = await injectSymbolContext(finalContent)
+
     // @docs — inject package documentation context
     finalContent = await injectDocsContext(finalContent)
 
-    // Gap 29 — automatic hybrid retrieval baseline, runs unconditionally (not
-    // gated on any @-mention) using the raw user input (`content`, not
-    // `finalContent`) as the retrieval query so expanded file/issue/web blocks
-    // don't pollute it. Deduped against manuallyMentionedPaths server-side.
-    if (content.trim()) {
+    // Gap 29 — automatic hybrid retrieval baseline. Only fires for substantive
+    // messages (>= 20 chars) so short greetings like "hey" or "thanks" don't
+    // trigger noisy codebase injection that confuses smaller local models.
+    if (content.trim().length >= 20) {
       try {
         const ctx = await window.api.search.assembleContext(content, manuallyMentionedPaths)
         if (ctx?.results?.length) {
@@ -784,10 +845,8 @@ export function ChatInput() {
       } catch { /* never block sending on a context-assembly failure */ }
     }
 
-    // Gap 34 — automatic agent-memory baseline, mirrors the Gap 29 auto_context
-    // block above but pulls from persisted decision/preference memory instead
-    // of codebase retrieval. Uses a distinct tag so it's visually separable.
-    if (content.trim()) {
+    // Gap 34 — automatic agent-memory baseline, same minimum-length guard.
+    if (content.trim().length >= 20) {
       try {
         const memories = await window.api.memory.query(content)
         if (memories?.length) {
@@ -804,18 +863,25 @@ export function ChatInput() {
     // E2E test hook: broadcast the final enriched content (with any @-context
     // blocks already injected) so tests can assert on what's being sent without
     // having to patch contextBridge APIs (which are sealed in Electron 28+).
-    window.dispatchEvent(new CustomEvent('lakoora:e2e:beforeSend', { detail: { content: finalContent } }))
+    window.dispatchEvent(new CustomEvent('meshflow:e2e:beforeSend', { detail: { content: finalContent } }))
 
     addUserMessage(finalContent, images)
 
     const assistantId = startAssistantMessage()
 
-    // Build system prompt: base + global rules + optional .lakoorarules
+    // Build system prompt: base + global rules + optional .meshflowrules.
+    // Ollama models (small, local) get a lighter prompt without the <<<EDIT>>>
+    // formatting instructions — those confuse small models into proposing edits
+    // for every message, even greetings.
+    const effectiveModel = messageModelOverride ?? activeModel
     const globalRules = useSettingsStore.getState().globalRules
     const globalRulesBlock = globalRules.trim() ? `\n\n# Global Rules\n${globalRules.trim()}` : ''
     const projectRules = await loadProjectRules(projectPath)
-    const systemPrompt = BASE_SYSTEM_PROMPT + globalRulesBlock + projectRules
-    const effectiveModel = messageModelOverride ?? activeModel
+    const isOllamaModel = effectiveModel === 'ollama' || (!effectiveModel.startsWith('claude') && !effectiveModel.startsWith('gpt') && !effectiveModel.startsWith('o1') && !effectiveModel.startsWith('o3') && !effectiveModel.startsWith('gemini') && !effectiveModel.startsWith('groq/') && !effectiveModel.startsWith('openrouter/'))
+    const basePrompt = isOllamaModel
+      ? 'You are a helpful AI assistant. Answer the user\'s question directly and concisely.'
+      : BASE_SYSTEM_PROMPT
+    const systemPrompt = basePrompt + globalRulesBlock + projectRules
 
     try {
       const streamId = await window.api.ai.streamChat({
@@ -854,8 +920,8 @@ export function ChatInput() {
       const { content } = (e as CustomEvent<{ content: string }>).detail
       send(content)
     }
-    window.addEventListener('lakoora:chat:regenerate', handler)
-    return () => window.removeEventListener('lakoora:chat:regenerate', handler)
+    window.addEventListener('meshflow:chat:regenerate', handler)
+    return () => window.removeEventListener('meshflow:chat:regenerate', handler)
   }, [send])
 
   // Click-to-edit: pre-fills the input from an InspectResultCard click.
@@ -866,15 +932,25 @@ export function ChatInput() {
       setText(content)
       textareaRef.current?.focus()
     }
-    window.addEventListener('lakoora:chat:prefill', handler)
-    return () => window.removeEventListener('lakoora:chat:prefill', handler)
+    window.addEventListener('meshflow:chat:prefill', handler)
+    return () => window.removeEventListener('meshflow:chat:prefill', handler)
   }, [])
+
+  // Gap 4 — Composer Panel: receive composed message and submit it immediately.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { message } = (e as CustomEvent<{ message: string }>).detail
+      if (message) send(message)
+    }
+    window.addEventListener('meshflow:composer:send', handler)
+    return () => window.removeEventListener('meshflow:composer:send', handler)
+  }, [send])
 
   const abort = () => {
     if (activeStreamId) {
       window.api.ai.abortStream(activeStreamId)
-      setStreaming(null)
     }
+    setStreaming(null)
   }
 
   const filteredMentions = mentionQuery !== null

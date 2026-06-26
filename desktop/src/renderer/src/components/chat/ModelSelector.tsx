@@ -8,6 +8,9 @@ const PROVIDER_COLORS: Record<string, string> = {
   anthropic: accent.amber.fg,
   openai: accent.green.fg,
   google: accent.blue.fg,
+  groq: accent.cyan.fg,
+  openrouter: accent.violet.fg,
+  ollama: accent.green.dim,
   auto: accent.violet.fg,
 }
 
@@ -18,7 +21,13 @@ export function ModelSelector() {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
+  // For Ollama, show the actual configured model name instead of the generic label
+  const ollamaModel = useSettingsStore((s) => s.ollamaModel) || 'llama3.2'
+
   const currentModel = MODELS.find((m) => m.id === activeModel)
+  const displayLabel = activeModel === 'ollama'
+    ? `Ollama: ${ollamaModel}`
+    : (currentModel?.label ?? activeModel)
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -54,8 +63,8 @@ export function ModelSelector() {
             flexShrink: 0,
           }}
         />
-        <span style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {currentModel?.label ?? activeModel}
+        <span style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {displayLabel}
         </span>
         <ChevronDown size={12} style={{ flexShrink: 0 }} />
       </button>

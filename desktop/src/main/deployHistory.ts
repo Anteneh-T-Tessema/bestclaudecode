@@ -1,7 +1,7 @@
 /**
  * Persistent, append-only deploy history — one hash-chained JSONL file per
  * project (not per agent session; deploys happen outside agent sessions too)
- * at <projectPath>/.lakoora/deploy-history/deploys.jsonl. Same tamper-evident
+ * at <projectPath>/.meshflow/deploy-history/deploys.jsonl. Same tamper-evident
  * hash-chain shape as agentEventLog.ts, copy-adapted rather than shared
  * since the keying (per-project vs per-session) and lifecycle differ.
  */
@@ -9,13 +9,14 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import * as crypto from 'crypto'
+import { type DeployProvider } from './deploy'
 
 const GENESIS_HASH = '0'.repeat(64)
 
 export interface DeployRecord {
   id: string
   ts: number
-  provider: 'vercel' | 'netlify' | 'npm'
+  provider: DeployProvider
   deployCmd: string
   target: 'preview' | 'production'
   url?: string
@@ -28,7 +29,7 @@ export interface DeployRecord {
 }
 
 function logPath(projectPath: string): string {
-  return path.join(projectPath, '.lakoora', 'deploy-history', 'deploys.jsonl')
+  return path.join(projectPath, '.meshflow', 'deploy-history', 'deploys.jsonl')
 }
 
 function computeHash(prevHash: string, record: Record<string, unknown>): string {

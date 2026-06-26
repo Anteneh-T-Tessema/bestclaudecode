@@ -1,7 +1,9 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Square, StopCircle, GitMerge, Share2 } from 'lucide-react'
+import { Square, StopCircle, GitMerge, Share2, Play, Loader } from 'lucide-react'
 import { accent, border, fg, surface } from '../../design'
 import { toast } from '../../store/useToastStore'
+import { useChatStore } from '../../store/useChatStore'
+import { useAppStore } from '../../store/useAppStore'
 
 const TERMINAL_STATUSES = ['finished', 'blocked', 'error', 'pr-opened', 'push-failed-kept-locally', 'deployed', 'approval-rejected']
 
@@ -24,6 +26,10 @@ const ROLE_COLOR: Record<string, string> = {
 
 export function SwarmPanel() {
   const [sessions, setSessions] = useState<SessionCard[]>([])
+  const [goal, setGoal] = useState('')
+  const [launching, setLaunching] = useState(false)
+  const activeModel = useChatStore((s) => s.activeModel)
+  const setActiveActivity = useAppStore((s) => s.setActiveActivity)
 
   const refresh = useCallback(async () => {
     const ids = await window.api.agent.getActiveSessions()
@@ -35,6 +41,32 @@ export function SwarmPanel() {
       return [...active, ...finished]
     })
   }, [])
+
+  const launch = useCallback(async () => {
+    const trimmed = goal.trim()
+    if (!trimmed || launching) return
+    setLaunching(true)
+    try {
+      const detail = await window.api.taskPlanner.create(trimmed)
+      if (!detail?.slug) { toast.error('Failed to create plan'); return }
+      const plans = await window.api.taskPlanner.list()
+      const summary = plans.find((p) => p.slug === detail.slug)
+      if (!summary?.path) { toast.error('Could not locate plan file'); return }
+      const sessionId = await window.api.agent.startAutonomous({ planFile: summary.path, model: activeModel })
+      setGoal('')
+      toast.success('Swarm background agent started')
+      await refresh()
+      if (sessionId) {
+        window.dispatchEvent(
+          new CustomEvent('focus-agent-session', { detail: { sessionId, mode: 'live' } })
+        )
+      }
+    } catch (err) {
+      toast.error(`Launch failed: ${(err as Error).message}`)
+    } finally {
+      setLaunching(false)
+    }
+  }, [goal, launching, activeModel, refresh])
 
   useEffect(() => {
     refresh()
@@ -94,6 +126,38 @@ export function SwarmPanel() {
 
   return (
     <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8, height: '100%', overflowY: 'auto' }}>
+      {/* New Swarm Agent launcher */}
+      <div style={{ padding: '8px 10px', borderBottom: `1px solid ${border[1]}`, flexShrink: 0, background: surface.base, borderRadius: 6, marginBottom: 8 }}>
+        <div style={{ fontSize: 10, color: fg[4], marginBottom: 4, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+          New Swarm Agent
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input
+            value={goal}
+            onChange={(e) => setGoal(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') void launch() }}
+            placeholder="Describe a swarm sub-goal…"
+            style={{
+              flex: 1, background: surface.raised, border: `1px solid ${border[0]}`,
+              borderRadius: 5, padding: '5px 8px', fontSize: 11, color: fg[0], outline: 'none', minWidth: 0,
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => void launch()}
+            disabled={!goal.trim() || launching}
+            style={{
+              background: goal.trim() && !launching ? accent.violet.fg : surface.raised,
+              border: 'none', borderRadius: 5, padding: '5px 10px', cursor: goal.trim() && !launching ? 'pointer' : 'not-allowed',
+              color: goal.trim() && !launching ? '#fff' : fg[4],
+              display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, flexShrink: 0,
+            }}
+          >
+            {launching ? <Loader size={11} style={{ animation: 'spin 1s linear infinite' }} /> : <Play size={11} />}
+            {launching ? 'Spawn…' : 'Spawn'}
+          </button>
+        </div>
+      </div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
         <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: fg[3] }}>
           Active ({activeSessions.length})
@@ -120,11 +184,28 @@ export function SwarmPanel() {
       )}
 
       {sessions.map((s) => (
-        <div key={s.sessionId} style={{
-          background: surface.raised, border: `1px solid ${s.isFinished ? border[0] : border[1]}`, borderRadius: 6, padding: '8px 10px',
-          display: 'flex', flexDirection: 'column', gap: 4,
-          opacity: s.isFinished ? 0.75 : 1,
-        }}>
+        <div
+          key={s.sessionId}
+          onClick={() => {
+            window.dispatchEvent(
+              new CustomEvent('focus-agent-session', {
+                detail: { sessionId: s.sessionId, mode: s.isFinished ? 'history' : 'live' }
+              })
+            )
+            setActiveActivity('agent')
+          }}
+          style={{
+            background: surface.raised,
+            border: `1px solid ${s.isFinished ? border[0] : border[1]}`,
+            borderRadius: 6,
+            padding: '8px 10px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4,
+            opacity: s.isFinished ? 0.75 : 1,
+            cursor: 'pointer',
+          }}
+        >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
             <span style={{ fontSize: 10.5, fontWeight: 700, color: fg[0], fontFamily: 'monospace', letterSpacing: '-0.01em' }}>
               {s.sessionId.slice(0, 8)}
@@ -143,7 +224,7 @@ export function SwarmPanel() {
               </span>
               <button
                 type="button"
-                onClick={() => void shareSession(s.sessionId)}
+                onClick={(e) => { e.stopPropagation(); void shareSession(s.sessionId) }}
                 title="Copy a live-view link for this session"
                 style={{
                   display: 'flex', alignItems: 'center', padding: 3, borderRadius: 3,
@@ -155,7 +236,7 @@ export function SwarmPanel() {
               {s.isFinished && s.branch ? (
                 <button
                   type="button"
-                  onClick={() => mergeSession(s)}
+                  onClick={(e) => { e.stopPropagation(); void mergeSession(s) }}
                   title={`Merge branch ${s.branch}`}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 3, padding: '2px 6px', borderRadius: 3, fontSize: 9,
@@ -167,7 +248,7 @@ export function SwarmPanel() {
               ) : !s.isFinished ? (
                 <button
                   type="button"
-                  onClick={() => stopSession(s.sessionId)}
+                  onClick={(e) => { e.stopPropagation(); void stopSession(s.sessionId) }}
                   title={`Stop session ${s.sessionId.slice(0, 8)}`}
                   style={{
                     display: 'flex', alignItems: 'center', padding: 3, borderRadius: 3,

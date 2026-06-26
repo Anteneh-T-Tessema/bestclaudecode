@@ -1,6 +1,6 @@
 /**
  * Minimal gitignore-style pattern matching for the file explorer and the
- * @file/@folder pickers. Reads .gitignore and .lakooraignore (both, unioned)
+ * @file/@folder pickers. Reads .gitignore and .meshflowignore (both, unioned)
  * from the project root.
  *
  * Deliberately simplified vs real gitignore semantics: no "!" negation, no
@@ -29,7 +29,7 @@ function compilePattern(raw: string): IgnoreRule | null {
 
 export function loadIgnoreRules(root: string): IgnoreRule[] {
   const rules: IgnoreRule[] = []
-  for (const file of ['.gitignore', '.lakooraignore']) {
+  for (const file of ['.gitignore', '.meshflowignore']) {
     try {
       const raw = fsSync.readFileSync(path.join(root, file), 'utf-8')
       for (const line of raw.split('\n')) {

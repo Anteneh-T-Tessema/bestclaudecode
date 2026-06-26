@@ -21,6 +21,8 @@ import { EnvVarsPanel } from '../components/sidebar/EnvVarsPanel'
 import { ProjectWizardPanel } from '../components/sidebar/ProjectWizardPanel'
 import { MonitorPanel } from '../components/sidebar/MonitorPanel'
 import { IdeationPanel } from '../components/sidebar/IdeationPanel'
+import { CallGraphPanel } from '../components/sidebar/CallGraphPanel'
+import { BrowserPreviewPanel } from '../components/sidebar/BrowserPreviewPanel'
 import { ErrorBoundary } from '../components/ErrorBoundary'
 
 const LABELS: Record<string, string> = {
@@ -46,6 +48,8 @@ const LABELS: Record<string, string> = {
   monitor: 'MONITOR',
   ideation: 'IDEATION',
   settings: 'SETTINGS',
+  callgraph: 'CALL GRAPH',
+  browser: 'BROWSER PREVIEW',
 }
 
 export function Sidebar() {
@@ -102,6 +106,10 @@ export function Sidebar() {
         return <IdeationPanel />
       case 'settings':
         return <SettingsPanel />
+      case 'callgraph':
+        return <CallGraphPanel />
+      case 'browser':
+        return <BrowserPreviewPanel />
       default:
         return null
     }

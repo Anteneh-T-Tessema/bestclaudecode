@@ -6,7 +6,7 @@ import { toast } from '../../store/useToastStore'
 import { POLICY_TEMPLATES, type PolicyConfig, type PolicyTemplate } from '../../policyTemplates'
 
 const EMPTY_CONFIG: PolicyConfig = { block_commands: [], block_paths: [], require_approval_for: [], max_retries: 3 }
-const TEMPLATES_DIR = (projectPath: string) => `${projectPath}/.lakoora/policy-templates`
+const TEMPLATES_DIR = (projectPath: string) => `${projectPath}/.meshflow/policy-templates`
 
 function toLines(values: string[]): string {
   return values.join('\n')
@@ -42,7 +42,7 @@ function PatternField({ label, placeholder, value, onChange }: FieldProps) {
   )
 }
 
-/** Gap 62/63/67/82 — visual editor for .lakoorapolicies.json: load/save via plain fs, starter templates, dry-run tester, and custom template save/load. */
+/** Gap 62/63/67/82 — visual editor for .meshflowpolicies.json: load/save via plain fs, starter templates, dry-run tester, and custom template save/load. */
 export function PolicySection() {
   const projectPath = useSettingsStore((s) => s.projectPath)
   const [config, setConfig] = useState<PolicyConfig>(EMPTY_CONFIG)
@@ -84,7 +84,7 @@ export function PolicySection() {
   useEffect(() => {
     if (!projectPath || loadedFor.current === projectPath) return
     loadedFor.current = projectPath
-    window.api.fs.readFile(`${projectPath}/.lakoorapolicies.json`)
+    window.api.fs.readFile(`${projectPath}/.meshflowpolicies.json`)
       .then((content) => {
         try {
           const parsed = JSON.parse(content) as Partial<PolicyConfig>
@@ -106,11 +106,11 @@ export function PolicySection() {
     if (!projectPath) return
     setSaving(true)
     try {
-      await window.api.fs.writeFile(`${projectPath}/.lakoorapolicies.json`, JSON.stringify(config, null, 2))
+      await window.api.fs.writeFile(`${projectPath}/.meshflowpolicies.json`, JSON.stringify(config, null, 2))
       setSaved(true)
       setTimeout(() => setSaved(false), 1500)
     } catch {
-      toast.error('Failed to save .lakoorapolicies.json')
+      toast.error('Failed to save .meshflowpolicies.json')
     } finally {
       setSaving(false)
     }
@@ -159,7 +159,7 @@ export function PolicySection() {
         color: fg[3], marginBottom: 8, paddingBottom: 6, borderBottom: `1px solid ${border[1]}`,
         display: 'flex', alignItems: 'center', gap: 6,
       }}>
-        <ShieldAlert size={11} color={accent.violet.fg} /> Agent Policies (.lakoorapolicies.json)
+        <ShieldAlert size={11} color={accent.violet.fg} /> Agent Policies (.meshflowpolicies.json)
       </div>
       <p style={{ fontSize: 10, color: fg[3], margin: '0 0 8px', lineHeight: 1.5 }}>
         Governance rules the autonomous agent enforces before every edit and command — one pattern per line.
@@ -283,7 +283,7 @@ export function PolicySection() {
           type="button"
           onClick={save}
           disabled={!projectPath || saving}
-          title="Save .lakoorapolicies.json"
+          title="Save .meshflowpolicies.json"
           style={{
             display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px', fontSize: 10, fontWeight: 600, borderRadius: 4,
             border: `1px solid ${saved ? accent.green.border : border[0]}`,

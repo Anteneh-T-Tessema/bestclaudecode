@@ -20,7 +20,7 @@ interface NotepadStore {
 }
 
 function storageKey(projectPath: string): string {
-  return `lakoora:notepads:${projectPath}`
+  return `meshflow:notepads:${projectPath}`
 }
 
 function persist(projectPath: string, notepads: Notepad[]): void {

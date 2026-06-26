@@ -8,7 +8,7 @@ describe('loadPolicy', () => {
   let projectPath = ''
 
   beforeEach(() => {
-    projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'lakoora-policy-'))
+    projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'meshflow-policy-'))
   })
 
   afterEach(() => {
@@ -22,13 +22,13 @@ describe('loadPolicy', () => {
   })
 
   it('returns an empty no-op policy when the file is invalid JSON', () => {
-    fs.writeFileSync(path.join(projectPath, '.lakoorapolicies.json'), '{ not valid json')
+    fs.writeFileSync(path.join(projectPath, '.meshflowpolicies.json'), '{ not valid json')
     expect(loadPolicy(projectPath)).toEqual({ block_commands: [], block_paths: [], require_approval_for: [], max_retries: 3, ...EMPTY_EXTRA })
   })
 
   it('parses a well-formed policy file', () => {
     fs.writeFileSync(
-      path.join(projectPath, '.lakoorapolicies.json'),
+      path.join(projectPath, '.meshflowpolicies.json'),
       JSON.stringify({ block_commands: ['curl.*\\|.*bash'], block_paths: ['.env', '*.pem'], require_approval_for: ['deploy'], max_retries: 5 }),
     )
     expect(loadPolicy(projectPath)).toEqual({
@@ -42,7 +42,7 @@ describe('loadPolicy', () => {
 
   it('drops non-string entries instead of throwing', () => {
     fs.writeFileSync(
-      path.join(projectPath, '.lakoorapolicies.json'),
+      path.join(projectPath, '.meshflowpolicies.json'),
       JSON.stringify({ block_commands: ['ok', 42, null], block_paths: 'not-an-array' }),
     )
     expect(loadPolicy(projectPath)).toEqual({ block_commands: ['ok'], block_paths: [], require_approval_for: [], max_retries: 3, ...EMPTY_EXTRA })
@@ -50,7 +50,7 @@ describe('loadPolicy', () => {
 
   it('falls back to the default when max_retries is invalid', () => {
     fs.writeFileSync(
-      path.join(projectPath, '.lakoorapolicies.json'),
+      path.join(projectPath, '.meshflowpolicies.json'),
       JSON.stringify({ max_retries: -1 }),
     )
     expect(loadPolicy(projectPath).max_retries).toBe(3)

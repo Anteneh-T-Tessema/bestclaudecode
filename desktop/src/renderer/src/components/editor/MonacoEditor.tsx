@@ -8,8 +8,8 @@ import { useProblemsStore } from '../../store/useProblemsStore'
 import { useDebugStore } from '../../store/useDebugStore'
 import { toast } from '../../store/useToastStore'
 
-const LAKOORA_DARK_ID = 'lakoora-dark'
-const LAKOORA_LIGHT_ID = 'lakoora-light'
+const MESHFLOW_DARK_ID = 'meshflow-dark'
+const MESHFLOW_LIGHT_ID = 'meshflow-light'
 
 function fileToUri(filePath: string): string {
   return `file://${filePath}`
@@ -142,10 +142,10 @@ function injectDiffStyles() {
   diffStylesInjected = true
   const el = document.createElement('style')
   el.textContent = [
-    '.lakoora-diff-added    { margin-left: 2px; width: 3px !important; background: rgba(35,134,54,0.6); }',
-    '.lakoora-diff-modified { margin-left: 2px; width: 3px !important; background: rgba(194,145,0,0.85); }',
-    '.lakoora-diff-deleted  { margin-left: 2px; width: 3px !important; background: rgba(248,81,73,0.85); }',
-    '.lakoora-next-edit-ghost { opacity: 0.45; font-style: italic; color: hsl(258 68% 70%); }',
+    '.meshflow-diff-added    { margin-left: 2px; width: 3px !important; background: rgba(35,134,54,0.6); }',
+    '.meshflow-diff-modified { margin-left: 2px; width: 3px !important; background: rgba(194,145,0,0.85); }',
+    '.meshflow-diff-deleted  { margin-left: 2px; width: 3px !important; background: rgba(248,81,73,0.85); }',
+    '.meshflow-next-edit-ghost { opacity: 0.45; font-style: italic; color: hsl(258 68% 70%); }',
   ].join('\n')
   document.head.appendChild(el)
 }
@@ -347,7 +347,7 @@ function registerInlineCompletionProvider(monaco: Monaco): void {
         if (!range) return
         const editor = monaco.editor.getEditors()[0]
         if (!editor) return
-        const setter = (editor as unknown as Record<string, unknown>).__lakooraSetLastShown
+        const setter = (editor as unknown as Record<string, unknown>).__meshflowSetLastShown
         if (typeof setter === 'function') {
           setter({ insertText: text, lineNumber: range.startLineNumber, column: range.startColumn })
         }
@@ -363,7 +363,7 @@ function registerInlineCompletionProvider(monaco: Monaco): void {
 // rather than re-resolved, since it stays in the same JS realm (no IPC
 // serialization boundary at this layer — only inside getApi() itself).
 let lspExecuteCommandRegistered = false
-const LSP_EXECUTE_COMMAND_ID = 'lakoora.executeLspCommand'
+const LSP_EXECUTE_COMMAND_ID = 'meshflow.executeLspCommand'
 function registerLspExecuteCommand(monaco: Monaco): void {
   if (lspExecuteCommandRegistered) return
   lspExecuteCommandRegistered = true
@@ -873,7 +873,7 @@ function registerLspProviders(monaco: Monaco, lspEntry: ReturnType<typeof resolv
 // "Illegal value for token color" at mount time. These are hex equivalents of the
 // surface/fg/accent tokens used elsewhere in the app, kept in sync by hand.
 function defineMonacoThemes(monaco: Monaco) {
-  monaco.editor.defineTheme(LAKOORA_DARK_ID, {
+  monaco.editor.defineTheme(MESHFLOW_DARK_ID, {
     base: 'vs-dark',
     inherit: true,
     rules: [
@@ -906,7 +906,7 @@ function defineMonacoThemes(monaco: Monaco) {
     },
   })
 
-  monaco.editor.defineTheme(LAKOORA_LIGHT_ID, {
+  monaco.editor.defineTheme(MESHFLOW_LIGHT_ID, {
     base: 'vs',
     inherit: true,
     rules: [
@@ -979,7 +979,7 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
       editorRef.current = editor
       monacoRef.current = monaco
       defineMonacoThemes(monaco)
-      monaco.editor.setTheme(useSettingsStore.getState().theme === 'light' ? LAKOORA_LIGHT_ID : LAKOORA_DARK_ID)
+      monaco.editor.setTheme(useSettingsStore.getState().theme === 'light' ? MESHFLOW_LIGHT_ID : MESHFLOW_DARK_ID)
       registerLspProviders(monaco, activeLsp)
       registerInlineCompletionProvider(monaco)
 
@@ -1062,6 +1062,17 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
         }
       })
 
+      // Cmd+I → open Composer Panel
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyI, () => {
+        const { open, addContext } = (require('../../store/useComposerStore') as typeof import('../../store/useComposerStore')).useComposerStore.getState()
+        const sel = editor.getSelection()
+        const model = editor.getModel()
+        if (sel && model && !sel.isEmpty()) {
+          addContext({ type: 'selection', value: model.getValueInRange(sel) })
+        }
+        open()
+      })
+
       // Cmd+S → format (if enabled) then save
       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, async () => {
         if (!tab) return
@@ -1090,7 +1101,7 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
       type LastShown = { insertText: string; lineNumber: number; column: number } | null
       let lastShownCompletion: LastShown = null
       let nextEditPrediction: { line: number; column: number; insertText: string } | null = null
-      const nextEditContextKey = editor.createContextKey<boolean>('lakooraNextEditActive', false)
+      const nextEditContextKey = editor.createContextKey<boolean>('meshflowNextEditActive', false)
 
       // Intercept the inline completion provider to capture handleItemDidShow.
       // We need to re-register after the initial provider to add the hook.
@@ -1124,7 +1135,7 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
                 options: {
                   after: {
                     content: prediction.insertText,
-                    inlineClassName: 'lakoora-next-edit-ghost',
+                    inlineClassName: 'meshflow-next-edit-ghost',
                   },
                 },
               }])
@@ -1143,14 +1154,14 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
           }
         })
 
-        // Tab keybinding — only fires when lakooraNextEditActive is true
+        // Tab keybinding — only fires when meshflowNextEditActive is true
         editor.addCommand(
           monaco.KeyCode.Tab,
           () => {
             if (!nextEditPrediction) return
             const pos = new monaco.Position(nextEditPrediction.line, nextEditPrediction.column)
             editor.setPosition(pos)
-            editor.executeEdits('lakoora-next-edit', [{
+            editor.executeEdits('meshflow-next-edit', [{
               range: new monaco.Range(pos.lineNumber, pos.column, pos.lineNumber, pos.column),
               text: nextEditPrediction.insertText,
             }])
@@ -1158,14 +1169,14 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
             nextEditPrediction = null
             nextEditContextKey.set(false)
           },
-          'lakooraNextEditActive',
+          'meshflowNextEditActive',
         )
       }
 
       // Expose lastShownCompletion setter so the inline completion provider
       // (module-level, can't close over per-mount state) can update it via
       // a side-channel stored on the editor instance.
-      ;(editor as unknown as Record<string, unknown>).__lakooraSetLastShown =
+      ;(editor as unknown as Record<string, unknown>).__meshflowSetLastShown =
         (item: LastShown) => { lastShownCompletion = item }
     },
     [tabId, tab, activeLsp, updateContent, markSaved, setCursor, setEditorSelection, openInlineEdit, openGoToLine, setProblems]
@@ -1181,7 +1192,7 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
   useEffect(() => {
     const monaco = monacoRef.current
     if (!monaco) return
-    monaco.editor.setTheme(theme === 'light' ? LAKOORA_LIGHT_ID : LAKOORA_DARK_ID)
+    monaco.editor.setTheme(theme === 'light' ? MESHFLOW_LIGHT_ID : MESHFLOW_DARK_ID)
   }, [theme])
 
   useEffect(() => {
@@ -1243,7 +1254,7 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
       fileBreakpoints.map((bp) => ({
         range: { startLineNumber: bp.line, startColumn: 1, endLineNumber: bp.line, endColumn: 1 },
         options: {
-          glyphMarginClassName: bp.condition ? 'lakoora-breakpoint-conditional' : 'lakoora-breakpoint',
+          glyphMarginClassName: bp.condition ? 'meshflow-breakpoint-conditional' : 'meshflow-breakpoint',
           glyphMarginHoverMessage: {
             value: bp.condition ? `Breakpoint at line ${bp.line} — if: \`${bp.condition}\`` : `Breakpoint at line ${bp.line}`,
           },
@@ -1277,7 +1288,7 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
           options: {
             after: {
               content: `  ${author.slice(0, 22)} · ${sha} · ${relativeTime(timestamp)}`,
-              inlineClassName: 'lakoora-blame',
+              inlineClassName: 'meshflow-blame',
             },
             showIfCollapsed: false,
           },
@@ -1301,7 +1312,7 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
       col.set(marks.map(({ line, type }) => ({
         range: { startLineNumber: line, startColumn: 1, endLineNumber: line, endColumn: 1 },
         options: {
-          linesDecorationsClassName: `lakoora-diff-${type}`,
+          linesDecorationsClassName: `meshflow-diff-${type}`,
           overviewRuler: {
             color: type === 'added' ? '#23863680' : type === 'modified' ? '#c2910080' : '#f8514980',
             position: 1,
@@ -1335,8 +1346,8 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
       editor.setPosition({ lineNumber: detail.line, column: detail.column ?? 1 })
       editor.focus()
     }
-    window.addEventListener('lakoora:goToLine', handler)
-    return () => window.removeEventListener('lakoora:goToLine', handler)
+    window.addEventListener('meshflow:goToLine', handler)
+    return () => window.removeEventListener('meshflow:goToLine', handler)
   }, [])
 
   if (!tab) return null
@@ -1347,7 +1358,7 @@ export function MonacoEditor({ tabId }: MonacoEditorProps) {
       path={tab.filePath}
       defaultLanguage={tab.language}
       defaultValue={tab.content}
-      theme={theme === 'light' ? LAKOORA_LIGHT_ID : LAKOORA_DARK_ID}
+      theme={theme === 'light' ? MESHFLOW_LIGHT_ID : MESHFLOW_DARK_ID}
       onChange={(value) => {
         if (value === undefined) return
         updateContent(tabId, value)

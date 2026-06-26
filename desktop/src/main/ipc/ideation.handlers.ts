@@ -4,7 +4,7 @@ import * as path from 'path'
 import { store } from '../store'
 import { repoRoot } from '../paths'
 
-// Specs are project-scoped (<projectPath>/.lakoora/specs/<slug>.md), distinct
+// Specs are project-scoped (<projectPath>/.meshflow/specs/<slug>.md), distinct
 // from plans which always live under <repoRoot>/plans/ regardless of which
 // project is open (runPythonJson always runs with cwd: repoRoot()). That
 // asymmetry already exists elsewhere in the app; the spec's frontmatter
@@ -13,7 +13,7 @@ import { repoRoot } from '../paths'
 
 function specsDir(): string {
   const projectPath = (store.get('projectPath') as string | undefined) || repoRoot()
-  return path.join(projectPath, '.lakoora', 'specs')
+  return path.join(projectPath, '.meshflow', 'specs')
 }
 
 export function registerIdeationHandlers(): void {

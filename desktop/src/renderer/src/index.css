@@ -29,8 +29,28 @@ body {
   scrollbar-color: hsl(222 18% 12%) transparent;
 }
 
+/* Panel resize handles */
+.resize-handle {
+  flex-shrink: 0;
+  position: relative;
+  z-index: 10;
+  transition: background 0.15s;
+}
+.resize-handle--vertical {
+  width: 5px;
+  cursor: col-resize;
+}
+.resize-handle--horizontal {
+  height: 5px;
+  cursor: row-resize;
+}
+.resize-handle:hover,
+.resize-handle:active {
+  background: hsl(220 60% 55% / 0.35);
+}
+
 /* Breakpoint red dots in Monaco glyph margin */
-.lakoora-breakpoint {
+.meshflow-breakpoint {
   background: #e53e3e;
   border-radius: 50%;
   width: 12px !important;
@@ -40,8 +60,8 @@ body {
   cursor: pointer;
 }
 
-/* Conditional breakpoints (Gap 97) — amber diamond, distinct from unconditional red dots */
-.lakoora-breakpoint-conditional {
+/* Conditional breakpoints — amber diamond, distinct from unconditional red dots */
+.meshflow-breakpoint-conditional {
   background: #f6ad55;
   border-radius: 2px;
   width: 11px !important;
@@ -53,7 +73,7 @@ body {
 }
 
 /* Inline git blame text injected after each line via Monaco's after decoration */
-.lakoora-blame {
+.meshflow-blame {
   color: #3a3f4b;
   font-style: italic;
   font-size: 11px;

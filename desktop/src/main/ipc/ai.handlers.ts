@@ -434,15 +434,68 @@ export function registerAiHandlers(): void {
             }
             nextRequest = responseParts
           }
+        } else if (resolvedModel.startsWith('groq/')) {
+          // Groq uses the OpenAI SDK pointed at a different base URL.
+          const { default: OpenAI } = await import('openai')
+          const apiKey = getSecret('groqApiKey')
+          if (!apiKey) throw new Error('Groq API key not configured. Go to Settings → AI Providers to add it.')
+          const client = new OpenAI({ apiKey, baseURL: 'https://api.groq.com/openai/v1' })
+          const groqModel = resolvedModel.slice('groq/'.length)
+          type OpenAIMessageParam = Parameters<typeof client.chat.completions.create>[0]['messages'][number]
+          const apiMessages: OpenAIMessageParam[] = messages.map((m) => ({ role: m.role as 'user' | 'assistant' | 'system', content: m.content }))
+          if (systemPrompt) apiMessages.unshift({ role: 'system', content: systemPrompt })
+
+          const stream = await client.chat.completions.create({
+            model: groqModel, messages: apiMessages, stream: true,
+            stream_options: { include_usage: true },
+          })
+          for await (const chunk of stream) {
+            if (controller.signal.aborted) break
+            if (chunk.usage) {
+              totalInputTokens += chunk.usage.prompt_tokens ?? 0
+              totalOutputTokens += chunk.usage.completion_tokens ?? 0
+            }
+            const delta = chunk.choices[0]?.delta?.content ?? ''
+            if (delta) send('ai:chunk', { streamId, delta })
+          }
+
+        } else if (resolvedModel.startsWith('openrouter/')) {
+          // OpenRouter exposes an OpenAI-compatible endpoint with a custom header.
+          const { default: OpenAI } = await import('openai')
+          const apiKey = getSecret('openrouterApiKey')
+          if (!apiKey) throw new Error('OpenRouter API key not configured. Go to Settings → AI Providers to add it.')
+          const client = new OpenAI({
+            apiKey,
+            baseURL: 'https://openrouter.ai/api/v1',
+            defaultHeaders: { 'HTTP-Referer': 'https://meshflow.app', 'X-Title': 'Meshflow IDE' },
+          })
+          const orModel = resolvedModel.slice('openrouter/'.length)
+          type OpenAIMessageParam = Parameters<typeof client.chat.completions.create>[0]['messages'][number]
+          const apiMessages: OpenAIMessageParam[] = messages.map((m) => ({ role: m.role as 'user' | 'assistant' | 'system', content: m.content }))
+          if (systemPrompt) apiMessages.unshift({ role: 'system', content: systemPrompt })
+
+          const stream = await client.chat.completions.create({
+            model: orModel, messages: apiMessages, stream: true,
+          })
+          for await (const chunk of stream) {
+            if (controller.signal.aborted) break
+            const delta = chunk.choices[0]?.delta?.content ?? ''
+            if (delta) send('ai:chunk', { streamId, delta })
+          }
+
         } else {
+          // Ollama — local inference via /api/chat (NDJSON stream)
           const ollamaUrl = (store.get('ollamaUrl') as string) || 'http://localhost:11434'
+          const ollamaModel = resolvedModel === 'ollama'
+            ? ((store.get('ollamaModel') as string) || 'llama3.2')
+            : resolvedModel
           const apiMessages = messages.map((m) => ({ role: m.role, content: m.content }))
           if (systemPrompt) apiMessages.unshift({ role: 'system', content: systemPrompt })
 
           const resp = await fetch(`${ollamaUrl}/api/chat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: resolvedModel, messages: apiMessages, stream: true }),
+            body: JSON.stringify({ model: ollamaModel, messages: apiMessages, stream: true }),
             signal: controller.signal,
           })
 

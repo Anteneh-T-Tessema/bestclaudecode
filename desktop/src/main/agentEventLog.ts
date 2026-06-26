@@ -2,7 +2,7 @@
  * Persistent, append-only event log for autonomous agent sessions — the
  * event-sourcing foundation for replay (Gap 51), audit (Gap 54), and
  * verification reports (Gap 53). One newline-delimited JSON file per
- * session at <projectPath>/.lakoora/agent-events/<sessionId>.jsonl.
+ * session at <projectPath>/.meshflow/agent-events/<sessionId>.jsonl.
  *
  * Each record is hash-chained (Gap 60): its `hash` covers the previous
  * record's hash plus its own content, so editing or deleting a past line
@@ -20,7 +20,7 @@ const GENESIS_HASH = '0'.repeat(64)
 
 function logDir(): string {
   const projectPath = (store.get('projectPath') as string | undefined) || repoRoot()
-  return path.join(projectPath, '.lakoora', 'agent-events')
+  return path.join(projectPath, '.meshflow', 'agent-events')
 }
 
 function logPath(sessionId: string): string {

@@ -8,7 +8,7 @@ describe('deployHistory', () => {
   let projectPath = ''
 
   beforeEach(() => {
-    projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'lakoora-deploy-history-'))
+    projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'meshflow-deploy-history-'))
   })
 
   afterEach(() => {

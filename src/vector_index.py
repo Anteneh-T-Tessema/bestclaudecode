@@ -98,6 +98,33 @@ class _Doc(NamedTuple):
 # Embedding backends
 # ---------------------------------------------------------------------------
 
+def load_lakoora_settings() -> dict:
+    """Load settings from lakoora-settings.json if it exists."""
+    home = Path.home()
+    if sys.platform == "darwin":
+        path = home / "Library" / "Application Support" / "lakoora" / "lakoora-settings.json"
+    elif sys.platform == "win32":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            path = Path(appdata) / "lakoora" / "lakoora-settings.json"
+        else:
+            path = home / "AppData" / "Roaming" / "lakoora" / "lakoora-settings.json"
+    else:
+        config_home = os.environ.get("XDG_CONFIG_HOME")
+        if config_home:
+            path = Path(config_home) / "lakoora" / "lakoora-settings.json"
+        else:
+            path = home / ".config" / "lakoora" / "lakoora-settings.json"
+    
+    try:
+        if path.exists():
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
 def _voyage_embed(texts: list[str], api_key: str) -> list[list[float]]:
     """Call the Voyage Code-3 embeddings API for a batch of texts.
 
@@ -118,6 +145,21 @@ def _voyage_embed(texts: list[str], api_key: str) -> list[list[float]]:
     with urllib.request.urlopen(request, timeout=_VOYAGE_TIMEOUT_S) as response:
         body = json.loads(response.read().decode("utf-8"))
     return [item["embedding"] for item in body["data"]]
+
+
+def _ollama_embed(texts: list[str], ollama_url: str, model: str) -> list[list[float]]:
+    """Call Ollama's local embeddings API (/api/embed) for a batch of texts."""
+    url = f"{ollama_url.rstrip('/')}/api/embed"
+    payload = json.dumps({"model": model, "input": texts}).encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=_VOYAGE_TIMEOUT_S) as response:
+        body = json.loads(response.read().decode("utf-8"))
+    return body["embeddings"]
 
 
 def _hash_embed(text: str, dimensions: int = _HASH_DIMENSIONS) -> list[float]:
@@ -144,23 +186,51 @@ def _hash_embed(text: str, dimensions: int = _HASH_DIMENSIONS) -> list[float]:
 
 
 def embed_texts(texts: list[str]) -> list[list[float]]:
-    """Embed a batch of texts, Voyage Code-3 if available, local fallback otherwise.
-
-    Returns an empty list for an empty input (no API call, no wasted work).
-    """
+    """Embed a batch of texts using the selected provider with robust fallbacks."""
     if not texts:
         return []
+
+    settings = load_lakoora_settings()
+
+    # 1. Try Local Ollama Embeddings if enabled
+    use_local = os.environ.get("LAKOORA_USE_LOCAL_EMBEDDINGS")
+    if use_local is not None:
+        use_local_embeddings = use_local.lower() in ("true", "1")
+    else:
+        use_local_embeddings = settings.get("useLocalEmbeddings", False)
+
+    if use_local_embeddings:
+        ollama_url = os.environ.get("LAKOORA_OLLAMA_URL") or settings.get("ollamaUrl", "http://localhost:11434")
+        model = os.environ.get("LAKOORA_LOCAL_EMBEDDING_MODEL") or settings.get("localEmbeddingModel", "nomic-embed-text")
+        try:
+            return _ollama_embed(texts, ollama_url, model)
+        except (urllib.error.URLError, TimeoutError, KeyError, ValueError, OSError):
+            pass  # fall through to other backends on failure
+
+    # 2. Try Voyage Code-3
     api_key = os.environ.get("VOYAGE_API_KEY")
     if api_key:
         try:
             return _voyage_embed(texts, api_key)
         except (urllib.error.URLError, TimeoutError, KeyError, ValueError, OSError):
-            pass  # fall through to the local embedder
+            pass  # fall through to local hash
+
+    # 3. Fall back to local hashing
     return [_hash_embed(t) for t in texts]
 
 
 def active_backend() -> str:
     """Return which embedding backend embed_texts() will use right now."""
+    settings = load_lakoora_settings()
+    use_local = os.environ.get("LAKOORA_USE_LOCAL_EMBEDDINGS")
+    if use_local is not None:
+        use_local_embeddings = use_local.lower() in ("true", "1")
+    else:
+        use_local_embeddings = settings.get("useLocalEmbeddings", False)
+
+    if use_local_embeddings:
+        model = os.environ.get("LAKOORA_LOCAL_EMBEDDING_MODEL") or settings.get("localEmbeddingModel", "nomic-embed-text")
+        return f"ollama ({model})"
     return "voyage-code-3" if os.environ.get("VOYAGE_API_KEY") else "local-hash"
 
 

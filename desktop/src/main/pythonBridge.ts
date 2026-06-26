@@ -1,6 +1,9 @@
 import { spawn } from 'child_process'
 import * as fs from 'fs'
+import * as os from 'os'
+import * as path from 'path'
 import { repoRoot, venvPython } from './paths'
+import { store } from './store'
 
 export interface PythonBridgeResult {
   ok: boolean
@@ -17,13 +20,61 @@ export interface CommandResult {
 /** Runs a one-off command to completion (not a pty) and captures its output — used for "Run Tests" from chat. */
 export function runCommand(bin: string, args: string[], cwd?: string): Promise<CommandResult> {
   return new Promise((resolve) => {
-    const child = spawn(bin, args, { cwd: cwd ?? repoRoot() })
+    const useSandboxExec = store.get('useSandboxExec') as string
+    let finalBin = bin
+    let finalArgs = args
+    let tempProfilePath: string | null = null
+
+    if (process.platform === 'darwin' && useSandboxExec && useSandboxExec !== 'never') {
+      const workspace = cwd ?? repoRoot()
+      if (useSandboxExec === 'no-network') {
+        finalArgs = ['-n', 'no-network', bin, ...args]
+        finalBin = 'sandbox-exec'
+      } else if (useSandboxExec === 'restrict-write') {
+        const profileContent = `(version 1)
+(allow default)
+(deny file-write*
+  (subpath "/System")
+  (subpath "/Library")
+  (subpath "/usr")
+  (subpath "/private/var")
+  (subpath "/private/etc")
+)
+(allow file-write*
+  (subpath "${workspace}")
+  (subpath "/private/tmp")
+  (subpath "/tmp")
+)`
+        tempProfilePath = path.join(os.tmpdir(), `meshflow_sandbox_${Date.now()}_${Math.random().toString(36).slice(2)}.sb`)
+        try {
+          fs.writeFileSync(tempProfilePath, profileContent, 'utf-8')
+          finalArgs = ['-f', tempProfilePath, bin, ...args]
+          finalBin = 'sandbox-exec'
+        } catch (e) {
+          console.error('Failed to write sandbox profile:', e)
+        }
+      }
+    }
+
+    const child = spawn(finalBin, finalArgs, { cwd: cwd ?? repoRoot() })
     let stdout = ''
     let stderr = ''
     child.stdout.on('data', (chunk: Buffer) => (stdout += chunk.toString()))
     child.stderr.on('data', (chunk: Buffer) => (stderr += chunk.toString()))
-    child.on('close', (code) => resolve({ stdout, stderr, exitCode: code ?? -1 }))
-    child.on('error', (err) => resolve({ stdout, stderr: err.message, exitCode: -1 }))
+    
+    child.on('close', (code) => {
+      if (tempProfilePath) {
+        fs.unlink(tempProfilePath, () => {})
+      }
+      resolve({ stdout, stderr, exitCode: code ?? -1 })
+    })
+    
+    child.on('error', (err) => {
+      if (tempProfilePath) {
+        fs.unlink(tempProfilePath, () => {})
+      }
+      resolve({ stdout, stderr: err.message, exitCode: -1 })
+    })
   })
 }
 

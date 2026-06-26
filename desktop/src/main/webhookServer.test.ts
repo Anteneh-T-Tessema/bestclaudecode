@@ -60,8 +60,8 @@ describe('webhookServer collab routes', () => {
   let port = 0
 
   beforeAll(async () => {
-    tmpUserData = fs.mkdtempSync(path.join(os.tmpdir(), 'lakoora-webhook-userdata-'))
-    projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'lakoora-webhook-project-'))
+    tmpUserData = fs.mkdtempSync(path.join(os.tmpdir(), 'meshflow-webhook-userdata-'))
+    projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'meshflow-webhook-project-'))
     setSecret('collabToken', 'test-token-123')
     const result = await startWebhookServer()
     expect(result.success).toBe(true)

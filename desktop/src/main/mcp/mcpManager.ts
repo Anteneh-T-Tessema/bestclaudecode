@@ -7,6 +7,7 @@
  * streamChat).
  */
 import { randomUUID } from 'crypto'
+import * as path from 'path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { store } from '../store'
@@ -48,10 +49,28 @@ const TOOL_SEP = '__'
 // Not a real connected server — just the namespace prefix for the builtin
 // tool below. Must not contain TOOL_SEP itself, or qualified-name splitting
 // (which splits on the first occurrence) would misparse it.
-const BUILTIN_SERVER_ID = '_lakoora'
+const BUILTIN_SERVER_ID = '_meshflow'
 
 export function listServerConfigs(): McpServerConfig[] {
-  return (store.get('mcpServers') as McpServerConfig[] | undefined) ?? []
+  const saved = store.get('mcpServers') as McpServerConfig[] | undefined
+  if (saved && saved.length > 0) return saved
+  
+  const defaults: McpServerConfig[] = [
+    {
+      id: 'build-log-server',
+      name: 'build-log-server',
+      command: 'node',
+      args: [path.join(repoRoot(), 'mcp-servers/build-log-server/dist/index.js')],
+    },
+    {
+      id: 'local-devops-server',
+      name: 'local-devops-server',
+      command: 'node',
+      args: [path.join(repoRoot(), 'mcp-servers/local-devops-server/dist/index.js')],
+    }
+  ]
+  store.set('mcpServers', defaults)
+  return defaults
 }
 
 function saveServerConfigs(configs: McpServerConfig[]): void {
@@ -78,7 +97,7 @@ export async function connectServer(id: string): Promise<{ success: boolean; err
 
   try {
     const transport = new StdioClientTransport({ command: config.command, args: config.args })
-    const client = new Client({ name: 'lakoora', version: '1.0.0' })
+    const client = new Client({ name: 'meshflow', version: '1.0.0' })
     await client.connect(transport)
     const { tools } = await client.listTools()
     connected.set(id, {

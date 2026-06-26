@@ -171,7 +171,7 @@ export function Terminal() {
     })
 
     // Store cleanup fns
-    ;(termRef.current as unknown as { _lakooraCleanup?: () => void })._lakooraCleanup = () => {
+    ;(termRef.current as unknown as { _meshflowCleanup?: () => void })._meshflowCleanup = () => {
       unData()
       unExit()
     }
@@ -183,7 +183,7 @@ export function Terminal() {
     return () => {
       const term = termRef.current
       if (term) {
-        const cleanup = (term as unknown as { _lakooraCleanup?: () => void })._lakooraCleanup
+        const cleanup = (term as unknown as { _meshflowCleanup?: () => void })._meshflowCleanup
         if (cleanup) cleanup()
         term.dispose()
         termRef.current = null

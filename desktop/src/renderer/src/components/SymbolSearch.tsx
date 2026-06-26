@@ -102,7 +102,7 @@ export function SymbolSearch() {
       const line = result.lineNumber
       if (line) {
         setTimeout(() => {
-          window.dispatchEvent(new CustomEvent('lakoora:goToLine', { detail: { line } }))
+          window.dispatchEvent(new CustomEvent('meshflow:goToLine', { detail: { line } }))
         }, 80)
       }
     } finally {

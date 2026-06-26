@@ -8,7 +8,7 @@ describe('monitorAlertLog', () => {
   let projectPath = ''
 
   beforeEach(() => {
-    projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'lakoora-monitor-alerts-'))
+    projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'meshflow-monitor-alerts-'))
   })
 
   afterEach(() => {

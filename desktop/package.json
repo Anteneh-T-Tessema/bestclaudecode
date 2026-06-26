@@ -1,5 +1,5 @@
 {
-  "name": "lakoora",
+  "name": "meshflow",
   "version": "0.1.0",
   "description": "Desktop UI for skillsagentsandmcp — transparent, auditable agent tooling",
   "private": true,
@@ -58,20 +58,22 @@
     "vitest": "^4.1.6"
   },
   "build": {
-    "appId": "com.lakoora.desktop",
-    "productName": "Lakoora",
+    "appId": "com.meshflow.desktop",
+    "productName": "Meshflow",
+    "icon": "build/icon.icns",
     "asarUnpack": [
       "**/node_modules/node-pty/**/*"
     ],
     "publish": {
       "provider": "github",
-      "owner": "lakoora",
-      "repo": "lakoora"
+      "owner": "meshflow",
+      "repo": "meshflow"
     },
     "mac": {
       "target": [
         "dmg"
       ],
+      "icon": "build/icon.icns",
       "category": "public.app-category.developer-tools",
       "identity": "Developer ID Application: <Your Name> (<TeamID>)",
       "hardenedRuntime": true,

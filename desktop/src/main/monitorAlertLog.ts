@@ -1,6 +1,6 @@
 /**
  * Plain (non-hash-chained) append-only alert log for the Monitor feature, at
- * <projectPath>/.lakoora/monitor-alerts/alerts.jsonl. Deliberately simpler
+ * <projectPath>/.meshflow/monitor-alerts/alerts.jsonl. Deliberately simpler
  * than agentEventLog.ts/deployHistory.ts's hash chains: those exist for
  * governance/audit tamper-evidence; alerts are just operational noise from a
  * log command the user themselves ran, with no audit story requiring it.
@@ -18,7 +18,7 @@ export interface AlertRecord {
 }
 
 function logPath(projectPath: string): string {
-  return path.join(projectPath, '.lakoora', 'monitor-alerts', 'alerts.jsonl')
+  return path.join(projectPath, '.meshflow', 'monitor-alerts', 'alerts.jsonl')
 }
 
 /** Appends one alert line. Best-effort — never throws. Returns the record, or null on failure. */

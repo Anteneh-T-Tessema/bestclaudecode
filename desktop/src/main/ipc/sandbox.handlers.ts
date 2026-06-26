@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import { runPythonJson } from '../pythonBridge'
 import { repoRoot } from '../paths'
+import { scanSandboxFiles } from '../sandboxScanner'
 
 export interface ShadowInfo {
   id: string
@@ -41,6 +42,14 @@ export function registerSandboxHandlers(): void {
   ipcMain.handle('agent:promoteShadow', async (_event, shadowId: string): Promise<boolean> => {
     const info = shadows.get(shadowId)
     if (!info) return false
+
+    // Run quality & security scans
+    const findings = scanSandboxFiles(info.path, info.base_ref)
+    if (findings.length > 0) {
+      const summary = findings.map(f => `- [${f.type.toUpperCase()}] ${f.message}`).join('\n')
+      throw new Error(`Promotion blocked by quality/security guardrails:\n${summary}`)
+    }
+
     const result = await runPythonJson([
       '-m', 'src.shadow_workspace', 'promote', info.path, repoRoot(), '--json',
     ])

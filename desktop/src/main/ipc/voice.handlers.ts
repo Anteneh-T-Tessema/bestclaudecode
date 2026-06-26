@@ -8,7 +8,7 @@ export function registerVoiceHandlers(): void {
   ipcMain.handle(
     'voice:transcribe',
     async (_event, audioBase64: string, _mimeType: string): Promise<{ text: string } | null> => {
-      const tempPath = path.join(os.tmpdir(), `lakoora-voice-${Date.now()}.webm`)
+      const tempPath = path.join(os.tmpdir(), `meshflow-voice-${Date.now()}.webm`)
       try {
         const buf = Buffer.from(audioBase64, 'base64')
         fs.writeFileSync(tempPath, buf)

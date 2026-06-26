@@ -39,7 +39,7 @@ const CONFIGS: Record<LangKey, LanguageServerConfig> = {
     workspaceConfiguration: { python: { pythonPath: venvPython() } },
   },
   ts: {
-    command: process.env.LAKOORA_TS_LS_BIN
+    command: process.env.MESHFLOW_TS_LS_BIN
       ?? path.join(repoRoot(), 'desktop', 'node_modules', '.bin', 'typescript-language-server'),
     args: ['--stdio'],
     rootUri: root(),
@@ -47,25 +47,25 @@ const CONFIGS: Record<LangKey, LanguageServerConfig> = {
     initializationOptions: { tsserver: { logDirectory: null, logVerbosity: 'off' } },
   },
   go: {
-    command: process.env.LAKOORA_GOPLS_BIN ?? 'gopls',
+    command: process.env.MESHFLOW_GOPLS_BIN ?? 'gopls',
     args: [],
     rootUri: root(),
     languageId: 'go',
   },
   rust: {
-    command: process.env.LAKOORA_RUST_ANALYZER_BIN ?? 'rust-analyzer',
+    command: process.env.MESHFLOW_RUST_ANALYZER_BIN ?? 'rust-analyzer',
     args: [],
     rootUri: root(),
     languageId: 'rust',
   },
   java: {
-    command: process.env.LAKOORA_JDTLS_BIN ?? 'jdtls',
+    command: process.env.MESHFLOW_JDTLS_BIN ?? 'jdtls',
     args: [],
     rootUri: root(),
     languageId: 'java',
   },
   c: {
-    command: process.env.LAKOORA_CLANGD_BIN ?? 'clangd',
+    command: process.env.MESHFLOW_CLANGD_BIN ?? 'clangd',
     args: ['--background-index'],
     rootUri: root(),
     languageId: cLangId,

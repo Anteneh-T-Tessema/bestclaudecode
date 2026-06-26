@@ -16,7 +16,7 @@ interface EventMessage {
 
 type EventListener = (payload: unknown) => void
 
-export class LakooraSocket {
+export class MeshflowSocket {
   private ws: WebSocket
   private readonly pending = new Map<string, (response: ResponseMessage) => void>()
   private readonly eventListeners = new Map<string, Set<EventListener>>()
@@ -26,7 +26,7 @@ export class LakooraSocket {
     this.ws = new WebSocket(url)
     this.ready = new Promise((resolve, reject) => {
       this.ws.addEventListener('open', () => resolve())
-      this.ws.addEventListener('error', () => reject(new Error(`Failed to connect to Lakoora server at ${url}`)))
+      this.ws.addEventListener('error', () => reject(new Error(`Failed to connect to Meshflow server at ${url}`)))
     })
     this.ws.addEventListener('message', (event: MessageEvent<string>) => {
       let msg: ResponseMessage | EventMessage
@@ -72,6 +72,6 @@ export class LakooraSocket {
   }
 }
 
-const SERVER_URL = (import.meta.env.VITE_LAKOORA_SERVER_URL as string | undefined) ?? 'ws://localhost:8787'
+const SERVER_URL = (import.meta.env.VITE_MESHFLOW_SERVER_URL as string | undefined) ?? 'ws://localhost:8787'
 
-export const socket = new LakooraSocket(SERVER_URL)
+export const socket = new MeshflowSocket(SERVER_URL)

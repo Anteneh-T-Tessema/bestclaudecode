@@ -1,11 +1,13 @@
 import { ipcMain } from 'electron'
 import { randomUUID } from 'crypto'
 import * as path from 'path'
+import { promises as fsp } from 'fs'
 import { store } from '../store'
 import { repoRoot } from '../paths'
+import { runCommand } from '../pythonBridge'
 import { detectDeployCommand, runDeploy, runPreviewDeploy, promoteDeploy, rollbackDeploy, providerFromCommand } from '../deploy'
 import { appendDeployRecord, listDeployRecords, type DeployRecord } from '../deployHistory'
-import { broadcast, getActiveSessions } from '../agents/autonomousAgent'
+import { broadcast, getActiveSessions, streamToString } from '../agents/autonomousAgent'
 
 // Gap 140 — manual, user-triggered deploy, distinct from the autonomous
 // agent's automatic end-of-session deploy (autonomousAgent.ts's
@@ -21,6 +23,152 @@ export function registerDeployHandlers(): void {
   ipcMain.handle('deploy:detect', async (): Promise<string | null> => {
     return detectDeployCommand(projectRoot())
   })
+
+  ipcMain.handle(
+    'deploy:runWithChecks',
+    async (_event, opts: { model?: string }): Promise<{ success: boolean; deployUrl?: string; error?: string; findings?: Array<{ severity: string; file: string; message: string }> }> => {
+      if (getActiveSessions().length > 0) {
+        return { success: false, error: 'An agent session is currently running — wait for it to finish before deploying manually.' }
+      }
+
+      const targetPath = projectRoot()
+      const sessionId = `manual-deploy-${Date.now()}`
+      const deployCmd = await detectDeployCommand(targetPath)
+      if (!deployCmd) {
+        return { success: false, error: 'No deploy configuration found (no package.json "deploy" script, vercel.json, .vercel, netlify.toml, .netlify, cdk.json, or k8s/kubernetes directory)' }
+      }
+      const provider = providerFromCommand(deployCmd)
+      const target: 'preview' | 'production' = provider === 'npm' ? 'production' : 'preview'
+
+      const hitlDeployment = store.get('hitlDeployment') as string
+      if (hitlDeployment === 'confirm') {
+        const { dialog } = await import('electron')
+        const choice = dialog.showMessageBoxSync({
+          type: 'warning',
+          buttons: ['Yes, Deploy', 'Cancel'],
+          defaultId: 1,
+          title: 'Confirm Deployment',
+          message: `Are you sure you want to run the deployment command: ${deployCmd}?`,
+          detail: 'This will release the active changes to production/preview.',
+        })
+        if (choice === 1) {
+          return { success: false, error: 'Deployment cancelled by user.' }
+        }
+      }
+
+      // 1. Run Tests Pre-flight
+      broadcast({ sessionId, planFile: '', subtaskId: 'deploy-preflight', subtaskDescription: '🧪 Running pre-flight unit tests…', status: 'deploying', doneCount: 0, totalCount: 2 })
+      
+      let testCmd = ''
+      try {
+        const raw = await fsp.readFile(path.join(targetPath, 'package.json'), 'utf-8')
+        const pkg = JSON.parse(raw) as { scripts?: Record<string, string> }
+        if (pkg.scripts?.test) {
+          testCmd = 'npm test'
+        }
+      } catch { /* no package.json or no scripts */ }
+
+      if (!testCmd) {
+        // Check python pytest
+        try {
+          await fsp.access(path.join(targetPath, '.venv/bin/pytest'))
+          testCmd = '.venv/bin/pytest src/tests/ -q'
+        } catch { /* no pytest */ }
+      }
+
+      if (testCmd) {
+        try {
+          const testResult = await runCommand('/bin/sh', ['-c', testCmd], targetPath)
+          if (testResult.exitCode !== 0) {
+            const error = `Tests failed (exit code ${testResult.exitCode}). Fix test failures before deploying.`
+            broadcast({ sessionId, planFile: '', subtaskId: 'deploy-preflight', subtaskDescription: '', status: 'error', error, doneCount: 0, totalCount: 2 })
+            return { success: false, error }
+          }
+        } catch (err) {
+          const error = `Failed to run tests: ${String(err)}`
+          broadcast({ sessionId, planFile: '', subtaskId: 'deploy-preflight', subtaskDescription: '', status: 'error', error, doneCount: 0, totalCount: 2 })
+          return { success: false, error }
+        }
+      }
+
+      // 2. AI Code Review Pre-flight
+      broadcast({ sessionId, planFile: '', subtaskId: 'deploy-preflight', subtaskDescription: '🤖 Running AI code review on local changes…', status: 'deploying', doneCount: 1, totalCount: 2 })
+      
+      let diff = ''
+      try {
+        const staged = await runCommand('git', ['diff', '--cached'], targetPath)
+        const unstaged = await runCommand('git', ['diff'], targetPath)
+        diff = (staged.stdout + '\n' + unstaged.stdout).trim()
+      } catch { /* git diff error, skip review */ }
+
+      if (diff) {
+        try {
+          const model = opts?.model || (store.get('activeModel') as string) || 'claude-sonnet-4-6'
+          const reviewResponse = await streamToString([
+            {
+              role: 'system',
+              content: 'You are an automated security and functional code reviewer. Respond ONLY with a JSON object. The JSON must have: "findings" (array of {severity: "error" | "warning", file: string, message: string}) and "summary" (string). If no issues are found, return an empty findings array. Avoid code blocks or markdown wrappers; return raw JSON only.'
+            },
+            {
+              role: 'user',
+              content: `Review this diff for security flaws, credentials leakage, or syntax errors before deployment:\n\n${diff.slice(0, 8000)}`
+            }
+          ], model, new AbortController().signal)
+
+          let cleaned = reviewResponse.trim()
+          if (cleaned.startsWith('```')) {
+            cleaned = cleaned.replace(/^```[a-z]*\n/, '').replace(/\n```$/, '')
+          }
+          const parsed = JSON.parse(cleaned) as { findings?: Array<{ severity: 'error' | 'warning'; file: string; message: string }>; summary?: string }
+          
+          const errors = parsed.findings?.filter(f => f.severity === 'error') || []
+          if (errors.length > 0) {
+            const error = `Deploy blocked by AI Code Reviewer. Critical issues found in files: ${errors.map(e => e.file).join(', ')}. Detail: ${errors[0].message}`
+            broadcast({ sessionId, planFile: '', subtaskId: 'deploy-preflight', subtaskDescription: '', status: 'error', error, doneCount: 1, totalCount: 2 })
+            return { success: false, error, findings: parsed.findings }
+          }
+        } catch (err) {
+          console.warn('[deploy preflight] Code review failed or JSON parse error:', err)
+        }
+      }
+
+      // 3. Run deploy command
+      broadcast({
+        sessionId, planFile: '', subtaskId: 'deploy-run', subtaskDescription: `Running ${deployCmd}…`,
+        status: 'deploying', doneCount: 2, totalCount: 2,
+      })
+
+      try {
+        const { exitCode, stderr, stdout, deployUrl } = target === 'preview'
+          ? await runPreviewDeploy(targetPath, provider as 'vercel' | 'netlify')
+          : await runDeploy(targetPath, deployCmd)
+        
+        if (exitCode !== 0) {
+          const error = stderr || stdout || `Deploy command exited with code ${exitCode}`
+          broadcast({
+            sessionId, planFile: '', subtaskId: 'deploy-run', subtaskDescription: '',
+            status: 'error', error, doneCount: 2, totalCount: 2,
+          })
+          appendDeployRecord(targetPath, { id: randomUUID(), ts: Date.now(), provider, deployCmd, target, exitCode, url: undefined })
+          return { success: false, error }
+        }
+        
+        broadcast({
+          sessionId, planFile: '', subtaskId: 'deploy-run', subtaskDescription: '',
+          status: 'deployed', doneCount: 2, totalCount: 2, deployUrl,
+        })
+        appendDeployRecord(targetPath, { id: randomUUID(), ts: Date.now(), provider, deployCmd, target, exitCode, url: deployUrl })
+        return { success: true, deployUrl }
+      } catch (err) {
+        const error = String(err)
+        broadcast({
+          sessionId, planFile: '', subtaskId: 'deploy-run', subtaskDescription: '',
+          status: 'error', error, doneCount: 2, totalCount: 2,
+        })
+        return { success: false, error }
+      }
+    }
+  )
 
   ipcMain.handle('deploy:run', async (): Promise<{ success: boolean; deployUrl?: string; error?: string }> => {
     // Gap 140 — block manual deploys while an autonomous agent session is active:
@@ -41,6 +189,22 @@ export function registerDeployHandlers(): void {
     // explicit Promote (see deploy:promote). npm-script projects have no
     // preview concept, so they keep the original direct-to-prod behavior.
     const target: 'preview' | 'production' = provider === 'npm' ? 'production' : 'preview'
+
+    const hitlDeployment = store.get('hitlDeployment') as string
+    if (hitlDeployment === 'confirm') {
+      const { dialog } = await import('electron')
+      const choice = dialog.showMessageBoxSync({
+        type: 'warning',
+        buttons: ['Yes, Deploy', 'Cancel'],
+        defaultId: 1,
+        title: 'Confirm Deployment',
+        message: `Are you sure you want to run the deployment command: ${deployCmd}?`,
+        detail: 'This will release the active changes to production/preview.',
+      })
+      if (choice === 1) {
+        return { success: false, error: 'Deployment cancelled by user.' }
+      }
+    }
 
     broadcast({
       sessionId, planFile: '', subtaskId: '', subtaskDescription: `Running ${deployCmd}…`,
@@ -86,7 +250,7 @@ export function registerDeployHandlers(): void {
     }
     const targetPath = projectRoot()
     const record = listDeployRecords(targetPath).find((r) => r.id === deployId)
-    if (!record || record.provider === 'npm') {
+    if (!record || (record.provider !== 'vercel' && record.provider !== 'netlify')) {
       return { success: false, error: 'No promotable preview deployment found' }
     }
     const sessionId = `manual-deploy-${Date.now()}`

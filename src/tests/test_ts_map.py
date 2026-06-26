@@ -136,7 +136,7 @@ def test_build_ts_map_combines_multiple_files(tmp_path):
     _write(tmp_path, "b.ts", "export class Beta {}\n")
     result = build_ts_map(tmp_path)
     assert "function alpha()" in result
-    assert "class Beta()" in result
+    assert "class Beta:" in result
 
 
 def test_format_context_include_ts(tmp_path):

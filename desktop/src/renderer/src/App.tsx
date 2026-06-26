@@ -8,6 +8,7 @@ import { QuickOpen } from './components/QuickOpen'
 import { SymbolSearch } from './components/SymbolSearch'
 import { ToastContainer } from './components/ToastContainer'
 import { KeyboardShortcuts } from './components/KeyboardShortcuts'
+import { ComposerPanel } from './components/editor/ComposerPanel'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { useSettingsStore } from './store/useSettingsStore'
 import { useEditorStore } from './store/useEditorStore'
@@ -67,6 +68,7 @@ export default function App() {
         <SymbolSearch />
         <ToastContainer />
         <KeyboardShortcuts />
+        <ComposerPanel />
       </div>
     </ErrorBoundary>
   )

@@ -8,6 +8,7 @@ interface SettingsStore {
   openaiApiKey: string
   googleApiKey: string
   ollamaUrl: string
+  ollamaModel: string
   theme: Theme
   fontSize: number
   wordWrap: boolean
@@ -24,6 +25,15 @@ interface SettingsStore {
   recentProjects: string[]
   activeModel: ModelId
   globalRules: string
+  hitlSandboxPromote: 'always' | 'review'
+  hitlCommandRun: 'always' | 'policy' | 'never'
+  hitlFileEdit: 'always' | 'sandbox'
+  hitlDeployment: 'always' | 'confirm'
+  customModelName: string
+  customModelProvider: 'anthropic' | 'openai' | 'google' | 'ollama'
+  useSandboxExec: 'never' | 'no-network' | 'restrict-write'
+  useLocalEmbeddings: boolean
+  localEmbeddingModel: string
   loaded: boolean
 
   // Actions
@@ -40,6 +50,7 @@ const DEFAULTS = {
   openaiApiKey: '',
   googleApiKey: '',
   ollamaUrl: 'http://localhost:11434',
+  ollamaModel: 'llama3.2',
   theme: 'dark' as Theme,
   fontSize: 14,
   wordWrap: false,
@@ -55,6 +66,15 @@ const DEFAULTS = {
   recentProjects: [] as string[],
   activeModel: 'claude-sonnet-4-6' as ModelId,
   globalRules: '',
+  hitlSandboxPromote: 'review' as 'always' | 'review',
+  hitlCommandRun: 'policy' as 'always' | 'policy' | 'never',
+  hitlFileEdit: 'sandbox' as 'always' | 'sandbox',
+  hitlDeployment: 'confirm' as 'always' | 'confirm',
+  customModelName: '',
+  customModelProvider: 'anthropic' as 'anthropic' | 'openai' | 'google' | 'ollama',
+  useSandboxExec: 'never' as 'never' | 'no-network' | 'restrict-write',
+  useLocalEmbeddings: false,
+  localEmbeddingModel: 'nomic-embed-text',
 }
 
 export const useSettingsStore = create<SettingsStore>((set) => ({

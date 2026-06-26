@@ -351,7 +351,7 @@ export function CommandPalette() {
             </div>
           ))}
           <span style={{ flex: 1 }} />
-          <span style={{ fontSize: 10, color: fg[4] }}>Lakoora</span>
+          <span style={{ fontSize: 10, color: fg[4] }}>Meshflow</span>
         </div>
       </div>
     </div>

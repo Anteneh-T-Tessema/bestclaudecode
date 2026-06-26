@@ -32,6 +32,8 @@ from __future__ import annotations
 
 import re
 import sys
+import json
+import subprocess
 from pathlib import Path
 
 _TS_EXTENSIONS = frozenset({".ts", ".tsx", ".js", ".mjs", ".cjs"})
@@ -107,6 +109,30 @@ def build_ts_map(root: Path) -> str:
     format is identical to build_repo_map() so the two can be joined with
     a blank line separator.
     """
+    # 1. Try to run the Node.js AST parser script
+    script_path = Path(__file__).parent.parent / "desktop" / "scripts" / "ts_ast_parser.js"
+    if script_path.exists():
+        try:
+            res = subprocess.run(
+                ["node", str(script_path), str(root)],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            data = json.loads(res.stdout)
+            outlines = []
+            for file_path, symbols in sorted(data.items()):
+                if not symbols:
+                    outlines.append(f"{file_path} -- (no top-level declarations)")
+                else:
+                    outlines.append(f"{file_path}\n" + "\n".join(symbols))
+            if outlines:
+                return "\n\n".join(outlines)
+        except Exception:
+            # Fall back to regex parser on failure
+            pass
+
+    # 2. Fallback to regex parser
     files = _iter_ts_files(root)
     if not files:
         return "(no TypeScript/JavaScript files found)"

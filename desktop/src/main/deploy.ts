@@ -42,6 +42,20 @@ export async function detectDeployCommand(targetPath: string): Promise<string | 
     } catch { /* not found */ }
   }
 
+  try {
+    await fs.access(path.join(targetPath, 'cdk.json'))
+    return 'cdk deploy --require-approval never'
+  } catch { /* not found */ }
+
+  for (const dir of ['k8s', 'kubernetes']) {
+    try {
+      const stats = await fs.stat(path.join(targetPath, dir))
+      if (stats.isDirectory()) {
+        return `kubectl apply -f ${dir}/`
+      }
+    } catch { /* not found */ }
+  }
+
   return null
 }
 
@@ -54,7 +68,7 @@ export async function runDeploy(
   return { ...result, deployUrl: extractUrl(combined) ?? undefined }
 }
 
-export type DeployProvider = 'vercel' | 'netlify' | 'npm'
+export type DeployProvider = 'vercel' | 'netlify' | 'npm' | 'cdk' | 'kubernetes'
 
 /** Vercel deployment URLs/ids are plain alphanumeric+dots+dashes — reject anything else before shell interpolation. */
 function isSafeDeployIdentifier(value: string): boolean {
@@ -65,6 +79,8 @@ function isSafeDeployIdentifier(value: string): boolean {
 export function providerFromCommand(deployCmd: string): DeployProvider {
   if (deployCmd.startsWith('vercel')) return 'vercel'
   if (deployCmd.startsWith('netlify')) return 'netlify'
+  if (deployCmd.startsWith('cdk')) return 'cdk'
+  if (deployCmd.startsWith('kubectl')) return 'kubernetes'
   return 'npm'
 }
 

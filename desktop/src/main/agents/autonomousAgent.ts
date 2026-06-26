@@ -31,9 +31,10 @@ import { publish } from '../sessionRelay'
 import { sendNotification } from '../ipc/notifications.handlers'
 import { loadPolicy, checkCommand, checkPath, checkApproval, globToRegex } from '../policyEngine'
 import { validateGeneratedTs } from '../codeValidator'
-import { detectDeployCommand, runDeploy, providerFromCommand } from '../deploy'
+import { detectDeployCommand, runDeploy, runPreviewDeploy, providerFromCommand } from '../deploy'
 import { appendDeployRecord } from '../deployHistory'
 import * as path from 'path'
+import { scanSandboxFiles } from '../sandboxScanner'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -70,7 +71,7 @@ export interface AgentProgress {
   browseUrl?: string
   /** Swarm — role of the agent handling this subtask (frontend/backend/security/test/docs). */
   role?: string
-  /** Governance — role of the approver (from .lakooraapprovers.json). */
+  /** Governance — role of the approver (from .meshflowapprovers.json). */
   approverRole?: string
   /** Swarm — set on a child session's earliest events if it was spawned by another session. */
   parentSessionId?: string
@@ -211,11 +212,11 @@ function requestApproval(sessionId: string, timeoutMs?: number): Promise<Approva
   })
 }
 
-/** Looks up a username in .lakooraapprovers.json at projectPath. Returns the role string or null. */
+/** Looks up a username in .meshflowapprovers.json at projectPath. Returns the role string or null. */
 async function lookupApproverRole(projectPath: string, username: string): Promise<string | null> {
   try {
     const { promises: fsp } = await import('fs')
-    const raw = await fsp.readFile(path.join(projectPath, '.lakooraapprovers.json'), 'utf-8')
+    const raw = await fsp.readFile(path.join(projectPath, '.meshflowapprovers.json'), 'utf-8')
     const map = JSON.parse(raw) as Record<string, string>
     return map[username] ?? null
   } catch {
@@ -342,7 +343,22 @@ export async function streamToString(
 ): Promise<string> {
   let result = ''
 
+  let provider = 'ollama'
   if (model.startsWith('claude')) {
+    provider = 'anthropic'
+  } else if (model.startsWith('gpt') || model.startsWith('o1')) {
+    provider = 'openai'
+  } else if (model.startsWith('gemini')) {
+    provider = 'google'
+  } else {
+    const customName = store.get('customModelName') as string
+    const customProv = store.get('customModelProvider') as string
+    if (customName && model === customName) {
+      provider = customProv || 'ollama'
+    }
+  }
+
+  if (provider === 'anthropic') {
     const { default: Anthropic } = await import('@anthropic-ai/sdk')
     const apiKey = getSecret('anthropicApiKey')
     if (!apiKey) throw new Error('Anthropic API key not configured')
@@ -369,7 +385,7 @@ export async function streamToString(
     return result
   }
 
-  if (model.startsWith('gpt')) {
+  if (provider === 'openai') {
     const { default: OpenAI } = await import('openai')
     const apiKey = getSecret('openaiApiKey')
     if (!apiKey) throw new Error('OpenAI API key not configured')
@@ -382,6 +398,31 @@ export async function streamToString(
     for await (const chunk of stream) {
       if (signal.aborted) break
       result += chunk.choices[0]?.delta?.content ?? ''
+    }
+    return result
+  }
+
+  if (provider === 'google') {
+    const { GoogleGenerativeAI } = await import('@google/generative-ai')
+    const apiKey = getSecret('googleApiKey')
+    if (!apiKey) throw new Error('Google API key not configured')
+    const ai = new GoogleGenerativeAI(apiKey)
+    const systemMessage = messages.find((m) => m.role === 'system')
+    const gModel = ai.getGenerativeModel({
+      model,
+      ...(systemMessage ? { systemInstruction: systemMessage.content } : {}),
+    })
+    const nonSystem = messages.filter((m) => m.role !== 'system')
+    const history = nonSystem.slice(0, -1).map((m) => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content }],
+    }))
+    const lastMsg = nonSystem[nonSystem.length - 1]
+    const chat = gModel.startChat({ history })
+    const streamResult = await chat.sendMessageStream(lastMsg ? lastMsg.content : '')
+    for await (const chunk of streamResult.stream) {
+      if (signal.aborted) break
+      result += chunk.text()
     }
     return result
   }
@@ -483,7 +524,7 @@ async function attemptDeploy(opts: {
 // ── Verification report (Gap 53) ──────────────────────────────────────────────
 
 /**
- * Writes a Markdown "evidence" report to <projectPath>/.lakoora/reports/<sessionId>.md
+ * Writes a Markdown "evidence" report to <projectPath>/.meshflow/reports/<sessionId>.md
  * summarizing the session: subtask completion, policy/error events pulled from the
  * persisted event log, and the final PR link if one was opened. Generated regardless
  * of whether the session fully succeeded — an audit trail is most useful precisely
@@ -561,7 +602,7 @@ async function writeVerificationReport(opts: {
 
   try {
     const { promises: fsp } = await import('fs')
-    const reportDir = path.join(projectPath, '.lakoora', 'reports')
+    const reportDir = path.join(projectPath, '.meshflow', 'reports')
     await fsp.mkdir(reportDir, { recursive: true })
     await fsp.writeFile(path.join(reportDir, `${sessionId}.md`), lines.join('\n'))
   } catch {
@@ -590,7 +631,7 @@ async function writeVerificationReport(opts: {
     '--task', plan.goal,
     '--verdict', verdict,
     '--outcome', outcome,
-    '--agent', 'lakoora-agent',
+    '--agent', 'meshflow-agent',
     '--retries', String(events.filter((e) => e.status === 'error').length),
     '--dir', path.join(projectPath, 'docs', 'decisions'),
     ...findings.flatMap((f) => ['--finding', f]),
@@ -624,6 +665,45 @@ async function finalizeSession(opts: {
     return
   }
 
+  // Run quality & security guardrail scans on the committed changes in worktree
+  const findings = scanSandboxFiles(worktreePath, 'HEAD~1')
+  const hitlSandboxPromote = store.get('hitlSandboxPromote') as string
+  let promoted = false
+
+  if (findings.length > 0) {
+    const summary = findings.map(f => `[${f.type.toUpperCase()}] ${f.message}`).join(', ')
+    const error = `Promotion blocked by quality/security guardrails: ${summary}`
+    broadcast({
+      sessionId,
+      planFile,
+      subtaskId: '',
+      subtaskDescription: 'Promotion blocked by quality/security guardrails',
+      status: 'blocked',
+      error,
+      doneCount,
+      totalCount,
+      branch
+    })
+  } else if (hitlSandboxPromote === 'always') {
+    broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: `Merging changes into active branch...`, status: 'finalizing', doneCount, totalCount, branch })
+    try {
+      const sha = (await runGit(worktreePath, ['rev-parse', 'HEAD'])).trim()
+      await runGit(projectPath, ['cherry-pick', sha])
+      promoted = true
+    } catch (err) {
+      console.error('Failed to auto-promote:', err)
+      broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: `Auto-promote failed: ${String(err)}. Falling back to opening PR…`, status: 'finalizing', doneCount, totalCount, branch })
+    }
+  }
+
+  if (promoted) {
+    await removeWorktree(projectPath, worktreePath, true).catch(() => {})
+    await writeVerificationReport({ sessionId, projectPath, plan, branch, doneCount, totalCount, prUrl: null })
+    sendNotification(`[Meshflow] Agent session ${sessionId.slice(0, 8)} finished — changes promoted directly.`)
+    broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: '', status: 'finished', doneCount, totalCount, branch })
+    return
+  }
+
   // Push
   broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: `Pushing branch ${branch}…`, status: 'finalizing', doneCount, totalCount, branch })
   try {
@@ -634,12 +714,29 @@ async function finalizeSession(opts: {
     return
   }
 
+  // Auto-preview deploy for non-main branches (Gap 3 — auto-preview after push)
+  const isMainBranch = /^(main|master)$/.test(branch)
+  if (!isMainBranch) {
+    const previewCmd = await detectDeployCommand(worktreePath)
+    const previewProvider = previewCmd ? providerFromCommand(previewCmd) : null
+    if (previewProvider === 'vercel' || previewProvider === 'netlify') {
+      broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: `Running preview deploy (${previewProvider})…`, status: 'deploying', doneCount, totalCount, branch })
+      try {
+        const { exitCode, deployUrl } = await runPreviewDeploy(worktreePath, previewProvider)
+        if (exitCode === 0 && deployUrl) {
+          broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: '', status: 'deployed', doneCount, totalCount, branch, deployUrl })
+          appendDeployRecord(worktreePath, { id: randomUUID(), ts: Date.now(), provider: previewProvider, deployCmd: previewCmd ?? previewProvider, target: 'preview', exitCode, url: deployUrl })
+        }
+      } catch { /* preview deploy failure is non-fatal */ }
+    }
+  }
+
   // Create PR
   broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: 'Opening PR…', status: 'finalizing', doneCount, totalCount, branch })
   const base = await runGit(projectPath, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => 'main')
   const prUrl = await createPr(worktreePath, {
     title: `Agent: ${plan.goal}`,
-    body: `Automated changes by Lakoora autonomous agent.\n\nGoal: ${plan.goal}`,
+    body: `Automated changes by Meshflow autonomous agent.\n\nGoal: ${plan.goal}`,
     base,
     head: branch,
   })
@@ -660,13 +757,13 @@ async function finalizeSession(opts: {
 
   await writeVerificationReport({ sessionId, projectPath, plan, branch, doneCount, totalCount, prUrl })
 
-  sendNotification(`[Lakoora] Agent session ${sessionId.slice(0, 8)} finished — ${doneCount}/${totalCount} subtasks${prUrl ? `. PR: ${prUrl}` : ''}`)
+  sendNotification(`[Meshflow] Agent session ${sessionId.slice(0, 8)} finished — ${doneCount}/${totalCount} subtasks${prUrl ? `. PR: ${prUrl}` : ''}`)
   broadcast({ sessionId, planFile, subtaskId: '', subtaskDescription: '', status: 'finished', doneCount, totalCount, branch, prUrl })
 }
 
 // ── Main orchestration loop ───────────────────────────────────────────────────
 
-const AGENT_SYSTEM_PROMPT = `You are an autonomous coding agent running inside the Lakoora IDE.
+const AGENT_SYSTEM_PROMPT = `You are an autonomous coding agent running inside the Meshflow IDE.
 You receive one subtask at a time from a task plan. Implement it completely.
 
 To write files use:
@@ -926,25 +1023,33 @@ export async function startAutonomousSession(opts: {
       }
 
       // Set up worktree isolation
-      const slug = initialPlan.goal.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30)
-      const shortId = randomUUID().slice(0, 8)
-      agentBranch = `agent/${slug}-${shortId}`
-      const candidateWorktreePath = path.join(projectPath, '.lakoora-worktrees', agentBranch)
+      const hitlFileEdit = store.get('hitlFileEdit') as string
+      if (hitlFileEdit !== 'always') {
+        const slug = initialPlan.goal.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30)
+        const shortId = randomUUID().slice(0, 8)
+        agentBranch = `agent/${slug}-${shortId}`
+        const candidateWorktreePath = path.join(projectPath, '.meshflow-worktrees', agentBranch)
 
-      broadcast({
-        sessionId, planFile, subtaskId: '', subtaskDescription: `Setting up worktree on branch ${agentBranch}`,
-        status: 'preparing', doneCount: 0, totalCount: initialPlan.subtasks.length, branch: agentBranch,
-        parentSessionId,
-      })
-
-      try {
-        await createWorktree(projectPath, candidateWorktreePath, agentBranch)
-        worktreePath = candidateWorktreePath
-        activePath = candidateWorktreePath
-      } catch {
-        // Not a git repo, or worktree creation failed — fall back to live working tree
         broadcast({
-          sessionId, planFile, subtaskId: '', subtaskDescription: 'No git repo or worktree creation failed — using live working tree',
+          sessionId, planFile, subtaskId: '', subtaskDescription: `Setting up worktree on branch ${agentBranch}`,
+          status: 'preparing', doneCount: 0, totalCount: initialPlan.subtasks.length, branch: agentBranch,
+          parentSessionId,
+        })
+
+        try {
+          await createWorktree(projectPath, candidateWorktreePath, agentBranch)
+          worktreePath = candidateWorktreePath
+          activePath = candidateWorktreePath
+        } catch {
+          // Not a git repo, or worktree creation failed — fall back to live working tree
+          broadcast({
+            sessionId, planFile, subtaskId: '', subtaskDescription: 'No git repo or worktree creation failed — using live working tree',
+            status: 'preparing', doneCount: 0, totalCount: initialPlan.subtasks.length,
+          })
+        }
+      } else {
+        broadcast({
+          sessionId, planFile, subtaskId: '', subtaskDescription: 'Using live working tree directly (worktree isolation disabled)',
           status: 'preparing', doneCount: 0, totalCount: initialPlan.subtasks.length,
         })
       }
@@ -957,12 +1062,12 @@ export async function startAutonomousSession(opts: {
       let projectRulesBlock = ''
       try {
         const { promises: fsp } = await import('fs')
-        const rules = await fsp.readFile(path.join(projectPath, '.lakoorarules'), 'utf-8').catch(() => '')
-        if (rules.trim()) projectRulesBlock = `\n\n# Project Rules (.lakoorarules)\n${rules.trim()}`
+        const rules = await fsp.readFile(path.join(projectPath, '.meshflowrules'), 'utf-8').catch(() => '')
+        if (rules.trim()) projectRulesBlock = `\n\n# Project Rules (.meshflowrules)\n${rules.trim()}`
       } catch { /* no rules file */ }
       const agentSystemPrompt = AGENT_SYSTEM_PROMPT + globalRulesBlock + projectRulesBlock
 
-      // Gap 52 — project-configurable policy (.lakoorapolicies.json), layered on
+      // Gap 52 — project-configurable policy (.meshflowpolicies.json), layered on
       // top of the hardcoded destructive-command blocklist (isBlocked above).
       const policy = loadPolicy(projectPath)
 
@@ -974,7 +1079,7 @@ export async function startAutonomousSession(opts: {
       // Gap 142 — bounded retry budget per subtask. retryCount tracks completed
       // failed attempts (0-indexed); isRetry distinguishes "any attempt past the
       // first" for prompt/status purposes and is unaffected by the count itself.
-      // max_retries is project-configurable via .lakoorapolicies.json (defaults to 3).
+      // max_retries is project-configurable via .meshflowpolicies.json (defaults to 3).
       let retryCount = 0
       const MAX_RETRIES = policy.max_retries
       // Cached per subtask id so a retry of the same subtask reuses the
@@ -1160,20 +1265,26 @@ export async function startAutonomousSession(opts: {
             runError = `Command blocked by project policy: ${run.command} matches "${commandViolation.pattern}"`
             break
           }
-          const approvalNeeded = checkApproval(policy, run.command)
+          const hitlCommandRun = store.get('hitlCommandRun') as string
+          let approvalNeeded = null
+          if (hitlCommandRun === 'never') {
+            approvalNeeded = { rule: 'require_approval', pattern: 'Always Prompt setting', subject: run.command }
+          } else if (hitlCommandRun === 'policy' || !hitlCommandRun) {
+            approvalNeeded = checkApproval(policy, run.command)
+          }
           if (approvalNeeded) {
             broadcast({
               sessionId, planFile, subtaskId: subtask.id, subtaskDescription: subtask.description,
               status: 'pending-approval', error: `Approval required: ${run.command} matches "${approvalNeeded.pattern}"`,
               doneCount, totalCount,
             })
-            sendNotification(`[Lakoora] Agent session ${sessionId.slice(0, 8)} requires approval for: \`${run.command}\``)
+            sendNotification(`[Meshflow] Agent session ${sessionId.slice(0, 8)} requires approval for: \`${run.command}\``)
             // Gap 78 — OS-level desktop notification so the user knows approval is needed
             // even when the IDE is in the background.
             const { Notification } = await import('electron')
             if (Notification.isSupported()) {
               new Notification({
-                title: 'Lakoora — Approval Required',
+                title: 'Meshflow — Approval Required',
                 body: `Agent paused: "${run.command}" requires your approval.`,
               }).show()
             }
@@ -1188,7 +1299,7 @@ export async function startAutonomousSession(opts: {
                 status: 'approval-rejected', error: `Rejected by ${approver}: ${run.command}`, doneCount, totalCount,
                 approverRole: approverRole ?? undefined,
               })
-              sendNotification(`[Lakoora] Agent session ${sessionId.slice(0, 8)} approval rejected by ${approver}${approverRole ? ` (${approverRole})` : ''}`)
+              sendNotification(`[Meshflow] Agent session ${sessionId.slice(0, 8)} approval rejected by ${approver}${approverRole ? ` (${approverRole})` : ''}`)
               return // human rejection halts the session cleanly — no retry, worktree left intact for review
             }
             broadcast({
@@ -1256,8 +1367,22 @@ export async function startAutonomousSession(opts: {
         }
 
         // Delegate independent sub-goals to brand-new child sessions (fire-and-forget).
-        for (const spawn of parseSpawns(response)) {
+        const spawns = parseSpawns(response)
+        for (const spawn of spawns) {
           void spawnChildSession(sessionId, planFile, spawn, model, doneCount, totalCount)
+        }
+
+        // Guard: if the AI produced no concrete actions at all, the subtask was not
+        // actually implemented — retry with a directive prompt rather than marking done.
+        const hasActions = edits.length > 0 || runs.length > 0 || browses.length > 0 || spawns.length > 0
+        if (!hasActions) {
+          if (retryCount >= MAX_RETRIES) {
+            broadcast({ sessionId, planFile, subtaskId: subtask.id, subtaskDescription: subtask.description, status: 'blocked', error: 'Agent produced no edits, runs, or browses — no implementation', doneCount, totalCount })
+            break
+          }
+          retryContext = 'Previous attempt produced no file edits, shell commands, or browse actions. You MUST produce <<<EDIT>>> blocks to write code. Do not respond with prose only.'
+          retryCount++
+          continue
         }
 
         // Subtask succeeded
@@ -1411,14 +1536,14 @@ export async function getSessionDiff(branch: string): Promise<string> {
 }
 
 /**
- * Renders a session's verification report (.lakoora/reports/<sessionId>.md) as a
+ * Renders a session's verification report (.meshflow/reports/<sessionId>.md) as a
  * standalone styled HTML file alongside it, for sharing with an auditor who
  * doesn't have a Markdown renderer. Returns the written file's path, or null
  * if no report exists for that session.
  */
 export async function exportReportHtml(sessionId: string): Promise<string | null> {
   const projectPath = (store.get('projectPath') as string | undefined) ?? repoRoot()
-  const reportDir = path.join(projectPath, '.lakoora', 'reports')
+  const reportDir = path.join(projectPath, '.meshflow', 'reports')
   const mdPath = path.join(reportDir, `${sessionId}.md`)
   try {
     const { promises: fsp } = await import('fs')
@@ -1438,7 +1563,7 @@ export async function exportReportHtml(sessionId: string): Promise<string | null
  *  first if it does not exist, then renders it in an offscreen window. */
 export async function exportReportPdf(sessionId: string): Promise<string | null> {
   const projectPath = (store.get('projectPath') as string | undefined) ?? repoRoot()
-  const reportDir = path.join(projectPath, '.lakoora', 'reports')
+  const reportDir = path.join(projectPath, '.meshflow', 'reports')
   const { promises: fsp } = await import('fs')
 
   // Ensure the HTML report exists (generate if not).

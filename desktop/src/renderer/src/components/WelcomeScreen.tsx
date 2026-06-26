@@ -46,7 +46,7 @@ export function WelcomeScreen() {
           <path d="M8 0 L15 3 V8 C15 12 12 15 8 16 C4 15 1 12 1 8 V3 Z" fill={accent.green.fg} opacity="0.9" />
         </svg>
         <span style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.02em', color: fg[0] }}>
-          LAKOORA
+          MESHFLOW
         </span>
       </div>
       <p style={{ color: fg[2], fontSize: 13, marginBottom: 40, textAlign: 'center' }}>

@@ -12,7 +12,7 @@ const notPortedWarned = new Set<string>()
 function notPorted<T>(label: string, fallback: T): T {
   if (!notPortedWarned.has(label)) {
     notPortedWarned.add(label)
-    console.warn(`[lakoora-web] "${label}" has no server-side handler yet — returning a stub.`)
+    console.warn(`[meshflow-web] "${label}" has no server-side handler yet — returning a stub.`)
   }
   return fallback
 }
@@ -436,6 +436,7 @@ export function createWebApi(): API {
     deploy: {
       detect: () => Promise.resolve(notPorted('deploy.detect', null)),
       run: () => Promise.resolve(notPorted('deploy.run', { success: false, error: 'not supported in web mode' })),
+      runWithChecks: () => Promise.resolve(notPorted('deploy.runWithChecks', { success: false, error: 'not supported in web mode' })),
       history: () => Promise.resolve(notPorted('deploy.history', [])),
       promote: () => Promise.resolve(notPorted('deploy.promote', { success: false, error: 'not supported in web mode' })),
       rollback: () => Promise.resolve(notPorted('deploy.rollback', { success: false, error: 'not supported in web mode' })),

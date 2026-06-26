@@ -1,8 +1,92 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { Bot, Square, CheckCircle2, AlertCircle, Loader, CircleDot, Play, GitBranch, GitPullRequest, Rocket, History, ShieldAlert, X, Check } from 'lucide-react'
+import { Bot, Square, CheckCircle2, AlertCircle, Loader, CircleDot, Play, GitBranch, GitPullRequest, Rocket, History, ShieldAlert, X, Check, Copy, ExternalLink } from 'lucide-react'
 import { PanelHeader, accent, border, fg, surface } from '../../design'
 import { toast } from '../../store/useToastStore'
 import { useChatStore } from '../../store/useChatStore'
+
+interface DiffLine {
+  type: 'add' | 'delete' | 'normal';
+  content: string;
+  numOld?: number;
+  numNew?: number;
+}
+
+interface ParsedFileDiff {
+  path: string;
+  name: string;
+  type: 'added' | 'deleted' | 'modified';
+  lines: DiffLine[];
+}
+
+function parseGitDiff(diff: string): ParsedFileDiff[] {
+  if (!diff) return []
+  const files: ParsedFileDiff[] = []
+  const parts = diff.split(/^diff --git /m)
+  
+  for (const part of parts) {
+    if (!part.trim()) continue
+    const lines = part.split('\n')
+    const headerLine = lines[0]
+    
+    let filePath = ''
+    const bMatch = headerLine.match(/\sb\/(.+)$/)
+    if (bMatch) {
+      filePath = bMatch[1]
+    } else {
+      const tokens = headerLine.split(' ')
+      filePath = tokens[tokens.length - 1].replace(/^[ab]\//, '')
+    }
+    
+    if (!filePath) continue
+    
+    const parsedLines: DiffLine[] = []
+    let type: 'added' | 'deleted' | 'modified' = 'modified'
+    let lnOld = 0
+    let lnNew = 0
+    
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i]
+      if (line.startsWith('new file mode')) {
+        type = 'added'
+        continue
+      }
+      if (line.startsWith('deleted file mode')) {
+        type = 'deleted'
+        continue
+      }
+      if (line.startsWith('---') || line.startsWith('+++') || line.startsWith('index ')) {
+        continue
+      }
+      
+      if (line.startsWith('@@')) {
+        const hunkMatch = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/)
+        if (hunkMatch) {
+          lnOld = parseInt(hunkMatch[1], 10)
+          lnNew = parseInt(hunkMatch[2], 10)
+        }
+        parsedLines.push({ type: 'normal', content: line })
+        continue
+      }
+      
+      if (line.startsWith('+')) {
+        parsedLines.push({ type: 'add', content: line.slice(1), numNew: lnNew++ })
+      } else if (line.startsWith('-')) {
+        parsedLines.push({ type: 'delete', content: line.slice(1), numOld: lnOld++ })
+      } else {
+        parsedLines.push({ type: 'normal', content: line.slice(1), numOld: lnOld++, numNew: lnNew++ })
+      }
+    }
+    
+    files.push({
+      path: filePath,
+      name: filePath.split('/').pop() || filePath,
+      type,
+      lines: parsedLines,
+    })
+  }
+  return files
+}
+
 
 type Subtask = { id: string; description: string; depends_on: string[]; done: boolean }
 type SessionSummary = { id: string; branch?: string; startedAt: number }
@@ -123,6 +207,8 @@ export function AgentProgressPanel() {
   const activeModel = useChatStore((s) => s.activeModel)
   const goalRef = useRef<HTMLInputElement>(null)
 
+  const [selectedLiveSessionId, setSelectedLiveSessionId] = useState('')
+
   // Gap 54 — history mode: browse the persisted event log of a past session.
   const [mode, setMode] = useState<'live' | 'history'>('live')
   const [historySessions, setHistorySessions] = useState<SessionSummary[]>([])
@@ -194,8 +280,47 @@ export function AgentProgressPanel() {
     else toast.error('No events found for this session')
   }, [selectedSession])
 
+  const liveSessionIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const e of events) {
+      if (e.sessionId) ids.add(e.sessionId)
+    }
+    for (const id of runningSessionIds) {
+      ids.add(id)
+    }
+    return Array.from(ids)
+  }, [events, runningSessionIds])
+
+  const activeLiveSessionId = selectedLiveSessionId || (liveSessionIds.length > 0 ? liveSessionIds[liveSessionIds.length - 1] : '')
+
+  const filteredLiveEvents = useMemo(() => {
+    if (!activeLiveSessionId) return events
+    return events.filter((e) => e.sessionId === activeLiveSessionId)
+  }, [events, activeLiveSessionId])
+
+  useEffect(() => {
+    const handleFocus = (e: Event) => {
+      const customEv = e as CustomEvent<{ sessionId: string; mode: 'live' | 'history' }>
+      if (!customEv.detail) return
+      const { sessionId, mode: targetMode } = customEv.detail
+      setMode(targetMode)
+      if (targetMode === 'live') {
+        setSelectedLiveSessionId(sessionId)
+      } else {
+        setSelectedSession(sessionId)
+        window.api.agent.listEventSessions().then((sessions) => {
+          setHistorySessions(sessions)
+        })
+      }
+    }
+    window.addEventListener('focus-agent-session', handleFocus)
+    return () => {
+      window.removeEventListener('focus-agent-session', handleFocus)
+    }
+  }, [])
+
   // Gap 59 — subtask dependency graph for whichever event stream is active.
-  const activeEvents = mode === 'live' ? events : historyEvents
+  const activeEvents = mode === 'live' ? filteredLiveEvents : historyEvents
   const planFile = activeEvents.length > 0 ? activeEvents[activeEvents.length - 1].planFile : ''
   const [planSubtasks, setPlanSubtasks] = useState<Subtask[]>([])
 
@@ -242,11 +367,21 @@ export function AgentProgressPanel() {
   }, [])
 
   const stop = useCallback(async () => {
-    const ids = [...runningSessionIds]
-    await Promise.all(ids.map((id) => window.api.agent.stopAutonomous(id)))
-    setRunningSessionIds(new Set())
-    toast.success(ids.length > 1 ? `Stopped ${ids.length} agent sessions` : 'Agent stopped')
-  }, [runningSessionIds])
+    if (activeLiveSessionId) {
+      await window.api.agent.stopAutonomous(activeLiveSessionId)
+      setRunningSessionIds((prev) => {
+        const s = new Set(prev)
+        s.delete(activeLiveSessionId)
+        return s
+      })
+      toast.success(`Stopped agent session ${activeLiveSessionId.slice(0, 8)}`)
+    } else {
+      const ids = [...runningSessionIds]
+      await Promise.all(ids.map((id) => window.api.agent.stopAutonomous(id)))
+      setRunningSessionIds(new Set())
+      toast.success(ids.length > 1 ? `Stopped ${ids.length} agent sessions` : 'Agent stopped')
+    }
+  }, [activeLiveSessionId, runningSessionIds])
 
   const clear = useCallback(() => setEvents([]), [])
 
@@ -272,6 +407,8 @@ export function AgentProgressPanel() {
   const [shadowDiff, setShadowDiff] = useState<string | null>(null)
   const [shadowBusy, setShadowBusy] = useState(false)
   const [shadowDiffOpen, setShadowDiffOpen] = useState(false)
+  const [expandedFiles, setExpandedFiles] = useState<Record<string, boolean>>({})
+  const parsedDiff = useMemo(() => parseGitDiff(shadowDiff || ''), [shadowDiff])
 
   const createShadow = useCallback(async () => {
     setShadowBusy(true)
@@ -344,7 +481,10 @@ export function AgentProgressPanel() {
       if (!summary?.path) { toast.error('Could not locate plan file'); return }
       const sessionId = await window.api.agent.startAutonomous({ planFile: summary.path, model: activeModel })
       setGoal('')
-      if (sessionId) setRunningSessionIds((prev) => new Set([...prev, sessionId]))
+      if (sessionId) {
+        setRunningSessionIds((prev) => new Set([...prev, sessionId]))
+        setSelectedLiveSessionId(sessionId)
+      }
       toast.success('Background agent started')
     } catch (err) {
       toast.error(`Launch failed: ${(err as Error).message}`)
@@ -353,7 +493,7 @@ export function AgentProgressPanel() {
     }
   }, [goal, isRunning, launching, activeModel])
 
-  const latest = events.length > 0 ? events[events.length - 1] : null
+  const latest = activeEvents.length > 0 ? activeEvents[activeEvents.length - 1] : null
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
@@ -406,6 +546,38 @@ export function AgentProgressPanel() {
           </div>
         }
       />
+
+      {/* Live mode — session picker when multiple live sessions are active/available */}
+      {mode === 'live' && liveSessionIds.length > 1 && (
+        <div style={{ padding: '8px 10px', borderBottom: `1px solid ${border[1]}`, flexShrink: 0, background: surface.base }}>
+          <div style={{ fontSize: 10, color: fg[4], marginBottom: 4, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+            Active/Live Sessions
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <select
+              value={activeLiveSessionId}
+              onChange={(e) => setSelectedLiveSessionId(e.target.value)}
+              title="Select active agent session"
+              style={{
+                flex: 1, background: surface.raised, border: `1px solid ${border[0]}`,
+                borderRadius: 5, padding: '5px 8px', fontSize: 11, color: fg[0], outline: 'none', minWidth: 0,
+              }}
+            >
+              {liveSessionIds.map((id) => {
+                const sessEvents = events.filter((e) => e.sessionId === id)
+                const lastEv = sessEvents[sessEvents.length - 1]
+                const label = lastEv?.branch ? `${lastEv.branch} (${id.slice(0, 8)})` : id.slice(0, 8)
+                const isSessRunning = runningSessionIds.has(id)
+                return (
+                  <option key={id} value={id}>
+                    {label} — {isSessRunning ? 'running' : 'finished'}
+                  </option>
+                )
+              })}
+            </select>
+          </div>
+        </div>
+      )}
 
       {/* History mode — session picker over the persisted event log */}
       {mode === 'history' && (
@@ -613,8 +785,10 @@ export function AgentProgressPanel() {
             <span style={{ fontSize: 11, fontWeight: 600, color: fg[0] }}>
               {statusLabel(latest.status, latest.retryCount, latest.maxRetries)}
             </span>
-            {latest.branch && (
-              <span style={{ fontSize: 9, color: fg[4], fontFamily: 'monospace' }}>{latest.branch}</span>
+            {latest.branch ? (
+              <span style={{ fontSize: 9, color: fg[4], fontFamily: 'monospace' }}>{latest.branch} ({latest.sessionId.slice(0, 8)})</span>
+            ) : (
+              <span style={{ fontSize: 9, color: fg[4], fontFamily: 'monospace' }}>{latest.sessionId.slice(0, 8)}</span>
             )}
             <span style={{ fontSize: 10, color: fg[4], marginLeft: 'auto' }}>
               {latest.doneCount}/{latest.totalCount}
@@ -631,8 +805,55 @@ export function AgentProgressPanel() {
             </div>
           )}
           {latest.deployUrl && (
-            <div style={{ fontSize: 10, color: accent.cyan.fg, paddingLeft: 17, marginTop: 2 }}>
-              Deployed: <a href={latest.deployUrl} style={{ color: accent.cyan.fg }}>{latest.deployUrl}</a>
+            <div style={{ paddingLeft: 17, marginTop: 6 }}>
+              <div style={{
+                display: 'inline-flex', alignItems: 'center', gap: 8,
+                background: `${accent.green.fg}18`,
+                border: `1px solid ${accent.green.border}`,
+                borderRadius: 8, padding: '6px 10px', maxWidth: '100%',
+              }}>
+                <span style={{ fontSize: 13 }}>🚀</span>
+                <a
+                  href={latest.deployUrl}
+                  onClick={(e) => { e.preventDefault(); window.open(latest.deployUrl, '_blank') }}
+                  style={{
+                    fontSize: 10, color: accent.green.fg, fontFamily: 'monospace',
+                    textDecoration: 'none', flex: 1, minWidth: 0,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}
+                  title={latest.deployUrl}
+                >
+                  {latest.deployUrl}
+                </a>
+                <button
+                  type="button"
+                  onClick={() => window.open(latest.deployUrl, '_blank')}
+                  title="Open preview in browser"
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 3,
+                    fontSize: 9, fontWeight: 700, padding: '3px 8px', borderRadius: 4,
+                    background: accent.green.fg, border: 'none', color: '#000',
+                    cursor: 'pointer', flexShrink: 0,
+                  }}
+                >
+                  <ExternalLink size={9} /> Open Preview
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(latest.deployUrl ?? '')
+                    toast.success('Preview URL copied')
+                  }}
+                  title="Copy URL"
+                  style={{
+                    display: 'flex', alignItems: 'center',
+                    background: 'transparent', border: `1px solid ${accent.green.border}`,
+                    borderRadius: 4, padding: 3, color: accent.green.fg, cursor: 'pointer', flexShrink: 0,
+                  }}
+                >
+                  <Copy size={9} />
+                </button>
+              </div>
             </div>
           )}
           {(latest.error) && (
@@ -739,15 +960,193 @@ export function AgentProgressPanel() {
               </button>
             </div>
             {shadowDiffOpen && shadowDiff && (
-              <pre
-                style={{
-                  marginTop: 6, maxHeight: 200, overflow: 'auto', fontSize: 9.5,
-                  fontFamily: 'monospace', color: fg[2], background: surface.void,
-                  border: `1px solid ${border[1]}`, borderRadius: 4, padding: 8, whiteSpace: 'pre-wrap',
-                }}
-              >
-                {shadowDiff}
-              </pre>
+              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {/* Inspect Mode instructions card */}
+                <div style={{
+                  padding: 8,
+                  borderRadius: 6,
+                  background: surface.raised,
+                  border: `1px solid ${border[1]}`,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 4
+                }}>
+                  <div style={{ fontSize: 9.5, fontWeight: 700, color: fg[3], textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    Inspect Sandbox Branch
+                  </div>
+                  <div style={{ fontSize: 10, color: fg[2], lineHeight: 1.4 }}>
+                    To test, run, or build this shadow workspace locally, run this command in your terminal:
+                  </div>
+                  <div style={{ display: 'flex', gap: 4, marginTop: 2, alignItems: 'center' }}>
+                    <code style={{
+                      flex: 1,
+                      background: surface.void,
+                      border: `1px solid ${border[0]}`,
+                      borderRadius: 4,
+                      padding: '4px 6px',
+                      fontSize: 10,
+                      fontFamily: 'monospace',
+                      color: fg[0],
+                      overflowX: 'auto',
+                      whiteSpace: 'nowrap'
+                    }}>
+                      git checkout {shadow.branch}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(`git checkout ${shadow.branch}`)
+                        toast.success('Checkout command copied to clipboard')
+                      }}
+                      title="Copy checkout command"
+                      style={{
+                        background: 'transparent',
+                        border: `1px solid ${border[0]}`,
+                        borderRadius: 4,
+                        padding: 4,
+                        color: fg[3],
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}
+                    >
+                      <Copy size={11} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Parsed Diff Explorer */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div style={{ fontSize: 9.5, fontWeight: 700, color: fg[3], textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 2 }}>
+                    Files Changed ({parsedDiff.length})
+                  </div>
+                  {parsedDiff.length === 0 ? (
+                    <div style={{ fontSize: 10, color: fg[4], fontStyle: 'italic', padding: 4 }}>
+                      (No changes detected)
+                    </div>
+                  ) : (
+                    parsedDiff.map((file) => {
+                      const isExpanded = !!expandedFiles[file.path]
+                      const badgeColor = file.type === 'added' ? accent.green.fg : file.type === 'deleted' ? accent.red.fg : accent.amber.fg
+                      const badgeLabel = file.type.toUpperCase()
+                      
+                      return (
+                        <div key={file.path} style={{
+                          border: `1px solid ${border[1]}`,
+                          borderRadius: 6,
+                          background: surface.void,
+                          overflow: 'hidden'
+                        }}>
+                          {/* File Header */}
+                          <div
+                            onClick={() => setExpandedFiles(prev => ({ ...prev, [file.path]: !prev[file.path] }))}
+                            style={{
+                              padding: '5px 8px',
+                              background: surface.raised,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              fontSize: 10,
+                              fontFamily: 'monospace'
+                            }}
+                          >
+                            <span style={{ color: fg[1], fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '80%' }}>
+                              {file.path}
+                            </span>
+                            <span style={{
+                              fontSize: 8,
+                              fontWeight: 700,
+                              padding: '1px 4px',
+                              borderRadius: 3,
+                              background: `${badgeColor}15`,
+                              color: badgeColor,
+                              border: `1px solid ${badgeColor}30`,
+                              marginLeft: 6,
+                              flexShrink: 0
+                            }}>
+                              {badgeLabel}
+                            </span>
+                          </div>
+
+                          {/* File Content / Diff Lines */}
+                          {isExpanded && (
+                            <div style={{
+                              maxHeight: 250,
+                              overflowY: 'auto',
+                              borderTop: `1px solid ${border[1]}`,
+                              fontSize: 9.5,
+                              fontFamily: 'monospace',
+                              background: surface.void,
+                              lineHeight: 1.4
+                            }}>
+                              {file.lines.map((line, idx) => {
+                                let lineBg = 'transparent'
+                                let lineTextColor = fg[2]
+                                if (line.type === 'add') {
+                                  lineBg = 'rgba(46, 160, 67, 0.12)'
+                                  lineTextColor = accent.green.fg
+                                } else if (line.type === 'delete') {
+                                  lineBg = 'rgba(248, 81, 73, 0.12)'
+                                  lineTextColor = accent.red.fg
+                                } else if (line.content.startsWith('@@')) {
+                                  lineBg = 'rgba(56, 139, 253, 0.08)'
+                                  lineTextColor = accent.violet.fg
+                                }
+
+                                return (
+                                  <div key={idx} style={{
+                                    display: 'flex',
+                                    background: lineBg,
+                                    color: lineTextColor,
+                                    borderBottom: `1px solid ${border[2]}20`
+                                  }}>
+                                    {/* Line Numbers Column */}
+                                    <div style={{
+                                      width: 25,
+                                      padding: '0 4px',
+                                      textAlign: 'right',
+                                      color: fg[4],
+                                      borderRight: `1px solid ${border[2]}50`,
+                                      userSelect: 'none',
+                                      flexShrink: 0
+                                    }}>
+                                      {line.numOld !== undefined ? line.numOld : ''}
+                                    </div>
+                                    <div style={{
+                                      width: 25,
+                                      padding: '0 4px',
+                                      textAlign: 'right',
+                                      color: fg[4],
+                                      borderRight: `1px solid ${border[2]}50`,
+                                      userSelect: 'none',
+                                      flexShrink: 0
+                                    }}>
+                                      {line.numNew !== undefined ? line.numNew : ''}
+                                    </div>
+                                    {/* Code Content Column */}
+                                    <pre style={{
+                                      margin: 0,
+                                      padding: '0 6px',
+                                      whiteSpace: 'pre-wrap',
+                                      wordBreak: 'break-all',
+                                      fontFamily: 'inherit',
+                                      flex: 1
+                                    }}>
+                                      {line.type === 'add' ? '+' : line.type === 'delete' ? '-' : ' '}{line.content}
+                                    </pre>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })
+                  )}
+                </div>
+              </div>
             )}
           </div>
         )}
@@ -782,12 +1181,12 @@ export function AgentProgressPanel() {
       <div style={{ flex: 1, overflowY: 'auto', fontFamily: 'monospace' }}>
         {mode === 'live' ? (
           <>
-            {events.length === 0 && (
+            {activeEvents.length === 0 && (
               <div style={{ padding: 16, textAlign: 'center', color: fg[4], fontSize: 11 }}>
                 No agent activity yet. Start an autonomous run from the Task Planner panel.
               </div>
             )}
-            {events.map((e, i) => <EventRow key={i} e={e} />)}
+            {activeEvents.map((e, i) => <EventRow key={i} e={e} />)}
           </>
         ) : (
           <>

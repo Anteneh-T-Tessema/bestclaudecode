@@ -1,7 +1,7 @@
 /**
  * Inbound webhook listener — the Integration Fabric's missing half. Until now
- * Lakoora only ever pulled from external systems (Linear, Jira, GitHub PR/issue
- * fetches); this lets external systems push into Lakoora:
+ * Meshflow only ever pulled from external systems (Linear, Jira, GitHub PR/issue
+ * fetches); this lets external systems push into Meshflow:
  *
  *   POST /webhook/slack   — Slack slash command body (application/x-www-form-urlencoded)
  *                            → creates a plan from the command text and starts an agent session.
@@ -9,7 +9,7 @@
  *                            → on `action: "opened"`, runs an AI review and posts it via `gh`.
  *   GET  /health          — liveness/status probe for external monitoring.
  *
- * Auth is an optional shared secret (X-Lakoora-Secret header), configured via
+ * Auth is an optional shared secret (X-Meshflow-Secret header), configured via
  * Settings → Webhooks. With no secret configured the server accepts requests
  * unauthenticated — acceptable for local/loopback use, not for exposing the
  * port beyond localhost.
@@ -59,7 +59,7 @@ function readBody(req: http.IncomingMessage): Promise<string> {
 function isAuthorized(req: http.IncomingMessage): boolean {
   const expected = getSecret('webhookSecret')
   if (!expected) return true
-  return req.headers['x-lakoora-secret'] === expected
+  return req.headers['x-meshflow-secret'] === expected
 }
 
 /** Separate trust boundary from isAuthorized() — collabToken is for human teammates watching a session, not inbound automation. */
@@ -78,7 +78,7 @@ function sendJson(res: http.ServerResponse, status: number, payload: unknown): v
 async function handleSlackCommand(body: string): Promise<{ status: number; payload: unknown }> {
   const params = new URLSearchParams(body)
   const text = params.get('text')?.trim() ?? ''
-  if (!text) return { status: 200, payload: { text: 'Usage: /lakoora <goal for the agent>' } }
+  if (!text) return { status: 200, payload: { text: 'Usage: /meshflow <goal for the agent>' } }
 
   const result = await runPythonJson(['-m', 'src.task_planner', '--new', text, '--save'])
   if (!result.ok) return { status: 200, payload: { text: `Failed to create plan: ${result.error}` } }
@@ -87,7 +87,7 @@ async function handleSlackCommand(body: string): Promise<{ status: number; paylo
   const model = (store.get('activeModel') as string | undefined) ?? 'claude-sonnet-4-6'
   try {
     const sessionId = await startAutonomousSession({ planFile, model })
-    return { status: 200, payload: { text: `Started Lakoora agent session \`${sessionId.slice(0, 8)}\` for: ${text}` } }
+    return { status: 200, payload: { text: `Started Meshflow agent session \`${sessionId.slice(0, 8)}\` for: ${text}` } }
   } catch (err) {
     return { status: 200, payload: { text: `Could not start agent: ${err}` } }
   }
@@ -135,11 +135,49 @@ async function handleGithubPullRequest(body: string): Promise<{ status: number; 
   }
 
   const posted = await postPrReview(projectPath, event.number, {
-    body: parsed.summary ?? 'Automated review by Lakoora.',
+    body: parsed.summary ?? 'Automated review by Meshflow.',
     event: 'COMMENT',
     comments: parsed.comments ?? [],
   })
   return { status: 200, payload: { reviewed: posted, prNumber: event.number } }
+}
+
+async function handleSentryWebhook(body: string): Promise<{ status: number; payload: unknown }> {
+  // Sentry sends JSON with an `event` object containing `level`, `message`, `logger`, `exception`
+  let event: { event?: { level?: string; message?: string; exception?: { values?: Array<{ type?: string; value?: string }> } }; action?: string }
+  try { event = JSON.parse(body) } catch { return { status: 400, payload: { error: 'invalid JSON' } } }
+  if (event.action && event.action !== 'triggered') return { status: 200, payload: { skipped: true } }
+
+  const level = event.event?.level ?? 'error'
+  const message = event.event?.message ??
+    event.event?.exception?.values?.[0]?.value ??
+    'Unknown Sentry error'
+  const type = event.event?.exception?.values?.[0]?.type ?? 'Error'
+
+  // Only handle errors and fatals
+  if (!['error', 'fatal', 'critical'].includes(level)) return { status: 200, payload: { skipped: true } }
+
+  const { appendAlert } = await import('./monitorAlertLog')
+  const projectPath = (store.get('projectPath') as string | undefined) ?? repoRoot()
+  appendAlert(projectPath, `[Sentry ${type}] ${message}`, 'sentry')
+  return { status: 200, payload: { received: true } }
+}
+
+async function handleDatadogWebhook(body: string): Promise<{ status: number; payload: unknown }> {
+  let event: { alert_status?: string; alert_title?: string; body?: string; title?: string }
+  try { event = JSON.parse(body) } catch { return { status: 400, payload: { error: 'invalid JSON' } } }
+
+  // Only handle triggered alerts
+  if (event.alert_status !== 'triggered') return { status: 200, payload: { skipped: true } }
+
+  const title = event.alert_title ?? event.title ?? 'Datadog Alert'
+  const detail = event.body ?? ''
+  const message = detail ? `${title}: ${detail.slice(0, 200)}` : title
+
+  const { appendAlert } = await import('./monitorAlertLog')
+  const projectPath = (store.get('projectPath') as string | undefined) ?? repoRoot()
+  appendAlert(projectPath, `[Datadog] ${message}`, 'datadog')
+  return { status: 200, payload: { received: true } }
 }
 
 async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
@@ -225,6 +263,18 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         return
       }
       const { status, payload } = await handleGithubPullRequest(await readBody(req))
+      sendJson(res, status, payload)
+      return
+    }
+
+    if (req.method === 'POST' && url.pathname === '/webhook/sentry') {
+      const { status, payload } = await handleSentryWebhook(await readBody(req))
+      sendJson(res, status, payload)
+      return
+    }
+
+    if (req.method === 'POST' && url.pathname === '/webhook/datadog') {
+      const { status, payload } = await handleDatadogWebhook(await readBody(req))
       sendJson(res, status, payload)
       return
     }

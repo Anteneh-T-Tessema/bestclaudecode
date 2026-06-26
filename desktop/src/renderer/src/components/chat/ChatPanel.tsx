@@ -112,7 +112,7 @@ export function ChatPanel() {
     useChatStore.setState({
       sessions: ss.map((s) => s.id === aid ? { ...s, messages: stripped } : s),
     })
-    window.dispatchEvent(new CustomEvent('lakoora:chat:regenerate', { detail: { content: lastUser.content } }))
+    window.dispatchEvent(new CustomEvent('meshflow:chat:regenerate', { detail: { content: lastUser.content } }))
   }
 
   const runTests = async () => {
@@ -153,11 +153,11 @@ export function ChatPanel() {
       }
     }
     const clearHandler = () => clearMessages()
-    window.addEventListener('lakoora:e2e:injectMessage', injectHandler)
-    window.addEventListener('lakoora:e2e:clearMessages', clearHandler)
+    window.addEventListener('meshflow:e2e:injectMessage', injectHandler)
+    window.addEventListener('meshflow:e2e:clearMessages', clearHandler)
     return () => {
-      window.removeEventListener('lakoora:e2e:injectMessage', injectHandler)
-      window.removeEventListener('lakoora:e2e:clearMessages', clearHandler)
+      window.removeEventListener('meshflow:e2e:injectMessage', injectHandler)
+      window.removeEventListener('meshflow:e2e:clearMessages', clearHandler)
     }
   }, [addUserMessage, startAssistantMessage, appendDelta, finalizeMessage, clearMessages])
 
@@ -526,7 +526,7 @@ export function ChatPanel() {
               </svg>
             </div>
             <p style={{ color: fg[2], fontSize: 12, textAlign: 'center', maxWidth: 200 }}>
-              Ask Lakoora anything about your code. Use @file to share the current editor context.
+              Ask Meshflow anything about your code. Use @file to share the current editor context.
             </p>
           </div>
         ) : (

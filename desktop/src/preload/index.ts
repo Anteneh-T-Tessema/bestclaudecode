@@ -686,6 +686,8 @@ const api = {
     detect: (): Promise<string | null> => ipcRenderer.invoke('deploy:detect'),
     run: (): Promise<{ success: boolean; deployUrl?: string; error?: string }> =>
       ipcRenderer.invoke('deploy:run'),
+    runWithChecks: (opts?: { model?: string }): Promise<{ success: boolean; deployUrl?: string; error?: string; findings?: Array<{ severity: string; file: string; message: string }> }> =>
+      ipcRenderer.invoke('deploy:runWithChecks', opts),
     history: (): Promise<import('../main/deployHistory').DeployRecord[]> =>
       ipcRenderer.invoke('deploy:history'),
     promote: (deployId: string): Promise<{ success: boolean; deployUrl?: string; error?: string }> =>
@@ -730,7 +732,7 @@ const api = {
     get: (key: string) => ipcRenderer.invoke('settings:get', key),
     set: (key: string, value: unknown) => ipcRenderer.invoke('settings:set', key, value),
     getAll: () => ipcRenderer.invoke('settings:getAll'),
-    validateKey: (provider: 'anthropic' | 'openai' | 'mistral' | 'fireworks', key: string): Promise<{ valid: boolean; error?: string }> =>
+    validateKey: (provider: 'anthropic' | 'openai' | 'mistral' | 'fireworks' | 'groq' | 'openrouter', key: string): Promise<{ valid: boolean; error?: string }> =>
       ipcRenderer.invoke('settings:validateKey', { provider, key }),
     exportSettings: (): Promise<string | null> => ipcRenderer.invoke('settings:exportSettings'),
     importSettings: (): Promise<string[] | null> => ipcRenderer.invoke('settings:importSettings'),
@@ -796,6 +798,17 @@ const api = {
     connect: (id: string) =>
       ipcRenderer.invoke('mcp:connect', id) as Promise<{ success: boolean; error?: string; toolCount?: number }>,
     disconnect: (id: string) => ipcRenderer.invoke('mcp:disconnect', id) as Promise<void>,
+  },
+
+  // ── Browser Preview (Gap — Visual Runtime Sandbox) ────────────────────────
+  browser: {
+    navigate: (url: string): Promise<{ ok: boolean; title?: string; error?: string }> =>
+      ipcRenderer.invoke('browser:navigate', url),
+    screenshot: (): Promise<{ dataUrl?: string; width?: number; height?: number; error?: string }> =>
+      ipcRenderer.invoke('browser:screenshot'),
+    consoleLogs: (): Promise<string[]> => ipcRenderer.invoke('browser:consoleLogs'),
+    clearLogs: (): Promise<void> => ipcRenderer.invoke('browser:clearLogs'),
+    close: (): Promise<void> => ipcRenderer.invoke('browser:close'),
   },
 }
 

@@ -210,7 +210,7 @@ export function CodeSearchPanel() {
       if (line) {
         // Give MonacoEditor a tick to mount for the newly-opened tab before jumping.
         setTimeout(() => {
-          window.dispatchEvent(new CustomEvent('lakoora:goToLine', { detail: { line } }))
+          window.dispatchEvent(new CustomEvent('meshflow:goToLine', { detail: { line } }))
         }, 80)
       }
     } catch {

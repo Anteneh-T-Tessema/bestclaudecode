@@ -29,6 +29,7 @@ import { registerWebhookHandlers } from './webhook.handlers'
 import { registerMonitorHandlers } from './monitor.handlers'
 import { registerIdeationHandlers } from './ideation.handlers'
 import { registerCollabHandlers } from './collab.handlers'
+import { registerBrowserHandlers } from './browser.handlers'
 
 export function registerAllIPC(): void {
   registerDecisionsHandlers()
@@ -61,6 +62,7 @@ export function registerAllIPC(): void {
   registerMonitorHandlers()
   registerIdeationHandlers()
   registerCollabHandlers()
+  registerBrowserHandlers()
 
   ipcMain.on('window:minimize', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)

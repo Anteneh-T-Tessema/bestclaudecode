@@ -29,6 +29,16 @@ export function createWindow(): BrowserWindow {
     mainWindow.show()
   })
 
+  // Dev-mode renderer error logging — helps diagnose blank-screen startup failures
+  if (process.env['ELECTRON_RENDERER_URL']) {
+    mainWindow.webContents.on('render-process-gone', (_e, details) => {
+      console.error(`[RENDERER CRASH] reason=${details.reason} exitCode=${details.exitCode}`)
+    })
+    mainWindow.webContents.on('did-fail-load', (_e, errorCode, errorDescription) => {
+      console.error(`[RENDERER LOAD FAIL] ${errorCode}: ${errorDescription}`)
+    })
+  }
+
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
     return { action: 'deny' }

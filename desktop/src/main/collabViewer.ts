@@ -16,7 +16,7 @@ export function renderWatchPage(sessionId: string, token: string): string {
 <html>
 <head>
 <meta charset="utf-8">
-<title>Lakoora — Session ${safeSessionId.slice(0, 8)}</title>
+<title>Meshflow — Session ${safeSessionId.slice(0, 8)}</title>
 <style>
   body { background: #0c0c10; color: #d8d8de; font-family: -apple-system, sans-serif; margin: 0; padding: 16px; }
   h1 { font-size: 14px; font-weight: 700; margin: 0 0 12px; }
@@ -32,7 +32,7 @@ export function renderWatchPage(sessionId: string, token: string): string {
 </style>
 </head>
 <body>
-  <h1>Lakoora session ${safeSessionId.slice(0, 8)} — live view</h1>
+  <h1>Meshflow session ${safeSessionId.slice(0, 8)} — live view</h1>
   <input id="name" placeholder="Your name (for the audit log)" />
   <div id="events"></div>
   <div id="approvalBox" class="approval">
@@ -48,8 +48,8 @@ export function renderWatchPage(sessionId: string, token: string): string {
   const approvalBox = document.getElementById('approvalBox')
   const approvalText = document.getElementById('approvalText')
   const nameInput = document.getElementById('name')
-  nameInput.value = sessionStorage.getItem('lakoora-collab-name') || ''
-  nameInput.addEventListener('change', () => sessionStorage.setItem('lakoora-collab-name', nameInput.value))
+  nameInput.value = sessionStorage.getItem('meshflow-collab-name') || ''
+  nameInput.addEventListener('change', () => sessionStorage.setItem('meshflow-collab-name', nameInput.value))
 
   function appendEvent(ev) {
     const div = document.createElement('div')

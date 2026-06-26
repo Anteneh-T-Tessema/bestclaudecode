@@ -15,7 +15,7 @@ export function GoToLine() {
     const line = parseInt(value, 10)
     if (!isNaN(line) && line > 0) {
       // Dispatch a custom event that MonacoEditor listens for
-      window.dispatchEvent(new CustomEvent('lakoora:goToLine', { detail: { line } }))
+      window.dispatchEvent(new CustomEvent('meshflow:goToLine', { detail: { line } }))
     }
     closeGoToLine()
   }

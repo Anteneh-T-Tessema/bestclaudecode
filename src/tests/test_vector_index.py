@@ -393,3 +393,64 @@ def test_cli_build_index_then_persistent_search(monkeypatch, capsys, tmp_path):
     search_out = json.loads(capsys.readouterr().out)
     assert search_out["docCount"] == 1
     assert search_out["results"]
+
+
+# ---------------------------------------------------------------------------
+# Ollama local embeddings
+# ---------------------------------------------------------------------------
+
+def test_ollama_embed_called(monkeypatch):
+    called = []
+
+    def mock_urlopen(request, timeout=None):
+        called.append(request)
+        class DummyResponse:
+            def read(self):
+                return json.dumps({"embeddings": [[0.1, 0.2, 0.3]]}).encode("utf-8")
+            def __enter__(self):
+                return self
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                pass
+        return DummyResponse()
+
+    import urllib.request
+    monkeypatch.setattr(urllib.request, "urlopen", mock_urlopen)
+
+    monkeypatch.setenv("LAKOORA_USE_LOCAL_EMBEDDINGS", "true")
+    monkeypatch.setenv("LAKOORA_LOCAL_EMBEDDING_MODEL", "nomic-embed-text")
+    monkeypatch.setenv("LAKOORA_OLLAMA_URL", "http://localhost:11434")
+
+    from src.vector_index import embed_texts, active_backend
+
+    assert active_backend() == "ollama (nomic-embed-text)"
+    res = embed_texts(["hello"])
+    assert res == [[0.1, 0.2, 0.3]]
+    assert len(called) == 1
+    req = called[0]
+    assert req.full_url == "http://localhost:11434/api/embed"
+    assert json.loads(req.data.decode("utf-8")) == {"model": "nomic-embed-text", "input": ["hello"]}
+
+
+def test_ollama_embed_fallback_on_network_failure(monkeypatch):
+    def mock_urlopen(request, timeout=None):
+        import urllib.error
+        raise urllib.error.URLError("Connection refused")
+
+    import urllib.request
+    monkeypatch.setattr(urllib.request, "urlopen", mock_urlopen)
+
+    monkeypatch.setenv("LAKOORA_USE_LOCAL_EMBEDDINGS", "true")
+    monkeypatch.setenv("LAKOORA_LOCAL_EMBEDDING_MODEL", "nomic-embed-text")
+    monkeypatch.setenv("LAKOORA_OLLAMA_URL", "http://localhost:11434")
+    monkeypatch.delenv("VOYAGE_API_KEY", raising=False)
+
+    from src.vector_index import embed_texts, active_backend
+
+    # Active backend still reports Ollama since the preference is set
+    assert active_backend() == "ollama (nomic-embed-text)"
+    
+    # But embedding should fall back to local-hash since Ollama failed and VOYAGE_API_KEY is not set
+    res = embed_texts(["hello"])
+    assert len(res) == 1
+    assert len(res[0]) == 256  # local-hash vector size
+

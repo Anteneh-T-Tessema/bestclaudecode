@@ -271,11 +271,11 @@ export function registerGitHandlers(): void {
     }
   })
 
-  // ── Checkpoints (named git stashes with "lakoora:" prefix) ─────────────────
+  // ── Checkpoints (named git stashes with "meshflow:" prefix) ─────────────────
 
   ipcMain.handle('git:stashCreate', async (_, { cwd, name }: { cwd: string; name: string }) => {
     try {
-      await git(cwd, ['stash', 'push', '--include-untracked', '-m', `lakoora: ${name}`])
+      await git(cwd, ['stash', 'push', '--include-untracked', '-m', `meshflow: ${name}`])
       return { success: true }
     } catch (e) {
       return { success: false, error: (e as Error).message }
@@ -288,7 +288,7 @@ export function registerGitHandlers(): void {
       return out.split('\n').filter(Boolean).flatMap((line) => {
         const [ref, age, ...subjectParts] = line.split('|')
         const subject = subjectParts.join('|')
-        const m = subject.match(/lakoora: (.+)$/)
+        const m = subject.match(/meshflow: (.+)$/)
         if (!m) return []
         return [{ ref: ref.trim(), name: m[1].trim(), age: age.trim() }]
       })

@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Activity, Play, Square, AlertTriangle, Sparkles, Trash2 } from 'lucide-react'
+import { Activity, Play, Square, AlertTriangle, Sparkles, Trash2, Bot, Loader } from 'lucide-react'
 import { toast } from '../../store/useToastStore'
 import { useChatStore } from '../../store/useChatStore'
+import { useAppStore } from '../../store/useAppStore'
 import { PanelHeader, accent, border, fg, surface } from '../../design'
 
 interface AlertRecord {
@@ -33,6 +34,43 @@ export function MonitorPanel() {
   const [diagnosis, setDiagnosis] = useState<string | null>(null)
 
   const activeModel = useChatStore((s) => s.activeModel)
+  const setActiveActivity = useAppStore((s) => s.setActiveActivity)
+  const [fixing, setFixing] = useState(false)
+
+  const autoFixWithAi = useCallback(async (recentAlerts: AlertRecord[]) => {
+    if (fixing || recentAlerts.length === 0) return
+    setFixing(true)
+    try {
+      const errorText = recentAlerts.slice(0, 5).map((a) => a.line).join('\n')
+      const goalText = `Fix the following runtime crash or error detected in logs:\n\n${errorText}\n\nInvestigate relevant files, make the fix, run unit tests to verify, and prompt the developer when done.`
+      
+      const detail = await window.api.taskPlanner.create(goalText)
+      if (!detail?.slug) {
+        toast.error('Failed to create self-healing task plan')
+        return
+      }
+      
+      const plans = await window.api.taskPlanner.list()
+      const summary = plans.find((p) => p.slug === detail.slug)
+      if (!summary?.path) {
+        toast.error('Could not locate plan file')
+        return
+      }
+      
+      const sessionId = await window.api.agent.startAutonomous({ planFile: summary.path, model: activeModel })
+      if (sessionId) {
+        toast.success('Self-healing background agent started')
+        setActiveActivity('agent')
+      } else {
+        toast.error('Failed to start self-healing agent session')
+      }
+    } catch (err) {
+      toast.error(`Auto-fix initiation failed: ${(err as Error).message}`)
+    } finally {
+      setFixing(false)
+    }
+  }, [activeModel, fixing, setActiveActivity])
+
   const logRef = useRef<HTMLDivElement>(null)
   const pinnedToBottom = useRef(true)
   const autoTriggeredRef = useRef(false)
@@ -50,8 +88,8 @@ export function MonitorPanel() {
       const detail = (e as CustomEvent<{ command: string }>).detail
       if (detail?.command) setCommand(detail.command)
     }
-    window.addEventListener('lakoora:monitor:prefill', handler)
-    return () => window.removeEventListener('lakoora:monitor:prefill', handler)
+    window.addEventListener('meshflow:monitor:prefill', handler)
+    return () => window.removeEventListener('meshflow:monitor:prefill', handler)
   }, [])
 
   const diagnoseWithAi = useCallback(async (recentAlerts: AlertRecord[]) => {
@@ -250,19 +288,36 @@ export function MonitorPanel() {
 
         {alertsOpen && alerts.length > 0 && (
           <div style={{ padding: '0 10px 8px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <button
-              type="button"
-              onClick={() => void diagnoseWithAi(alerts)}
-              disabled={diagnosing}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 700,
-                padding: '5px 9px', borderRadius: 4, border: `1px solid ${accent.violet.border}`,
-                background: accent.violet.subtle, color: accent.violet.fg,
-                cursor: diagnosing ? 'not-allowed' : 'pointer', alignSelf: 'flex-start',
-              }}
-            >
-              <Sparkles size={11} /> {diagnosing ? 'Diagnosing…' : 'Diagnose with AI'}
-            </button>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                type="button"
+                onClick={() => void diagnoseWithAi(alerts)}
+                disabled={diagnosing || fixing}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 700,
+                  padding: '5px 9px', borderRadius: 4, border: `1px solid ${accent.violet.border}`,
+                  background: accent.violet.subtle, color: accent.violet.fg,
+                  cursor: diagnosing || fixing ? 'not-allowed' : 'pointer',
+                }}
+              >
+                <Sparkles size={11} /> {diagnosing ? 'Diagnosing…' : 'Diagnose with AI'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => void autoFixWithAi(alerts)}
+                disabled={diagnosing || fixing}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 700,
+                  padding: '5px 9px', borderRadius: 4, border: `1px solid ${accent.green.border}`,
+                  background: accent.green.subtle, color: accent.green.fg,
+                  cursor: diagnosing || fixing ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {fixing ? <Loader size={11} className="agent-pulse" /> : <Bot size={11} />}
+                {fixing ? 'Starting Repair…' : 'Auto-Fix with AI Agent'}
+              </button>
+            </div>
 
             {diagnosis && (
               <div style={{ fontSize: 10.5, color: fg[1], background: surface.raised, borderRadius: 4, padding: '6px 8px', lineHeight: 1.5 }}>

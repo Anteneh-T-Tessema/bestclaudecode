@@ -14,17 +14,17 @@ function asWebviewElement(el: HTMLWebViewElement | null): WebviewElement | null 
 
 const DEFAULT_URL = 'http://localhost:3000'
 
-const CLICK_PREFIX = '__LAKOORA_CLICK__'
+const CLICK_PREFIX = '__MESHFLOW_CLICK__'
 
 // Injected into the webview when inspect mode is on. Uses console.log as the
 // guest→host channel (Electron webview console-message event).
 const INSPECTOR_SCRIPT = `
 (function() {
-  if (window.__lakooraInspect) {
-    window.__lakooraInspect.targets.forEach(function(el) {
-      el.removeEventListener('mouseenter', window.__lakooraInspect.onEnter);
-      el.removeEventListener('mouseleave', window.__lakooraInspect.onLeave);
-      el.removeEventListener('click', window.__lakooraInspect.onClick, true);
+  if (window.__meshflowInspect) {
+    window.__meshflowInspect.targets.forEach(function(el) {
+      el.removeEventListener('mouseenter', window.__meshflowInspect.onEnter);
+      el.removeEventListener('mouseleave', window.__meshflowInspect.onLeave);
+      el.removeEventListener('click', window.__meshflowInspect.onClick, true);
     });
   }
   var lastHovered = null;
@@ -47,20 +47,20 @@ const INSPECTOR_SCRIPT = `
     el.addEventListener('mouseleave', onLeave);
     el.addEventListener('click', onClick, true);
   });
-  window.__lakooraInspect = { targets: allEls, onEnter: onEnter, onLeave: onLeave, onClick: onClick };
+  window.__meshflowInspect = { targets: allEls, onEnter: onEnter, onLeave: onLeave, onClick: onClick };
 })();
 `
 
 const CLEANUP_SCRIPT = `
 (function() {
-  if (!window.__lakooraInspect) return;
-  window.__lakooraInspect.targets.forEach(function(el) {
+  if (!window.__meshflowInspect) return;
+  window.__meshflowInspect.targets.forEach(function(el) {
     el.style.outline = '';
-    el.removeEventListener('mouseenter', window.__lakooraInspect.onEnter);
-    el.removeEventListener('mouseleave', window.__lakooraInspect.onLeave);
-    el.removeEventListener('click', window.__lakooraInspect.onClick, true);
+    el.removeEventListener('mouseenter', window.__meshflowInspect.onEnter);
+    el.removeEventListener('mouseleave', window.__meshflowInspect.onLeave);
+    el.removeEventListener('click', window.__meshflowInspect.onClick, true);
   });
-  window.__lakooraInspect = null;
+  window.__meshflowInspect = null;
 })();
 `
 
@@ -128,8 +128,8 @@ export function LivePreview() {
       const componentName = (e as CustomEvent<{ componentName: string }>).detail?.componentName ?? 'Component'
       toast.info(`"${componentName}" scaffolded — click Refresh to preview`)
     }
-    window.addEventListener('lakoora:scaffold:generated', handler)
-    return () => window.removeEventListener('lakoora:scaffold:generated', handler)
+    window.addEventListener('meshflow:scaffold:generated', handler)
+    return () => window.removeEventListener('meshflow:scaffold:generated', handler)
   }, [])
 
   // Mount-once: register the console-message listener for click results.

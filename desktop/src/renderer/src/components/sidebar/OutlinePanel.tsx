@@ -210,7 +210,7 @@ export function OutlinePanel() {
   }
 
   const goTo = (line: number) => {
-    window.dispatchEvent(new CustomEvent('lakoora:goToLine', { detail: { line, column: 1 } }))
+    window.dispatchEvent(new CustomEvent('meshflow:goToLine', { detail: { line, column: 1 } }))
   }
 
   return (

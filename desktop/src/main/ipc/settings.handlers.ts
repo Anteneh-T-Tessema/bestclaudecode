@@ -28,6 +28,10 @@ const MUTABLE_KEYS = new Set([
   'jiraEmail', 'jiraBaseUrl',
   // Inbound webhook listener port (non-secret; the shared secret is webhookSecret, encrypted).
   'webhookPort',
+  // Local Ollama embeddings configuration
+  'useLocalEmbeddings', 'localEmbeddingModel',
+  // Ollama chat model selection and custom model name
+  'ollamaModel', 'customModelName', 'customModelProvider',
 ])
 
 interface EngineHealth {
@@ -57,7 +61,7 @@ export function registerSettingsHandlers(): void {
 
   ipcMain.handle('terminal:runCommand', (_, { command, cwd }: { command: string; cwd?: string }): Promise<CommandResult> => {
     if (MAIN_BLOCKED.some(re => re.test(command))) {
-      throw new Error('Command blocked by Lakoora safety policy')
+      throw new Error('Command blocked by Meshflow safety policy')
     }
     return runCommand('/bin/sh', ['-c', command], cwd ?? repoRoot())
   })
@@ -74,17 +78,17 @@ export function registerSettingsHandlers(): void {
       const task = `Run: ${command}`.slice(0, 80)
       const args = [
         '-m', 'src.decision_log', '--log',
-        '--agent', 'lakoora-run',
+        '--agent', 'meshflow-run',
         '--task', task,
         '--verdict', verdict,
         '--outcome', outcome,
         '--finding', `cwd: ${cwd}`,
       ]
-      // In E2E tests, LAKOORA_DECISIONS_DIR points to an isolated fixture dir.
+      // In E2E tests, MESHFLOW_DECISIONS_DIR points to an isolated fixture dir.
       // Pass --dir so the Python script writes there instead of docs/decisions/,
       // matching where decisions.handlers.ts reads from.
-      if (process.env.LAKOORA_DECISIONS_DIR) {
-        args.push('--dir', process.env.LAKOORA_DECISIONS_DIR)
+      if (process.env.MESHFLOW_DECISIONS_DIR) {
+        args.push('--dir', process.env.MESHFLOW_DECISIONS_DIR)
       }
       await runCommand(venvPython(), args, repoRoot())
     } catch (e) { console.error('[logRun audit]', e) }
@@ -114,8 +118,8 @@ export function registerSettingsHandlers(): void {
   ipcMain.handle('settings:exportSettings', async (): Promise<string | null> => {
     const { dialog } = await import('electron')
     const { canceled, filePath } = await dialog.showSaveDialog({
-      title: 'Export Lakoora Settings',
-      defaultPath: 'lakoora-settings.json',
+      title: 'Export Meshflow Settings',
+      defaultPath: 'meshflow-settings.json',
       filters: [{ name: 'JSON', extensions: ['json'] }],
     })
     if (canceled || !filePath) return null
@@ -130,7 +134,7 @@ export function registerSettingsHandlers(): void {
   ipcMain.handle('settings:importSettings', async (): Promise<string[] | null> => {
     const { dialog } = await import('electron')
     const { canceled, filePaths } = await dialog.showOpenDialog({
-      title: 'Import Lakoora Settings',
+      title: 'Import Meshflow Settings',
       filters: [{ name: 'JSON', extensions: ['json'] }],
       properties: ['openFile'],
     })
@@ -150,7 +154,7 @@ export function registerSettingsHandlers(): void {
     }
   })
 
-  ipcMain.handle('settings:validateKey', async (_, { provider, key }: { provider: 'anthropic' | 'openai'; key: string }): Promise<{ valid: boolean; error?: string }> => {
+  ipcMain.handle('settings:validateKey', async (_, { provider, key }: { provider: 'anthropic' | 'openai' | 'groq' | 'openrouter'; key: string }): Promise<{ valid: boolean; error?: string }> => {
     try {
       if (provider === 'anthropic') {
         const { default: Anthropic } = await import('@anthropic-ai/sdk')
@@ -161,6 +165,17 @@ export function registerSettingsHandlers(): void {
         const { default: OpenAI } = await import('openai')
         const client = new OpenAI({ apiKey: key })
         await client.models.list()
+        return { valid: true }
+      } else if (provider === 'groq') {
+        const { default: OpenAI } = await import('openai')
+        const client = new OpenAI({ apiKey: key, baseURL: 'https://api.groq.com/openai/v1' })
+        await client.models.list()
+        return { valid: true }
+      } else if (provider === 'openrouter') {
+        const resp = await fetch('https://openrouter.ai/api/v1/models', {
+          headers: { Authorization: `Bearer ${key}` },
+        })
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
         return { valid: true }
       }
       return { valid: false, error: 'Unknown provider' }

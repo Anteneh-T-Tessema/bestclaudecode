@@ -7,7 +7,7 @@ import { runCommand } from './pythonBridge'
  * The temp file is deleted in a finally block regardless of outcome.
  */
 export async function validateGeneratedTs(content: string, absPath: string): Promise<string | null> {
-  const tmpPath = absPath + '.lakoora-tmp.ts'
+  const tmpPath = absPath + '.meshflow-tmp.ts'
   const { promises: fsp } = await import('fs')
 
   try {

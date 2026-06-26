@@ -1,6 +1,6 @@
 /**
  * User-configurable governance policy for the autonomous agent — read from
- * <projectPath>/.lakoorapolicies.json. Layered on top of (not replacing) the
+ * <projectPath>/.meshflowpolicies.json. Layered on top of (not replacing) the
  * hardcoded destructive-command blocklist in autonomousAgent.ts: this engine
  * is for project-specific rules a team wants enforced and auditable, e.g.
  * blocking edits to secret files or requiring approval before a deploy.
@@ -48,10 +48,10 @@ function asStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []
 }
 
-/** Reads and validates .lakoorapolicies.json from the project root. Returns an empty (no-op) policy if missing or invalid. */
+/** Reads and validates .meshflowpolicies.json from the project root. Returns an empty (no-op) policy if missing or invalid. */
 export function loadPolicy(projectPath: string): PolicyConfig {
   try {
-    const raw = fs.readFileSync(path.join(projectPath, '.lakoorapolicies.json'), 'utf-8')
+    const raw = fs.readFileSync(path.join(projectPath, '.meshflowpolicies.json'), 'utf-8')
     const parsed = JSON.parse(raw) as Record<string, unknown>
     return {
       block_commands: asStringArray(parsed.block_commands),

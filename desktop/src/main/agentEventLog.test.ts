@@ -17,7 +17,7 @@ import { appendEvent, readEvents, listSessions, verifyEventLog, computeComplianc
 
 describe('agentEventLog', () => {
   beforeEach(() => {
-    projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'lakoora-event-log-'))
+    projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'meshflow-event-log-'))
   })
 
   afterEach(() => {
@@ -72,7 +72,7 @@ describe('agentEventLog', () => {
 
 describe('verifyEventLog', () => {
   beforeEach(() => {
-    projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'lakoora-event-log-'))
+    projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'meshflow-event-log-'))
   })
 
   afterEach(() => {
@@ -93,7 +93,7 @@ describe('verifyEventLog', () => {
     appendEvent('s1', { status: 'running' })
     appendEvent('s1', { status: 'blocked', error: 'original error' })
 
-    const file = path.join(projectPath, '.lakoora', 'agent-events', 's1.jsonl')
+    const file = path.join(projectPath, '.meshflow', 'agent-events', 's1.jsonl')
     const lines = fs.readFileSync(file, 'utf-8').split('\n').filter(Boolean)
     const tampered = { ...JSON.parse(lines[1]), error: 'a forged, less alarming error' }
     lines[1] = JSON.stringify(tampered)
@@ -109,7 +109,7 @@ describe('verifyEventLog', () => {
     appendEvent('s1', { status: 'blocked', error: 'should not be erased' })
     appendEvent('s1', { status: 'finished' })
 
-    const file = path.join(projectPath, '.lakoora', 'agent-events', 's1.jsonl')
+    const file = path.join(projectPath, '.meshflow', 'agent-events', 's1.jsonl')
     const lines = fs.readFileSync(file, 'utf-8').split('\n').filter(Boolean)
     fs.writeFileSync(file, [lines[0], lines[2]].join('\n') + '\n') // drop the middle "blocked" record
 
@@ -119,7 +119,7 @@ describe('verifyEventLog', () => {
 
 describe('computeComplianceSummary', () => {
   beforeEach(() => {
-    projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'lakoora-event-log-'))
+    projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'meshflow-event-log-'))
   })
 
   afterEach(() => {

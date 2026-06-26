@@ -5,7 +5,7 @@ import * as path from 'path'
 import { loadIgnoreRules, isIgnored } from './ignoreRules'
 
 function withGitignore(content: string, fn: (root: string) => void) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lakoora-ignore-test-'))
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'meshflow-ignore-test-'))
   fs.writeFileSync(path.join(root, '.gitignore'), content, 'utf-8')
   try {
     fn(root)
@@ -59,7 +59,7 @@ describe('loadIgnoreRules + isIgnored', () => {
   })
 
   it('returns no rules when no ignore file exists', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lakoora-ignore-test-empty-'))
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'meshflow-ignore-test-empty-'))
     try {
       expect(loadIgnoreRules(root)).toEqual([])
     } finally {

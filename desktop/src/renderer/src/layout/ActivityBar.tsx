@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Files, GitBranch, Search, MessageSquare, ShieldCheck, Settings, Brain, Radar, ListTodo, BookOpen, Bot, Bug, ListTree, StickyNote, DollarSign, Map, Github, KeyRound, LayoutGrid, Wand2, Activity, Lightbulb } from 'lucide-react'
+import { Files, GitBranch, Search, MessageSquare, ShieldCheck, Settings, Brain, Radar, ListTodo, BookOpen, Bot, Bug, ListTree, StickyNote, DollarSign, Map, Github, KeyRound, LayoutGrid, Wand2, Activity, Lightbulb, GitFork, Globe } from 'lucide-react'
 import { useAppStore, type ActivityId } from '../store/useAppStore'
 import { IconButton, Tooltip, accent, surface, border, type AccentName } from '../design'
 
@@ -27,11 +27,13 @@ const ACTIVITIES: ActivityDef[] = [
   { id: 'notepads', icon: StickyNote, label: 'Notepads', accentName: 'amber' },
   { id: 'usage', icon: DollarSign, label: 'Usage Dashboard', accentName: 'green' },
   { id: 'map', icon: Map, label: 'Codebase Map', accentName: 'cyan' },
+  { id: 'callgraph', icon: GitFork, label: 'Call Graph', accentName: 'cyan' },
   { id: 'github', icon: Github, label: 'GitHub', accentName: 'violet' },
   { id: 'env', icon: KeyRound, label: 'Environment', accentName: 'amber' },
   { id: 'wizard', icon: Wand2, label: 'New Project Wizard', accentName: 'green' },
   { id: 'monitor', icon: Activity, label: 'Monitor', accentName: 'red' },
   { id: 'ideation', icon: Lightbulb, label: 'Ideation', accentName: 'amber' },
+  { id: 'browser', icon: Globe, label: 'Browser Preview', accentName: 'cyan' },
 ]
 
 const BOTTOM: ActivityDef = { id: 'settings', icon: Settings, label: 'Settings' }
@@ -114,7 +116,7 @@ export function ActivityBar() {
         gap: 6,
       }}
     >
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, overflowY: 'auto', overflowX: 'hidden', scrollbarWidth: 'none' }}>
         {ACTIVITIES.map((activity) => (
           <div key={activity.id} style={{ position: 'relative' }}>
             <ActivityButton

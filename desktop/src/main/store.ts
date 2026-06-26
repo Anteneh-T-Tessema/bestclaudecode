@@ -6,6 +6,8 @@ interface StoreSchema {
   anthropicApiKey: string
   googleApiKey: string
   openaiApiKey: string
+  groqApiKey: string
+  openrouterApiKey: string
   ollamaUrl: string
   activeModel: string
   theme: 'dark' | 'light'
@@ -22,6 +24,15 @@ interface StoreSchema {
   autoSave: boolean
   stickyScroll: boolean
   recentFiles: string[]
+  hitlSandboxPromote: 'always' | 'review'
+  hitlCommandRun: 'always' | 'policy' | 'never'
+  hitlFileEdit: 'always' | 'sandbox'
+  hitlDeployment: 'always' | 'confirm'
+  customModelName: string
+  customModelProvider: 'anthropic' | 'openai' | 'google' | 'ollama'
+  useSandboxExec: 'never' | 'no-network' | 'restrict-write'
+  useLocalEmbeddings: boolean
+  localEmbeddingModel: string
   [key: string]: unknown
 }
 
@@ -29,6 +40,8 @@ const DEFAULTS: StoreSchema = {
   anthropicApiKey: '',
   googleApiKey: '',
   openaiApiKey: '',
+  groqApiKey: '',
+  openrouterApiKey: '',
   ollamaUrl: 'http://localhost:11434',
   activeModel: 'claude-sonnet-4-6',
   theme: 'dark',
@@ -45,6 +58,15 @@ const DEFAULTS: StoreSchema = {
   autoSave: true,
   stickyScroll: true,
   recentFiles: [],
+  hitlSandboxPromote: 'review',
+  hitlCommandRun: 'policy',
+  hitlFileEdit: 'sandbox',
+  hitlDeployment: 'confirm',
+  customModelName: '',
+  customModelProvider: 'anthropic',
+  useSandboxExec: 'never',
+  useLocalEmbeddings: false,
+  localEmbeddingModel: 'nomic-embed-text',
 }
 
 function getStorePath(): string {
@@ -56,10 +78,10 @@ function getStorePath(): string {
       process.env.HOME || '',
       'Library',
       'Application Support',
-      'lakoora'
+      'meshflow'
     )
   }
-  return path.join(userDataPath, 'lakoora-settings.json')
+  return path.join(userDataPath, 'meshflow-settings.json')
 }
 
 function readData(): StoreSchema {
@@ -101,7 +123,7 @@ export const store = {
 
 // Gap 88 — API keys encrypted at rest via Electron's OS-keychain-backed safeStorage
 // (macOS Keychain / Windows DPAPI / Linux Secret Service) instead of the plain
-// lakoora-settings.json field. Falls back to plaintext when no OS keychain is
+// meshflow-settings.json field. Falls back to plaintext when no OS keychain is
 // available (e.g. some headless Linux setups), and to the legacy plain field for
 // keys saved before this existed.
 export function getSecret(key: string): string {

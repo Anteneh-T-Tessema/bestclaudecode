@@ -40,7 +40,7 @@ function ProblemRow({ problem }: { problem: Problem }) {
       openFile(problem.filePath, content)
       setTimeout(() => {
         window.dispatchEvent(
-          new CustomEvent('lakoora:goToLine', { detail: { line: problem.line, column: problem.col } })
+          new CustomEvent('meshflow:goToLine', { detail: { line: problem.line, column: problem.col } })
         )
       }, 80)
     } catch {
@@ -73,7 +73,7 @@ function ProblemRow({ problem }: { problem: Problem }) {
 
     setActiveActivity('chat')
     setTimeout(() => {
-      window.dispatchEvent(new CustomEvent('lakoora:chat:regenerate', { detail: { content: prompt } }))
+      window.dispatchEvent(new CustomEvent('meshflow:chat:regenerate', { detail: { content: prompt } }))
     }, 50)
   }
 

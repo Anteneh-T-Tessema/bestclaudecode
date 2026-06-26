@@ -41,7 +41,7 @@ class DesktopDapClient extends EventEmitter {
     await Promise.race([
       (async () => {
         await this.request('initialize', {
-          adapterID: 'lakoora', pathFormat: 'path',
+          adapterID: 'meshflow', pathFormat: 'path',
           linesStartAt1: true, columnsStartAt1: true, supportsRunInTerminalRequest: false,
         })
         await this.request('launch', launchArgs)
@@ -159,7 +159,7 @@ export function registerDapHandlers(): void {
 
     const isNode = language === 'node'
     const adapterCmd = isNode
-      ? (process.env.LAKOORA_JSDBG_BIN ?? 'js-debug-adapter')
+      ? (process.env.MESHFLOW_JSDBG_BIN ?? 'js-debug-adapter')
       : pyCmd()
     const adapterArgs = isNode ? [] : ['-m', 'debugpy.adapter']
 
@@ -179,7 +179,7 @@ export function registerDapHandlers(): void {
     try {
       await client.launch(adapterCmd, adapterArgs, {
         request: 'launch', type: isNode ? 'node' : 'python',
-        name: 'Lakoora Debug', program, stopOnEntry, args,
+        name: 'Meshflow Debug', program, stopOnEntry, args,
       })
       return { started: true }
     } catch (err) {

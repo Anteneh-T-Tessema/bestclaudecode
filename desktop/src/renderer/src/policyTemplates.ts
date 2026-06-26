@@ -1,5 +1,5 @@
 /**
- * Starter .lakoorapolicies.json templates for common compliance regimes — a
+ * Starter .meshflowpolicies.json templates for common compliance regimes — a
  * reasonable default a team can load into the policy editor and adjust,
  * rather than writing regex/glob patterns from scratch. Not legal advice or
  * a certification claim; these are starting points for the kinds of actions

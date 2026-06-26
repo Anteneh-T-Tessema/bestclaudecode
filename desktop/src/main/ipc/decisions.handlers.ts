@@ -42,7 +42,7 @@ export interface DecisionStats {
 function decisionsDir(): string {
   // E2E tests point this at an isolated temp fixture dir so test runs never
   // read or write the real project's actual docs/decisions/ audit trail.
-  if (process.env.LAKOORA_DECISIONS_DIR) return process.env.LAKOORA_DECISIONS_DIR
+  if (process.env.MESHFLOW_DECISIONS_DIR) return process.env.MESHFLOW_DECISIONS_DIR
   return path.join(repoRoot(), 'docs', 'decisions')
 }
 
@@ -174,7 +174,7 @@ export function registerDecisionsHandlers(): void {
     const { dialog } = await import('electron')
     const { canceled, filePath } = await dialog.showSaveDialog({
       title: 'Export Decision Log',
-      defaultPath: 'lakoora-decisions.json',
+      defaultPath: 'meshflow-decisions.json',
       filters: [{ name: 'JSON', extensions: ['json'] }],
     })
     if (canceled || !filePath) return null
@@ -187,7 +187,7 @@ export function registerDecisionsHandlers(): void {
 
   // Gap 74 — create-side: write an ADR-style decision log entry via src.decision_log.
   ipcMain.handle('decisions:log', async (_event, opts: DecisionLogOpts): Promise<{ ok: boolean; error?: string }> => {
-    const { task, verdict, outcome, agent = 'lakoora-agent', retries = 0, findings = [], dir } = opts
+    const { task, verdict, outcome, agent = 'meshflow-agent', retries = 0, findings = [], dir } = opts
     const args = [
       '-m', 'src.decision_log', '--log',
       '--task', task,
@@ -198,7 +198,7 @@ export function registerDecisionsHandlers(): void {
       ...findings.flatMap((f) => ['--finding', f]),
     ]
     if (dir) args.push('--dir', dir)
-    else if (process.env.LAKOORA_DECISIONS_DIR) args.push('--dir', process.env.LAKOORA_DECISIONS_DIR)
+    else if (process.env.MESHFLOW_DECISIONS_DIR) args.push('--dir', process.env.MESHFLOW_DECISIONS_DIR)
     const result = await runCommand(venvPython(), args, repoRoot())
     return result.exitCode === 0 ? { ok: true } : { ok: false, error: result.stderr.trim().slice(0, 200) }
   })
