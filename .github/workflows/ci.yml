@@ -83,3 +83,10 @@ jobs:
           sudo apt-get install -y xvfb libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6 xauth libasound2t64 libgbm1
       - name: Run e2e suite against a real Electron + CDP session
         run: xvfb-run --auto-servernum --server-args="-screen 0 1280x800x24" npm run test:e2e
+      - name: Upload failure artifacts (screenshots + accessibility-tree snapshots)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-results
+          path: desktop/test-results/
+          retention-days: 3
