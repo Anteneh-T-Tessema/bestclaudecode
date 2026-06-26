@@ -1,6 +1,8 @@
 import { BrowserWindow, shell } from 'electron'
 import { join } from 'path'
 
+const iconPath = join(__dirname, '../../build/icon.icns')
+
 export function createWindow(): BrowserWindow {
   const mainWindow = new BrowserWindow({
     width: 1100,
@@ -12,6 +14,7 @@ export function createWindow(): BrowserWindow {
     titleBarStyle: 'hidden',
     trafficLightPosition: { x: 16, y: 13 },
     backgroundColor: '#0a0c0f',
+    icon: iconPath,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,

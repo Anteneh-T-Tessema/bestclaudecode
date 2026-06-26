@@ -1,4 +1,5 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, nativeImage } from 'electron'
+import { join } from 'path'
 import { autoUpdater } from 'electron-updater'
 
 // Must run before app.whenReady() — enables CDP for Playwright E2E (Electron 32+
@@ -21,6 +22,12 @@ import { registerAllIPC } from './ipc'
 
 app.whenReady().then(() => {
   app.setAppUserModelId('com.meshflow.desktop')
+
+  // Set dock icon in dev mode (packaged builds pick it up from build/icon.icns automatically)
+  if (process.platform === 'darwin' && app.dock) {
+    const dockIcon = nativeImage.createFromPath(join(__dirname, '../../build/icon.icns'))
+    if (!dockIcon.isEmpty()) app.dock.setIcon(dockIcon)
+  }
 
   registerAllIPC()
 
