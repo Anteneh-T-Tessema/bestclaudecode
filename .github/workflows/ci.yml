@@ -40,13 +40,17 @@ jobs:
         with:
           node-version: "22"
       - run: npm ci
-      - name: Diagnose electron's own install (debug — getElectronPath() threw 'Electron uninstall' on the first CI attempt)
-        run: |
-          ls -la node_modules/electron/ || true
-          echo "--- path.txt ---"
-          cat node_modules/electron/path.txt 2>&1 || echo "(missing)"
-          echo "--- dist/ ---"
-          ls -la node_modules/electron/dist/ 2>&1 || echo "(missing)"
+      - name: Force Electron's binary download
+        # Newer Electron versions don't auto-download via an npm postinstall
+        # hook (its package.json has no "scripts" field at all anymore) —
+        # the download only happens lazily, the first time something
+        # actually require()s the package, which runs index.js's
+        # downloadElectron(). electron-vite's own getElectronPath() only
+        # resolves the package's file path without ever requiring it, so on
+        # a genuinely fresh install (unlike a dev machine that already has
+        # it cached from before) nothing in the build pipeline ever triggers
+        # the download — `electron --version` forces it explicitly.
+        run: npx electron --version
       - run: npx playwright install --with-deps chromium
       - name: Install Electron's Linux runtime libraries + a virtual display
         run: |
