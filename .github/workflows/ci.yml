@@ -40,6 +40,13 @@ jobs:
         with:
           node-version: "22"
       - run: npm ci
+      - name: Diagnose electron's own install (debug — getElectronPath() threw 'Electron uninstall' on the first CI attempt)
+        run: |
+          ls -la node_modules/electron/ || true
+          echo "--- path.txt ---"
+          cat node_modules/electron/path.txt 2>&1 || echo "(missing)"
+          echo "--- dist/ ---"
+          ls -la node_modules/electron/dist/ 2>&1 || echo "(missing)"
       - run: npx playwright install --with-deps chromium
       - name: Install Electron's Linux runtime libraries + a virtual display
         run: |
