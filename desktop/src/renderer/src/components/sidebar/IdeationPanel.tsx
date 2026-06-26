@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Lightbulb, Sparkles, Plus, Trash2, ListTodo, RefreshCw } from 'lucide-react'
 import { toast } from '../../store/useToastStore'
-import { useChatStore } from '../../store/useChatStore'
+import { useChatStore, MODELS } from '../../store/useChatStore'
 import { useAppStore } from '../../store/useAppStore'
 import { PanelHeader, accent, border, fg, surface } from '../../design'
 
@@ -62,6 +62,7 @@ export function IdeationPanel() {
   const [refining, setRefining] = useState(false)
   const [iteration, setIteration] = useState(0)
   const activeModel = useChatStore((s) => s.activeModel)
+  const setActiveModel = useChatStore((s) => s.setActiveModel)
   const setActiveActivity = useAppStore((s) => s.setActiveActivity)
 
   const draftSpec = async () => {
@@ -174,6 +175,27 @@ export function IdeationPanel() {
       <PanelHeader icon={<Lightbulb style={{ width: 13, height: 13, color: accent.amber.fg }} />} label="Ideation" />
 
       <div style={{ flex: 1, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div>
+          <label style={labelStyle()}>Model</label>
+          <select
+            value={activeModel}
+            onChange={(e) => setActiveModel(e.target.value as typeof activeModel)}
+            style={{
+              ...fieldStyle(),
+              resize: 'none',
+              cursor: 'pointer',
+              appearance: 'none',
+              paddingRight: 24,
+              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E")`,
+              backgroundRepeat: 'no-repeat',
+              backgroundPosition: 'right 8px center',
+            }}
+          >
+            {MODELS.filter((m) => m.id !== 'auto' && m.id !== 'custom' && m.id !== 'ollama').map((m) => (
+              <option key={m.id} value={m.id}>{m.label}</option>
+            ))}
+          </select>
+        </div>
         <div>
           <label style={labelStyle()}>Rough idea</label>
           <textarea

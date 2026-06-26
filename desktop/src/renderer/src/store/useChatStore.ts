@@ -52,6 +52,15 @@ export type ModelId = (typeof MODELS)[number]['id']
 
 const SESSIONS_KEY = 'meshflow:chat:sessions'
 const LEGACY_KEY = 'meshflow:chat:messages'
+const MODEL_KEY = 'meshflow:activeModel'
+
+function loadPersistedModel(): ModelId {
+  try {
+    const saved = localStorage.getItem(MODEL_KEY) as ModelId | null
+    if (saved && MODELS.some((m) => m.id === saved)) return saved
+  } catch { /* ignore */ }
+  return 'claude-sonnet-4-6'
+}
 
 function makeSession(messages: ChatMessage[] = []): ChatSession {
   return {
@@ -133,7 +142,7 @@ const initial = loadInitialState()
 export const useChatStore = create<ChatStore>((set) => ({
   sessions: initial.sessions,
   activeSessionId: initial.activeSessionId,
-  activeModel: 'claude-sonnet-4-6',
+  activeModel: loadPersistedModel(),
   isStreaming: false,
   streamingId: null,
   activeStreamId: null,
@@ -247,7 +256,10 @@ export const useChatStore = create<ChatStore>((set) => ({
     })
   },
 
-  setActiveModel: (model) => set({ activeModel: model }),
+  setActiveModel: (model) => {
+    try { localStorage.setItem(MODEL_KEY, model) } catch { /* ignore */ }
+    set({ activeModel: model })
+  },
 
   addSessionUsage: (sessionId, inputTokens, outputTokens, costUsd, model) => {
     set((s) => {
