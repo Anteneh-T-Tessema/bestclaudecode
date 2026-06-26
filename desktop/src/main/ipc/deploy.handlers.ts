@@ -8,6 +8,7 @@ import { runCommand } from '../pythonBridge'
 import { detectDeployCommand, runDeploy, runPreviewDeploy, promoteDeploy, rollbackDeploy, providerFromCommand } from '../deploy'
 import { appendDeployRecord, listDeployRecords, type DeployRecord } from '../deployHistory'
 import { broadcast, getActiveSessions, streamToString, runDeployFixLoop } from '../agents/autonomousAgent'
+import { redactSecrets } from '../secretPatterns'
 
 // Gap 140 — manual, user-triggered deploy, distinct from the autonomous
 // agent's automatic end-of-session deploy (autonomousAgent.ts's
@@ -123,9 +124,15 @@ export function registerDeployHandlers(): void {
           
           const errors = parsed.findings?.filter(f => f.severity === 'error') || []
           if (errors.length > 0) {
-            const error = `Deploy blocked by AI Code Reviewer. Critical issues found in files: ${errors.map(e => e.file).join(', ')}. Detail: ${errors[0].message}`
+            // Redacted before this IPC handler returns it directly to the
+            // renderer — broadcast() redacts its own copy internally, but
+            // that doesn't reach this function's `return`, which bypasses
+            // broadcast entirely. The model is reviewing a diff, so its
+            // findings can legitimately quote a leaked secret back at us.
+            const error = redactSecrets(`Deploy blocked by AI Code Reviewer. Critical issues found in files: ${errors.map(e => e.file).join(', ')}. Detail: ${errors[0].message}`)
+            const redactedFindings = parsed.findings?.map((f) => ({ ...f, message: redactSecrets(f.message) }))
             broadcast({ sessionId, planFile: '', subtaskId: 'deploy-preflight', subtaskDescription: '', status: 'error', error, doneCount: 1, totalCount: 2 })
-            return { success: false, error, findings: parsed.findings }
+            return { success: false, error, findings: redactedFindings }
           }
         } catch (err) {
           console.warn('[deploy preflight] Code review failed or JSON parse error:', err)

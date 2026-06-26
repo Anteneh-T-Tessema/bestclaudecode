@@ -1,6 +1,7 @@
 import { execSync } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
+import { SECRET_PATTERNS } from './secretPatterns'
 
 export interface ScanFinding {
   type: 'quality' | 'security'
@@ -8,14 +9,6 @@ export interface ScanFinding {
   line: number
   message: string
 }
-
-// Security credentials pattern checks (reused from autonomousAgent.ts)
-const SECRET_PATTERNS: Array<{ name: string; re: RegExp }> = [
-  { name: 'AWS access key',     re: /AKIA[0-9A-Z]{16}/ },
-  { name: 'GitHub PAT',         re: /ghp_[A-Za-z0-9]{36}/ },
-  { name: 'PEM private key',    re: /-----BEGIN (?:RSA |EC )?PRIVATE KEY-----/ },
-  { name: 'generic API secret', re: /(?:api[_-]?key|api[_-]?secret|password|access[_-]?token)\s*[:=]\s*['"][A-Za-z0-9+/]{24,}['"]/i },
-]
 
 export function scanSandboxFiles(shadowPath: string, baseRef: string): ScanFinding[] {
   const findings: ScanFinding[] = []

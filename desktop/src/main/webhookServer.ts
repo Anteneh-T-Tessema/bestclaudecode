@@ -32,6 +32,7 @@ import { startAutonomousSession, getActiveSessions, streamToString, resolveAppro
 import { readEvents } from './agentEventLog'
 import { subscribe } from './sessionRelay'
 import { renderWatchPage } from './collabViewer'
+import { redactSecrets } from './secretPatterns'
 
 const DEFAULT_PORT = 7391
 
@@ -147,10 +148,14 @@ async function handleGithubPullRequest(body: string): Promise<{ status: number; 
     parsed = { summary: response.slice(0, 1000) }
   }
 
+  // Redacted before posting — this review is reviewing a diff for "security
+  // flaws, credentials leakage", so its own output can legitimately quote a
+  // leaked secret straight back into a public/private GitHub PR comment,
+  // which is a worse leak than showing it in our own UI would be.
   const posted = await postPrReview(projectPath, event.number, {
-    body: parsed.summary ?? 'Automated review by Meshflow.',
+    body: redactSecrets(parsed.summary ?? 'Automated review by Meshflow.'),
     event: 'COMMENT',
-    comments: parsed.comments ?? [],
+    comments: (parsed.comments ?? []).map((c) => ({ ...c, body: redactSecrets(c.body) })),
   })
   return { status: 200, payload: { reviewed: posted, prNumber: event.number } }
 }

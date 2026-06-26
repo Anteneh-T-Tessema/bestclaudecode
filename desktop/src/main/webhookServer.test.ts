@@ -181,6 +181,27 @@ describe('webhookServer collab routes', () => {
     stream.close()
   })
 
+  // Secret redaction — broadcast() must scrub secret-shaped substrings out
+  // of agent-authored free text before it reaches any subscriber, including
+  // a remote SSE viewer over the network, not just the local Electron UI.
+  it('redacts a secret embedded in a comment before it reaches SSE subscribers', async () => {
+    const sessionId = 'session-redaction-test'
+    const chunks: string[] = []
+    const stream = getSSE(port, `/watch-stream?session=${sessionId}&token=test-token-123&name=Dave`, (c) => chunks.push(c))
+    await new Promise((r) => setTimeout(r, 200))
+
+    const leakedKey = 'AKIAABCDEFGHIJKLMNOP'
+    const res = await post(port, `/session/${sessionId}/comment`, { text: `found this in the logs: ${leakedKey}`, token: 'test-token-123', from: 'Dave' })
+    expect(res.status).toBe(200)
+
+    await new Promise((r) => setTimeout(r, 200))
+    const combined = chunks.join('')
+    expect(combined).not.toContain(leakedKey)
+    expect(combined).toContain('[REDACTED:AWS access key]')
+
+    stream.close()
+  })
+
   // Lightweight live collaboration — presence
   it('GET /watch-stream announces the viewer joining as a comment event', async () => {
     const sessionId = 'session-presence-test'

@@ -35,6 +35,7 @@ import { detectDeployCommand, runDeploy, runPreviewDeploy, providerFromCommand, 
 import { appendDeployRecord } from '../deployHistory'
 import * as path from 'path'
 import { scanSandboxFiles } from '../sandboxScanner'
+import { detectSecret, redactSecrets } from '../secretPatterns'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -242,12 +243,30 @@ export function resolveApproval(sessionId: string, approved: boolean, approver: 
 
 // ── Progress broadcast ────────────────────────────────────────────────────────
 
-export function broadcast(progress: AgentProgress): void {
-  appendEvent(progress.sessionId, progress as unknown as Record<string, unknown>)
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed()) win.webContents.send('agent:progress', progress)
+/**
+ * Redacts secret-shaped substrings out of the free-text fields an agent
+ * authors itself (a RUN block's command/output, a chat-style summary, an
+ * error message) before broadcast() funnels them anywhere. This is distinct
+ * from detectSecret()'s file-edit guard and sandboxScanner.ts's pre-commit
+ * scan: an agent can echo a secret it merely *read* (e.g. `cat .env`)
+ * without ever writing it to a file, so neither of those ever sees it.
+ */
+function redactProgressSecrets(progress: AgentProgress): AgentProgress {
+  return {
+    ...progress,
+    subtaskDescription: redactSecrets(progress.subtaskDescription),
+    error: progress.error !== undefined ? redactSecrets(progress.error) : progress.error,
+    output: progress.output !== undefined ? redactSecrets(progress.output) : progress.output,
   }
-  publish(progress.sessionId, progress as unknown as Record<string, unknown>)
+}
+
+export function broadcast(progress: AgentProgress): void {
+  const safe = redactProgressSecrets(progress)
+  appendEvent(safe.sessionId, safe as unknown as Record<string, unknown>)
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send('agent:progress', safe)
+  }
+  publish(safe.sessionId, safe as unknown as Record<string, unknown>)
 }
 
 // ── Per-subtask repo context (Gap 28) ────────────────────────────────────────
@@ -323,24 +342,8 @@ async function getWorktreeDiff(worktreePath: string): Promise<string> {
 }
 
 // ── Secrets guard (Gap 44) ────────────────────────────────────────────────────
-
-const SECRET_PATTERNS: Array<{ name: string; re: RegExp }> = [
-  { name: 'AWS access key',     re: /AKIA[0-9A-Z]{16}/ },
-  { name: 'GitHub PAT',         re: /ghp_[A-Za-z0-9]{36}/ },
-  { name: 'PEM private key',    re: /-----BEGIN (?:RSA |EC )?PRIVATE KEY-----/ },
-  { name: 'generic API secret', re: /(?:api[_-]?key|api[_-]?secret|password|access[_-]?token)\s*[:=]\s*['"][A-Za-z0-9+/]{24,}['"]/i },
-]
-
-/**
- * Returns the name of the first secret pattern found in `content`, or null.
- * Only called in the autonomous agent's edit path — not in the chat path.
- */
-function detectSecret(content: string): string | null {
-  for (const { name, re } of SECRET_PATTERNS) {
-    if (re.test(content)) return name
-  }
-  return null
-}
+// detectSecret/SECRET_PATTERNS moved to ../secretPatterns.ts (single source of
+// truth, shared with sandboxScanner.ts and broadcast()'s output redaction below).
 
 // ── AI streaming helper ───────────────────────────────────────────────────────
 
