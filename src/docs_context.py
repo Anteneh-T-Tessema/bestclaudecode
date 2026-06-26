@@ -31,7 +31,7 @@ import urllib.parse
 import urllib.request
 
 _TIMEOUT = 8
-_UA = "Lakoora/1.0 (docs context)"
+_UA = "Meshflow/1.0 (docs context)"
 
 
 # ── Fetchers ──────────────────────────────────────────────────────────────────

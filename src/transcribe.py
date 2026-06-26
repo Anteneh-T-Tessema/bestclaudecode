@@ -23,7 +23,7 @@ def _get_model():
         from faster_whisper import WhisperModel  # type: ignore[import]
     except ImportError:
         return None
-    size = os.environ.get("LAKOORA_WHISPER_MODEL", "base")
+    size = os.environ.get("MESHFLOW_WHISPER_MODEL", "base")
     _model = WhisperModel(size)
     return _model
 

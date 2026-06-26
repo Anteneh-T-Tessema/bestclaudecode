@@ -98,24 +98,30 @@ class _Doc(NamedTuple):
 # Embedding backends
 # ---------------------------------------------------------------------------
 
-def load_lakoora_settings() -> dict:
-    """Load settings from lakoora-settings.json if it exists."""
+def load_meshflow_settings() -> dict:
+    """Load settings from meshflow-settings.json if it exists.
+
+    Path must match desktop/src/main/store.ts's getStorePath() exactly:
+    Electron's userData dir (app.setName('Meshflow') in main/index.ts fixes
+    this to "Meshflow" on every platform, not just darwin) plus the
+    "meshflow-settings.json" filename store.ts writes.
+    """
     home = Path.home()
     if sys.platform == "darwin":
-        path = home / "Library" / "Application Support" / "lakoora" / "lakoora-settings.json"
+        path = home / "Library" / "Application Support" / "Meshflow" / "meshflow-settings.json"
     elif sys.platform == "win32":
         appdata = os.environ.get("APPDATA")
         if appdata:
-            path = Path(appdata) / "lakoora" / "lakoora-settings.json"
+            path = Path(appdata) / "Meshflow" / "meshflow-settings.json"
         else:
-            path = home / "AppData" / "Roaming" / "lakoora" / "lakoora-settings.json"
+            path = home / "AppData" / "Roaming" / "Meshflow" / "meshflow-settings.json"
     else:
         config_home = os.environ.get("XDG_CONFIG_HOME")
         if config_home:
-            path = Path(config_home) / "lakoora" / "lakoora-settings.json"
+            path = Path(config_home) / "Meshflow" / "meshflow-settings.json"
         else:
-            path = home / ".config" / "lakoora" / "lakoora-settings.json"
-    
+            path = home / ".config" / "Meshflow" / "meshflow-settings.json"
+
     try:
         if path.exists():
             with open(path, "r", encoding="utf-8") as f:
@@ -190,18 +196,18 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     if not texts:
         return []
 
-    settings = load_lakoora_settings()
+    settings = load_meshflow_settings()
 
     # 1. Try Local Ollama Embeddings if enabled
-    use_local = os.environ.get("LAKOORA_USE_LOCAL_EMBEDDINGS")
+    use_local = os.environ.get("MESHFLOW_USE_LOCAL_EMBEDDINGS")
     if use_local is not None:
         use_local_embeddings = use_local.lower() in ("true", "1")
     else:
         use_local_embeddings = settings.get("useLocalEmbeddings", False)
 
     if use_local_embeddings:
-        ollama_url = os.environ.get("LAKOORA_OLLAMA_URL") or settings.get("ollamaUrl", "http://localhost:11434")
-        model = os.environ.get("LAKOORA_LOCAL_EMBEDDING_MODEL") or settings.get("localEmbeddingModel", "nomic-embed-text")
+        ollama_url = os.environ.get("MESHFLOW_OLLAMA_URL") or settings.get("ollamaUrl", "http://localhost:11434")
+        model = os.environ.get("MESHFLOW_LOCAL_EMBEDDING_MODEL") or settings.get("localEmbeddingModel", "nomic-embed-text")
         try:
             return _ollama_embed(texts, ollama_url, model)
         except (urllib.error.URLError, TimeoutError, KeyError, ValueError, OSError):
@@ -221,15 +227,15 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
 
 def active_backend() -> str:
     """Return which embedding backend embed_texts() will use right now."""
-    settings = load_lakoora_settings()
-    use_local = os.environ.get("LAKOORA_USE_LOCAL_EMBEDDINGS")
+    settings = load_meshflow_settings()
+    use_local = os.environ.get("MESHFLOW_USE_LOCAL_EMBEDDINGS")
     if use_local is not None:
         use_local_embeddings = use_local.lower() in ("true", "1")
     else:
         use_local_embeddings = settings.get("useLocalEmbeddings", False)
 
     if use_local_embeddings:
-        model = os.environ.get("LAKOORA_LOCAL_EMBEDDING_MODEL") or settings.get("localEmbeddingModel", "nomic-embed-text")
+        model = os.environ.get("MESHFLOW_LOCAL_EMBEDDING_MODEL") or settings.get("localEmbeddingModel", "nomic-embed-text")
         return f"ollama ({model})"
     return "voyage-code-3" if os.environ.get("VOYAGE_API_KEY") else "local-hash"
 

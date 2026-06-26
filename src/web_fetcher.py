@@ -23,7 +23,7 @@ import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
 
-_UA = "Mozilla/5.0 (compatible; Lakoora/1.0; +https://lakoora.dev)"
+_UA = "Mozilla/5.0 (compatible; Meshflow/1.0; +https://meshflow.dev)"
 _MAX_RESULTS = 5
 _TIMEOUT = 8
 

@@ -1,6 +1,7 @@
 """Tests for src/vector_index.py — semantic vector search over repo map symbols."""
 import json
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -416,9 +417,9 @@ def test_ollama_embed_called(monkeypatch):
     import urllib.request
     monkeypatch.setattr(urllib.request, "urlopen", mock_urlopen)
 
-    monkeypatch.setenv("LAKOORA_USE_LOCAL_EMBEDDINGS", "true")
-    monkeypatch.setenv("LAKOORA_LOCAL_EMBEDDING_MODEL", "nomic-embed-text")
-    monkeypatch.setenv("LAKOORA_OLLAMA_URL", "http://localhost:11434")
+    monkeypatch.setenv("MESHFLOW_USE_LOCAL_EMBEDDINGS", "true")
+    monkeypatch.setenv("MESHFLOW_LOCAL_EMBEDDING_MODEL", "nomic-embed-text")
+    monkeypatch.setenv("MESHFLOW_OLLAMA_URL", "http://localhost:11434")
 
     from src.vector_index import embed_texts, active_backend
 
@@ -439,9 +440,9 @@ def test_ollama_embed_fallback_on_network_failure(monkeypatch):
     import urllib.request
     monkeypatch.setattr(urllib.request, "urlopen", mock_urlopen)
 
-    monkeypatch.setenv("LAKOORA_USE_LOCAL_EMBEDDINGS", "true")
-    monkeypatch.setenv("LAKOORA_LOCAL_EMBEDDING_MODEL", "nomic-embed-text")
-    monkeypatch.setenv("LAKOORA_OLLAMA_URL", "http://localhost:11434")
+    monkeypatch.setenv("MESHFLOW_USE_LOCAL_EMBEDDINGS", "true")
+    monkeypatch.setenv("MESHFLOW_LOCAL_EMBEDDING_MODEL", "nomic-embed-text")
+    monkeypatch.setenv("MESHFLOW_OLLAMA_URL", "http://localhost:11434")
     monkeypatch.delenv("VOYAGE_API_KEY", raising=False)
 
     from src.vector_index import embed_texts, active_backend
@@ -453,4 +454,87 @@ def test_ollama_embed_fallback_on_network_failure(monkeypatch):
     res = embed_texts(["hello"])
     assert len(res) == 1
     assert len(res[0]) == 256  # local-hash vector size
+
+
+# ---------------------------------------------------------------------------
+# load_meshflow_settings — the realistic Settings-UI-to-Python path (every
+# test above exercises the MESHFLOW_* env var fallbacks, which Electron never
+# actually sets; the real path is Settings UI -> meshflow-settings.json ->
+# this function). Previously untested — a stale pre-rename path
+# (lakoora/lakoora-settings.json) silently meant this file was never read.
+# ---------------------------------------------------------------------------
+
+def _write_settings_file(home: Path, payload: dict) -> None:
+    settings_dir = home / "Library" / "Application Support" / "Meshflow"
+    settings_dir.mkdir(parents=True, exist_ok=True)
+    (settings_dir / "meshflow-settings.json").write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_load_meshflow_settings_reads_the_real_electron_store_path(tmp_path, monkeypatch):
+    from src.vector_index import load_meshflow_settings
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    _write_settings_file(tmp_path, {"useLocalEmbeddings": True, "ollamaUrl": "http://example.test:1234"})
+
+    assert load_meshflow_settings() == {"useLocalEmbeddings": True, "ollamaUrl": "http://example.test:1234"}
+
+
+def test_load_meshflow_settings_returns_empty_dict_when_file_does_not_exist(tmp_path, monkeypatch):
+    from src.vector_index import load_meshflow_settings
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    assert load_meshflow_settings() == {}
+
+
+def test_active_backend_honors_the_settings_file_without_any_env_vars(tmp_path, monkeypatch):
+    """The real path: a user ticks "Local Ollama Embeddings" in Settings,
+    which writes useLocalEmbeddings/localEmbeddingModel to meshflow-settings.json
+    — no MESHFLOW_* env var is ever involved."""
+    from src.vector_index import active_backend
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("MESHFLOW_USE_LOCAL_EMBEDDINGS", raising=False)
+    monkeypatch.delenv("MESHFLOW_LOCAL_EMBEDDING_MODEL", raising=False)
+    _write_settings_file(tmp_path, {"useLocalEmbeddings": True, "localEmbeddingModel": "mxbai-embed-large"})
+
+    assert active_backend() == "ollama (mxbai-embed-large)"
+
+
+def test_embed_texts_calls_ollama_from_settings_file_alone(tmp_path, monkeypatch):
+    from src.vector_index import embed_texts
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("MESHFLOW_USE_LOCAL_EMBEDDINGS", raising=False)
+    monkeypatch.delenv("MESHFLOW_OLLAMA_URL", raising=False)
+    monkeypatch.delenv("MESHFLOW_LOCAL_EMBEDDING_MODEL", raising=False)
+    _write_settings_file(tmp_path, {
+        "useLocalEmbeddings": True,
+        "ollamaUrl": "http://settings-file-host:11434",
+        "localEmbeddingModel": "nomic-embed-text",
+    })
+
+    called = []
+
+    def mock_urlopen(request, timeout=None):
+        called.append(request)
+        class DummyResponse:
+            def read(self):
+                return json.dumps({"embeddings": [[0.4, 0.5, 0.6]]}).encode("utf-8")
+            def __enter__(self):
+                return self
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                pass
+        return DummyResponse()
+
+    import urllib.request
+    monkeypatch.setattr(urllib.request, "urlopen", mock_urlopen)
+
+    res = embed_texts(["hello"])
+    assert res == [[0.4, 0.5, 0.6]]
+    assert called[0].full_url == "http://settings-file-host:11434/api/embed"
 

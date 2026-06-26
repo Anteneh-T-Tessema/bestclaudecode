@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 _DEFAULT_LOCAL_PATH = Path(".cache") / "qdrant"
-_COLLECTION = "lakoora_symbols"
+_COLLECTION = "meshflow_symbols"
 
 
 def is_available() -> bool:
