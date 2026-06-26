@@ -1,7 +1,7 @@
-import { BrowserWindow, shell } from 'electron'
+import { BrowserWindow, shell, app } from 'electron'
 import { join } from 'path'
 
-const iconPath = join(__dirname, '../../build/icon.icns')
+const iconPath = join(app.getAppPath(), 'build/icon.iconset/icon_512x512.png')
 
 export function createWindow(): BrowserWindow {
   const mainWindow = new BrowserWindow({

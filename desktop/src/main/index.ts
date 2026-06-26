@@ -23,9 +23,10 @@ import { registerAllIPC } from './ipc'
 app.whenReady().then(() => {
   app.setAppUserModelId('com.meshflow.desktop')
 
-  // Set dock icon in dev mode (packaged builds pick it up from build/icon.icns automatically)
+  // Set dock icon in dev mode — use a PNG (more reliable than .icns with nativeImage)
+  // app.getAppPath() returns the desktop/ root in both dev and packaged builds.
   if (process.platform === 'darwin' && app.dock) {
-    const dockIcon = nativeImage.createFromPath(join(__dirname, '../../build/icon.icns'))
+    const dockIcon = nativeImage.createFromPath(join(app.getAppPath(), 'build/icon.iconset/icon_512x512.png'))
     if (!dockIcon.isEmpty()) app.dock.setIcon(dockIcon)
   }
 
