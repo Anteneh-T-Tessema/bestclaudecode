@@ -67,7 +67,13 @@ export function listServerConfigs(): McpServerConfig[] {
       name: 'local-devops-server',
       command: 'node',
       args: [path.join(repoRoot(), 'mcp-servers/local-devops-server/dist/index.js')],
-    }
+    },
+    {
+      id: 'playwright-browser-server',
+      name: 'playwright-browser-server',
+      command: 'node',
+      args: [path.join(repoRoot(), 'mcp-servers/playwright-browser-server/dist/index.js')],
+    },
   ]
   store.set('mcpServers', defaults)
   return defaults
