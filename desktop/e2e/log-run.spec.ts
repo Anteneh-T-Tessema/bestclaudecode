@@ -2,7 +2,7 @@
  * E2E test: logRun audit integration.
  *
  * Executes a safe <<<RUN>>> block (echo hello) via the RunProposalCard "Run"
- * button and then verifies that a new entry with agent "lakoora-run" appears
+ * button and then verifies that a new entry with agent "meshflow-run" appears
  * in the Audit Trail panel within 5 seconds. This exercises the full path:
  * RunProposalCard → terminal:logRun IPC → decision_log.py → Audit Trail panel reload.
  */
@@ -32,13 +32,13 @@ test.describe('logRun audit integration', () => {
 
       // Clear persisted messages so the only Run button visible is for echo hello.
       await window.evaluate(() => {
-        window.dispatchEvent(new CustomEvent('lakoora:e2e:clearMessages'))
+        window.dispatchEvent(new CustomEvent('meshflow:e2e:clearMessages'))
       })
       await window.waitForTimeout(100)
 
       await window.evaluate(() => {
         const content = '<<<RUN>>>\necho hello\n<<<END_RUN>>>'
-        window.dispatchEvent(new CustomEvent('lakoora:e2e:injectMessage', {
+        window.dispatchEvent(new CustomEvent('meshflow:e2e:injectMessage', {
           detail: { role: 'assistant', content },
         }))
       })
@@ -62,8 +62,11 @@ test.describe('logRun audit integration', () => {
       await window.locator('[title="Refresh"]').first().click({ timeout: 5_000 })
       await expect(window.locator('[data-testid="audit-entry"]')).toHaveCount(initialCount + 1, { timeout: 8_000 })
 
-      // The new entry should show the lakoora-run agent label.
-      await expect(window.locator('text=lakoora-run').first()).toBeVisible()
+      // The new entry should show the meshflow-run agent label. Scoped to
+      // audit-entry rows, not a plain text= locator — the agent filter
+      // <select> also has a hidden <option value="meshflow-run"> that a bare
+      // text locator matches first (and "hidden" fails toBeVisible()).
+      await expect(window.locator('[data-testid="audit-entry"]', { hasText: 'meshflow-run' }).first()).toBeVisible()
     } finally {
       await closeApp(app)
     }

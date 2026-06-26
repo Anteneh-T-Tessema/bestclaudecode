@@ -7,7 +7,7 @@
  * Implementation notes:
  * - contextBridge.exposeInMainWorld() seals the api object in Electron 28+,
  *   so patching window.api.ai.streamChat silently fails. Instead, ChatInput.tsx
- *   fires a 'lakoora:e2e:beforeSend' CustomEvent with the final enriched content
+ *   fires a 'meshflow:e2e:beforeSend' CustomEvent with the final enriched content
  *   before it's passed to the store. The test listens for this event.
  * - window.api.search.bm25 is also sealed, so the test cannot mock it. Instead
  *   the BM25 call is allowed to run (it may return empty results), and we assert
@@ -16,7 +16,7 @@
  *   verify the event fired (the BM25 mock below patches at a lower level via
  *   the in-renderer module — this is the best we can do without keytar).
  *
- * Simpler approach used here: ChatInput dispatches 'lakoora:e2e:beforeSend'
+ * Simpler approach used here: ChatInput dispatches 'meshflow:e2e:beforeSend'
  * with { content } — the enriched text including any injected context blocks.
  * We register a one-shot listener in the page before typing, then poll for it.
  */
@@ -37,12 +37,12 @@ test.describe('@codebase context injection', () => {
       await window.locator('textarea[placeholder*="Ask anything"]').waitFor({ state: 'visible', timeout: 5_000 })
 
       // Register a one-shot listener for the test hook event BEFORE typing.
-      // The 'lakoora:e2e:beforeSend' event carries the final enriched content
+      // The 'meshflow:e2e:beforeSend' event carries the final enriched content
       // that ChatInput.tsx will pass to the AI (after @-context injection).
       await window.evaluate(() => {
         ;(window as unknown as Record<string, unknown>).__e2e_sentContent = null
         window.addEventListener(
-          'lakoora:e2e:beforeSend',
+          'meshflow:e2e:beforeSend',
           (e) => {
             ;(window as unknown as Record<string, unknown>).__e2e_sentContent =
               (e as CustomEvent<{ content: string }>).detail.content

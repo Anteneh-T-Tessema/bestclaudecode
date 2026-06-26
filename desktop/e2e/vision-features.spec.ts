@@ -5,7 +5,7 @@
  * CDP — clicking real buttons, reading real rendered DOM, and for Monitor,
  * spawning a real node-pty process. AI-dependent flows (Ideation's Draft
  * Spec, Monitor's Diagnose with AI) are NOT exercised against a live model —
- * there's no `lakoora:e2e:injectMessage`-style hook for them (that hook is
+ * there's no `meshflow:e2e:injectMessage`-style hook for them (that hook is
  * wired into ChatPanel's message store, not these panels' direct
  * window.api.ai.streamChat calls) — so this file only verifies what's
  * reachable without spending a real API call: that the panels mount, the

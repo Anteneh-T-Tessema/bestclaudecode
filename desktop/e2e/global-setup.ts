@@ -37,7 +37,7 @@ async function waitForCDP(port: number, timeout = 30_000): Promise<void> {
 }
 
 // Synthetic decision-log fixtures — never touches the real project's actual
-// docs/decisions/ audit trail. See LAKOORA_DECISIONS_DIR in decisions.handlers.ts.
+// docs/decisions/ audit trail. See MESHFLOW_DECISIONS_DIR in decisions.handlers.ts.
 function seedDecisionFixtures(dir: string): void {
   fs.mkdirSync(dir, { recursive: true })
 
@@ -86,20 +86,20 @@ export default async function globalSetup() {
 
   // Isolated userData dir — keeps e2e runs from touching the developer's real
   // Electron app settings/state.
-  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lakoora-e2e-'))
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meshflow-e2e-'))
   fs.writeFileSync(PORT_FILE + '.userdata', userDataDir, 'utf-8')
 
   // Isolated decision-log fixture dir — see seedDecisionFixtures() above.
-  const decisionsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lakoora-e2e-decisions-'))
+  const decisionsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meshflow-e2e-decisions-'))
   seedDecisionFixtures(decisionsDir)
   fs.writeFileSync(PORT_FILE + '.decisions', decisionsDir, 'utf-8')
 
   const env = {
     ...process.env,
     NODE_ENV: 'test',
-    LAKOORA_CDP_PORT: String(CDP_PORT),
-    LAKOORA_E2E_USER_DATA_DIR: userDataDir,
-    LAKOORA_DECISIONS_DIR: decisionsDir,
+    MESHFLOW_CDP_PORT: String(CDP_PORT),
+    MESHFLOW_E2E_USER_DATA_DIR: userDataDir,
+    MESHFLOW_DECISIONS_DIR: decisionsDir,
   }
   // Electron must NOT run as a plain Node process, or require('electron') returns
   // the npm shim (binary path string) instead of the real API and the app crashes

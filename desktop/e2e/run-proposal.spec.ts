@@ -14,7 +14,7 @@ async function openChat(window: Awaited<ReturnType<typeof launchApp>>['window'])
   await chatIcon.waitFor({ state: 'visible', timeout: 5_000 })
   await chatIcon.click()
   // Wait until ChatPanel's textarea is visible — this confirms the component
-  // is mounted and its 'lakoora:e2e:injectMessage' listener is attached.
+  // is mounted and its 'meshflow:e2e:injectMessage' listener is attached.
   await window.locator('textarea[placeholder*="Ask anything"]').waitFor({ state: 'visible', timeout: 5_000 })
 }
 
@@ -23,13 +23,13 @@ async function injectRunMessage(window: Awaited<ReturnType<typeof launchApp>>['w
   // Clear any messages persisted to localStorage by previous tests so that
   // not.toBeVisible() checks for 'Blocked'/'Caution' start from a clean slate.
   await window.evaluate(() => {
-    window.dispatchEvent(new CustomEvent('lakoora:e2e:clearMessages'))
+    window.dispatchEvent(new CustomEvent('meshflow:e2e:clearMessages'))
   })
   await window.waitForTimeout(100)
 
   await window.evaluate((cmd) => {
     const content = `Here is the command:\n\`\`\`\n<<<RUN>>>\n${cmd}\n<<<END_RUN>>>\n\`\`\``
-    window.dispatchEvent(new CustomEvent('lakoora:e2e:injectMessage', {
+    window.dispatchEvent(new CustomEvent('meshflow:e2e:injectMessage', {
       detail: { role: 'assistant', content },
     }))
   }, command)
