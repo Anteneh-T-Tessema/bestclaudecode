@@ -128,6 +128,14 @@ export function MonitorPanel() {
     // backlog catch-up below — so whichever data already arrived live isn't
     // double-counted when the backlog fetch resolves afterward.
     let consumedLength = 0
+    let exitHandled = false
+
+    const handleExit = () => {
+      if (exitHandled) return
+      exitHandled = true
+      setMonitorId(null)
+      toast.info('Monitor command exited')
+    }
 
     const appendChunk = (data: string) => {
       consumedLength += data.length
@@ -155,15 +163,16 @@ export function MonitorPanel() {
       })
     })
 
-    const offExit = window.api.monitor.onExit(monitorId, () => {
-      setMonitorId(null)
-      toast.info('Monitor command exited')
-    })
+    const offExit = window.api.monitor.onExit(monitorId, handleExit)
 
-    window.api.monitor.getBacklog(monitorId).then((backlog) => {
-      if (cancelled || !backlog) return
-      const missed = backlog.slice(consumedLength)
+    window.api.monitor.getBacklog(monitorId).then(({ data, exitCode }) => {
+      if (cancelled) return
+      const missed = data.slice(consumedLength)
       if (missed) appendChunk(missed)
+      // Same race as data, for exit: a near-instant command can finish (and
+      // send monitor:exit:<id>) before onExit above was even registered, so
+      // the Stop button would otherwise never revert to Start.
+      if (exitCode !== null) handleExit()
     }).catch(() => {})
 
     return () => { cancelled = true; offData(); offAlert(); offExit() }

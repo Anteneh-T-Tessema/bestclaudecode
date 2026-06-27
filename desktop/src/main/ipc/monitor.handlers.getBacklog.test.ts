@@ -4,15 +4,16 @@
  * tests only the pure helpers, no mocking needed there).
  *
  * Regression coverage for a real race: a near-instant command (e.g. `echo`)
- * can spawn, run, and emit all its output via term.onData() before the
- * renderer's React effect has subscribed monitor:data:<id> — that effect
- * only runs after monitor:start's IPC round-trip resolves and triggers a
- * re-render. Electron IPC doesn't buffer past sends for a not-yet-subscribed
- * channel, so the output was silently lost. This mock's onData() fires its
- * callback *synchronously, immediately upon registration* — the realistic
- * worst case (data arrives before monitor:start's own IPC response even
- * reaches the caller, let alone before a renderer subscribes) — to prove
- * getBacklog() still has it.
+ * can spawn, run, and emit all its output (and exit) via term.onData()/
+ * onExit() before the renderer's React effect has subscribed
+ * monitor:data:<id>/monitor:exit:<id> — that effect only runs after
+ * monitor:start's IPC round-trip resolves and triggers a re-render. Electron
+ * IPC doesn't buffer past sends for a not-yet-subscribed channel, so both the
+ * output and the exit notification were silently lost (confirmed in CI: the
+ * Stop button never reverted to Start because the exit event never arrived).
+ * This mock's onData()/onExit() fire their callbacks *synchronously,
+ * immediately upon registration* — the realistic worst case — to prove
+ * getBacklog() still has both.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -40,12 +41,16 @@ vi.mock('../monitorAlertLog', () => ({
   clearAlerts: () => {},
 }))
 
-/** A fake node-pty module whose onData() immediately fires `emitted` upon registration — simulating data that arrives before any external listener could exist. */
-function fakePtyModule(emitted: string | null) {
+/**
+ * A fake node-pty module whose onData()/onExit() immediately fire upon
+ * registration — simulating data/exit that arrive before any external
+ * listener could exist.
+ */
+function fakePtyModule(emitted: string | null, exitCode: number | null = null) {
   return {
     spawn: vi.fn(() => ({
       onData: (cb: (data: string) => void) => { if (emitted) cb(emitted) },
-      onExit: () => {},
+      onExit: (cb: (e: { exitCode: number }) => void) => { if (exitCode !== null) cb({ exitCode }) },
       kill: vi.fn(),
     })),
   }
@@ -71,14 +76,14 @@ describe('monitor:getBacklog', () => {
     expect(id).toBeTruthy()
 
     const getBacklogHandler = registeredHandlers.get('monitor:getBacklog')!
-    expect(getBacklogHandler({}, id)).toBe('hello-backlog-test\n')
+    expect(getBacklogHandler({}, id)).toEqual({ data: 'hello-backlog-test\n', exitCode: null })
   })
 
   it('accumulates multiple chunks emitted before the caller fetches the backlog', async () => {
-    let cb: ((data: string) => void) | null = null
+    const held: { cb: ((data: string) => void) | null } = { cb: null }
     vi.doMock('node-pty', () => ({
       spawn: vi.fn(() => ({
-        onData: (handler: (data: string) => void) => { cb = handler },
+        onData: (handler: (data: string) => void) => { held.cb = handler },
         onExit: () => {},
         kill: vi.fn(),
       })),
@@ -89,24 +94,36 @@ describe('monitor:getBacklog', () => {
     const startHandler = registeredHandlers.get('monitor:start')!
     const { id } = (await startHandler(fakeEvent(), 'some-command')) as { id?: string }
 
-    cb?.('first chunk\n')
-    cb?.('second chunk\n')
+    held.cb?.('first chunk\n')
+    held.cb?.('second chunk\n')
 
     const getBacklogHandler = registeredHandlers.get('monitor:getBacklog')!
-    expect(getBacklogHandler({}, id)).toBe('first chunk\nsecond chunk\n')
+    expect(getBacklogHandler({}, id)).toEqual({ data: 'first chunk\nsecond chunk\n', exitCode: null })
   })
 
-  it('returns an empty string for an unknown id', async () => {
+  it('returns empty data and a null exitCode for an unknown id', async () => {
     vi.doMock('node-pty', () => fakePtyModule(null))
     const { registerMonitorHandlers } = await import('./monitor.handlers')
     registerMonitorHandlers()
 
     const getBacklogHandler = registeredHandlers.get('monitor:getBacklog')!
-    expect(getBacklogHandler({}, 'no-such-id')).toBe('')
+    expect(getBacklogHandler({}, 'no-such-id')).toEqual({ data: '', exitCode: null })
   })
 
-  it('monitor:stop clears the backlog for that id', async () => {
-    vi.doMock('node-pty', () => fakePtyModule('hi\n'))
+  it('reports an exit code the pty emitted the instant onExit was registered, before any external listener could exist', async () => {
+    vi.doMock('node-pty', () => fakePtyModule('hi\n', 0))
+    const { registerMonitorHandlers } = await import('./monitor.handlers')
+    registerMonitorHandlers()
+
+    const startHandler = registeredHandlers.get('monitor:start')!
+    const { id } = (await startHandler(fakeEvent(), 'echo hi')) as { id?: string }
+
+    const getBacklogHandler = registeredHandlers.get('monitor:getBacklog')!
+    expect(getBacklogHandler({}, id)).toEqual({ data: 'hi\n', exitCode: 0 })
+  })
+
+  it('monitor:stop clears the backlog and exit code for that id', async () => {
+    vi.doMock('node-pty', () => fakePtyModule('hi\n', 0))
     const { registerMonitorHandlers } = await import('./monitor.handlers')
     registerMonitorHandlers()
 
@@ -117,6 +134,6 @@ describe('monitor:getBacklog', () => {
     stopHandler({}, id)
 
     const getBacklogHandler = registeredHandlers.get('monitor:getBacklog')!
-    expect(getBacklogHandler({}, id)).toBe('')
+    expect(getBacklogHandler({}, id)).toEqual({ data: '', exitCode: null })
   })
 })

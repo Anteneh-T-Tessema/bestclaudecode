@@ -37,6 +37,12 @@ const lineBuffers = new Map<string, string>()
 // fetch what it missed via monitor:getBacklog before going live.
 const rawBuffers = new Map<string, string>()
 const MAX_BACKLOG = 64 * 1024
+// Same race, same fix, for exit: a near-instant command can run term.onExit
+// (and event.sender.send the exit code) before the renderer has subscribed
+// monitor:exit:<id> — observed in CI as the Stop button never reverting to
+// Start because the exit notification was sent into the void. Recorded here
+// so a late subscriber can ask "did it already exit?" via monitor:getBacklog.
+const exitedCodes = new Map<string, number>()
 
 export const ERROR_PATTERN = /\b(error|exception|fail(?:ed|ure)?|fatal|panic|5\d\d)\b/i
 
@@ -105,6 +111,7 @@ export function registerMonitorHandlers(): void {
     }
 
     term.onExit(({ exitCode }) => {
+      exitedCodes.set(id, exitCode)
       cleanup()
       if (!event.sender.isDestroyed()) {
         event.sender.send(`monitor:exit:${id}`, exitCode)
@@ -122,16 +129,20 @@ export function registerMonitorHandlers(): void {
     monitors.delete(id)
     lineBuffers.delete(id)
     rawBuffers.delete(id)
+    exitedCodes.delete(id)
   })
 
   // Race fix companion — fetched once by the renderer right after monitor:start
-  // resolves, *before* it subscribes monitor:data:<id> for live updates, so
-  // anything the pty already emitted in that window isn't lost. Deliberately
-  // not cleared on process exit (only on monitor:stop / explicit cleanup of
-  // the id) since a near-instant command's exit can itself race ahead of the
-  // renderer fetching this.
-  ipcMain.handle('monitor:getBacklog', (_, id: string): string => {
-    return rawBuffers.get(id) ?? ''
+  // resolves, *before* it subscribes monitor:data:<id>/monitor:exit:<id> for
+  // live updates, so anything the pty already emitted/finished in that window
+  // isn't lost. Deliberately not cleared on process exit (only on
+  // monitor:stop / explicit cleanup of the id) since a near-instant command's
+  // data or exit can itself race ahead of the renderer fetching this.
+  ipcMain.handle('monitor:getBacklog', (_, id: string): { data: string; exitCode: number | null } => {
+    return {
+      data: rawBuffers.get(id) ?? '',
+      exitCode: exitedCodes.has(id) ? exitedCodes.get(id)! : null,
+    }
   })
 
   ipcMain.handle('monitor:listAlerts', (): AlertRecord[] => {

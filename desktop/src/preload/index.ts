@@ -84,10 +84,11 @@ const api = {
     start: (cmd: string, cwd?: string): Promise<{ id?: string; error?: string }> =>
       ipcRenderer.invoke('monitor:start', cmd, cwd),
     stop: (id: string): Promise<void> => ipcRenderer.invoke('monitor:stop', id),
-    // Race fix companion to onData — fetch whatever the pty already emitted
-    // before subscribing live, since a near-instant command can finish
-    // before the renderer's listener is registered.
-    getBacklog: (id: string): Promise<string> => ipcRenderer.invoke('monitor:getBacklog', id),
+    // Race fix companion to onData/onExit — fetch whatever the pty already
+    // emitted/finished before subscribing live, since a near-instant command
+    // can finish before the renderer's listeners are registered.
+    getBacklog: (id: string): Promise<{ data: string; exitCode: number | null }> =>
+      ipcRenderer.invoke('monitor:getBacklog', id),
     listAlerts: (): Promise<import('../main/monitorAlertLog').AlertRecord[]> =>
       ipcRenderer.invoke('monitor:listAlerts'),
     clearAlerts: (): Promise<void> => ipcRenderer.invoke('monitor:clearAlerts'),
