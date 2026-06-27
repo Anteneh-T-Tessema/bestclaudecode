@@ -102,6 +102,7 @@ interface AgentProgress {
     | 'running' | 'done' | 'retrying' | 'blocked' | 'finished' | 'error'
     | 'preparing' | 'finalizing' | 'pr-opened' | 'push-failed-kept-locally'
     | 'deploying' | 'deployed' | 'pending-approval' | 'approval-rejected'
+    | 'comment'
   output?: string
   error?: string
   doneCount: number
@@ -109,6 +110,8 @@ interface AgentProgress {
   prUrl?: string
   deployUrl?: string
   branch?: string
+  /** Team Collaboration — name of the remote viewer who sent a 'comment' event, or joined/left. */
+  viewerName?: string
   /** Gap 142 — set on 'retrying'; retryCount is 0-indexed (completed failures so far). */
   retryCount?: number
   maxRetries?: number
