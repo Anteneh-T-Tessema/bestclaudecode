@@ -26,6 +26,17 @@ const monitors = new Map<string, import('node-pty').IPty>()
 // detection needs discrete lines, so each active monitor buffers its
 // trailing partial line across onData calls.
 const lineBuffers = new Map<string, string>()
+// Race fix: for a near-instant command (e.g. `echo`), the pty can spawn, run,
+// and emit all its output via onData before the renderer's React effect
+// (which only subscribes monitor:data:<id> *after* monitor:start's IPC
+// round-trip resolves and triggers a re-render) has registered its
+// listener — Electron IPC doesn't buffer past sends for a not-yet-subscribed
+// channel, so that output is silently lost. Mirrors the backlog-then-live
+// pattern webhookServer.ts's /watch-stream already uses for the same reason:
+// every chunk is also accumulated here (capped) so a late subscriber can
+// fetch what it missed via monitor:getBacklog before going live.
+const rawBuffers = new Map<string, string>()
+const MAX_BACKLOG = 64 * 1024
 
 export const ERROR_PATTERN = /\b(error|exception|fail(?:ed|ure)?|fatal|panic|5\d\d)\b/i
 
@@ -64,11 +75,14 @@ export function registerMonitorHandlers(): void {
     }
 
     lineBuffers.set(id, '')
+    rawBuffers.set(id, '')
 
     term.onData((data) => {
       if (!event.sender.isDestroyed()) {
         event.sender.send(`monitor:data:${id}`, data)
       }
+      const combined = (rawBuffers.get(id) ?? '') + data
+      rawBuffers.set(id, combined.length > MAX_BACKLOG ? combined.slice(-MAX_BACKLOG) : combined)
       const { lines, remainder } = splitLines(lineBuffers.get(id) ?? '', data)
       lineBuffers.set(id, remainder)
       for (const line of lines) {
@@ -107,6 +121,17 @@ export function registerMonitorHandlers(): void {
     try { monitors.get(id)?.kill() } catch { /* ignore */ }
     monitors.delete(id)
     lineBuffers.delete(id)
+    rawBuffers.delete(id)
+  })
+
+  // Race fix companion — fetched once by the renderer right after monitor:start
+  // resolves, *before* it subscribes monitor:data:<id> for live updates, so
+  // anything the pty already emitted in that window isn't lost. Deliberately
+  // not cleared on process exit (only on monitor:stop / explicit cleanup of
+  // the id) since a near-instant command's exit can itself race ahead of the
+  // renderer fetching this.
+  ipcMain.handle('monitor:getBacklog', (_, id: string): string => {
+    return rawBuffers.get(id) ?? ''
   })
 
   ipcMain.handle('monitor:listAlerts', (): AlertRecord[] => {

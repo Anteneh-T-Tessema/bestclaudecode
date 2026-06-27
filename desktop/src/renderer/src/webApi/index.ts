@@ -63,6 +63,7 @@ export function createWebApi(): API {
     monitor: {
       start: () => Promise.resolve(notPorted('monitor.start', { error: 'not available in web mode' })),
       stop: () => Promise.resolve(notPorted('monitor.stop', undefined)),
+      getBacklog: () => Promise.resolve(notPorted('monitor.getBacklog', '')),
       listAlerts: () => Promise.resolve(notPorted('monitor.listAlerts', [])),
       clearAlerts: () => Promise.resolve(notPorted('monitor.clearAlerts', undefined)),
       onData: () => () => {},

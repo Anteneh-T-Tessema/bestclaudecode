@@ -119,8 +119,18 @@ export function MonitorPanel() {
 
   useEffect(() => {
     if (!monitorId) return
+    let cancelled = false
+    // Race fix — a near-instant command (e.g. `echo`) can spawn, run, and
+    // exit before this effect even runs (it only fires after monitor:start's
+    // IPC round-trip resolves and triggers the re-render that sets
+    // monitorId), so the onData subscription below can miss everything.
+    // consumedLength is advanced by every appendChunk call — live or the
+    // backlog catch-up below — so whichever data already arrived live isn't
+    // double-counted when the backlog fetch resolves afterward.
+    let consumedLength = 0
 
-    const offData = window.api.monitor.onData(monitorId, (data) => {
+    const appendChunk = (data: string) => {
+      consumedLength += data.length
       const combined = partialLineRef.current + data
       const parts = combined.split('\n')
       partialLineRef.current = parts.pop() ?? ''
@@ -129,7 +139,9 @@ export function MonitorPanel() {
         const next = [...prev, ...parts]
         return next.length > MAX_LOG_LINES ? next.slice(next.length - MAX_LOG_LINES) : next
       })
-    })
+    }
+
+    const offData = window.api.monitor.onData(monitorId, appendChunk)
 
     const offAlert = window.api.monitor.onAlert(monitorId, (alert) => {
       setAlerts((prev) => {
@@ -148,7 +160,13 @@ export function MonitorPanel() {
       toast.info('Monitor command exited')
     })
 
-    return () => { offData(); offAlert(); offExit() }
+    window.api.monitor.getBacklog(monitorId).then((backlog) => {
+      if (cancelled || !backlog) return
+      const missed = backlog.slice(consumedLength)
+      if (missed) appendChunk(missed)
+    }).catch(() => {})
+
+    return () => { cancelled = true; offData(); offAlert(); offExit() }
   }, [monitorId, diagnoseWithAi])
 
   useEffect(() => {
