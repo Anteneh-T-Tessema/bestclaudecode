@@ -18,3 +18,7 @@ plans/
 .meshflow-worktrees/
 .meshflow/
 desktop/build/icon-source/icon_1024.png
+# TS incremental build cache — machine/run-specific, and a committed stale
+# copy is exactly what masked a real type error (AgentProgress['status']
+# missing 'comment') until an unrelated change invalidated it.
+*.tsbuildinfo
