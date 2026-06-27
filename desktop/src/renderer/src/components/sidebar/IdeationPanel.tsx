@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Lightbulb, Sparkles, Plus, Trash2, ListTodo, RefreshCw, Wand2 } from 'lucide-react'
 import { toast } from '../../store/useToastStore'
 import { useChatStore, MODELS } from '../../store/useChatStore'
@@ -70,6 +70,19 @@ export function IdeationPanel() {
   const activeModel = useChatStore((s) => s.activeModel)
   const setActiveModel = useChatStore((s) => s.setActiveModel)
   const setActiveActivity = useAppStore((s) => s.setActiveActivity)
+  const pendingIdeaSeed = useAppStore((s) => s.pendingIdeaSeed)
+  const setPendingIdeaSeed = useAppStore((s) => s.setPendingIdeaSeed)
+
+  // System Architect's "Generate Plan from this blueprint" hands off here via
+  // useAppStore rather than the two panels sharing state directly — consumed
+  // once on mount/whenever it changes, then cleared so revisiting Ideation
+  // later doesn't keep re-seeding a stale blueprint.
+  useEffect(() => {
+    if (pendingIdeaSeed) {
+      setIdea(pendingIdeaSeed)
+      setPendingIdeaSeed(null)
+    }
+  }, [pendingIdeaSeed, setPendingIdeaSeed])
 
   // Zero-to-one scaffolding, first slice: builds a task description (prompt +
   // the project's existing design tokens) and hands it to the same

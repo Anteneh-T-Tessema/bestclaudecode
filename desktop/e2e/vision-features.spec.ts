@@ -51,6 +51,51 @@ test.describe('Sidebar registration — Monitor and Ideation', () => {
       await closeApp(app)
     }
   })
+
+  // Adapted from github.com/Anteneh-T-Tessema/AIDesignPatterns's designer.js —
+  // a "describe the agent system you want" -> pattern-aware blueprint panel,
+  // next to Ideation rather than a standalone CLI/landing-page, with a
+  // "Generate Plan from this blueprint" handoff into Ideation's existing
+  // create-plan -> swarm pipeline.
+  test('System Architect activity icon is visible and switches to the System Architect panel', async () => {
+    const { app, window } = await launchApp()
+    try {
+      const icon = window.locator('[data-testid="activity-architect"]')
+      await expect(icon).toBeVisible({ timeout: 15_000 })
+      await icon.click()
+      await expect(window.getByPlaceholder(/checks if they are spam/i)).toBeVisible({ timeout: 5_000 })
+      await expect(window.locator('button:has-text("Generate System Design")')).toBeVisible()
+    } finally {
+      await closeApp(app)
+    }
+  })
+})
+
+test.describe('System Architect panel — non-AI behavior', () => {
+  test('Generate System Design is disabled until a description is typed', async () => {
+    const { app, window } = await launchApp()
+    try {
+      await window.locator('[data-testid="activity-architect"]').click()
+      const generateButton = window.locator('[data-testid="generate-blueprint-button"]')
+      await expect(generateButton).toBeDisabled()
+
+      await window.getByPlaceholder(/checks if they are spam/i).fill('A router that triages support tickets')
+      await expect(generateButton).toBeEnabled()
+    } finally {
+      await closeApp(app)
+    }
+  })
+
+  test('no blueprint output or Send-to-Ideation button before generating', async () => {
+    const { app, window } = await launchApp()
+    try {
+      await window.locator('[data-testid="activity-architect"]').click()
+      await expect(window.getByText('Blueprint')).not.toBeVisible()
+      await expect(window.locator('button:has-text("Generate Plan from this blueprint")')).not.toBeVisible()
+    } finally {
+      await closeApp(app)
+    }
+  })
 })
 
 test.describe('Ideation panel — non-AI behavior', () => {

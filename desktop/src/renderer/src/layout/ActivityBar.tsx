@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Files, GitBranch, Search, MessageSquare, ShieldCheck, Settings, Brain, Radar, ListTodo, BookOpen, Bot, Bug, ListTree, StickyNote, DollarSign, Map, Github, KeyRound, LayoutGrid, Wand2, Activity, Lightbulb, GitFork, Globe } from 'lucide-react'
+import { Files, GitBranch, Search, MessageSquare, ShieldCheck, Settings, Brain, Radar, ListTodo, BookOpen, Bot, Bug, ListTree, StickyNote, DollarSign, Map, Github, KeyRound, LayoutGrid, Wand2, Activity, Lightbulb, GitFork, Globe, Network } from 'lucide-react'
 import { useAppStore, type ActivityId } from '../store/useAppStore'
 import { IconButton, Tooltip, accent, surface, border, type AccentName } from '../design'
 
@@ -33,6 +33,7 @@ const ACTIVITIES: ActivityDef[] = [
   { id: 'wizard', icon: Wand2, label: 'New Project Wizard', accentName: 'green' },
   { id: 'monitor', icon: Activity, label: 'Monitor', accentName: 'red' },
   { id: 'ideation', icon: Lightbulb, label: 'Ideation', accentName: 'amber' },
+  { id: 'architect', icon: Network, label: 'System Architect', accentName: 'violet' },
   { id: 'browser', icon: Globe, label: 'Browser Preview', accentName: 'cyan' },
 ]
 

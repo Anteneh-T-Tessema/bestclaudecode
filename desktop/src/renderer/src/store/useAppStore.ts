@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type ActivityId = 'files' | 'git' | 'chat' | 'search' | 'memory' | 'codesearch' | 'tasks' | 'audit' | 'archdoc' | 'agent' | 'swarm' | 'debug' | 'outline' | 'notepads' | 'usage' | 'map' | 'github' | 'env' | 'wizard' | 'monitor' | 'ideation' | 'settings' | 'callgraph' | 'browser'
+export type ActivityId = 'files' | 'git' | 'chat' | 'search' | 'memory' | 'codesearch' | 'tasks' | 'audit' | 'archdoc' | 'agent' | 'swarm' | 'debug' | 'outline' | 'notepads' | 'usage' | 'map' | 'github' | 'env' | 'wizard' | 'monitor' | 'ideation' | 'architect' | 'settings' | 'callgraph' | 'browser'
 export type ActiveView = 'welcome' | 'editor'
 export type BottomPanelTab = 'terminal' | 'problems'
 
@@ -31,6 +31,9 @@ interface AppStore {
   toggleZenMode: () => void
   setZenMode: (on: boolean) => void
   appendTerminalOutput: (chunk: string) => void
+  /** System Architect's "Send to Ideation" handoff — IdeationPanel consumes and clears this on mount, rather than the two panels sharing a store. */
+  pendingIdeaSeed: string | null
+  setPendingIdeaSeed: (text: string | null) => void
 }
 
 const TERMINAL_CAP = 5000
@@ -68,4 +71,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const combined = s.terminalOutput + chunk
     return { terminalOutput: combined.length > TERMINAL_CAP ? combined.slice(-TERMINAL_CAP) : combined }
   }),
+  pendingIdeaSeed: null,
+  setPendingIdeaSeed: (text) => set({ pendingIdeaSeed: text }),
 }))
